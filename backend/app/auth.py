@@ -32,7 +32,9 @@ def verify_session_token(token: str, now: int | None = None) -> str | None:
     try:
         padded = token + "=" * (-len(token) % 4)
         raw = base64.urlsafe_b64decode(padded.encode("ascii"))
-        payload, signature = raw.rsplit(b".", 1)
+        payload, separator, signature = raw[:-33], raw[-33:-32], raw[-32:]
+        if separator != b".":
+            return None
         expected = hmac.new(_secret(), payload, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected):
             return None
