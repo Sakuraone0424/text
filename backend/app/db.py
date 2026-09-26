@@ -9,7 +9,7 @@ from psycopg.rows import dict_row
 
 @contextmanager
 def get_db():
-    """Commit on success; roll back on failure."""
+    """Yield a transaction-scoped connection; commit on success, roll back on error."""
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured")

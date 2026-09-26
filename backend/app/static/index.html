@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>USTC Adaptive Quiz</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <main class="shell">
+    <section id="loginView" class="panel login-panel">
+      <h1>USTC Adaptive Quiz</h1>
+      <p>中科大生物化学 × 细胞生物学每日训练</p>
+      <form id="loginForm">
+        <input id="password" type="password" placeholder="输入访问密码" autocomplete="current-password" required />
+        <button type="submit">进入今日训练</button>
+      </form>
+      <p id="loginError" class="error"></p>
+    </section>
+
+    <section id="appView" hidden>
+      <header class="topbar">
+        <div>
+          <h1>每日 60 题</h1>
+          <p id="paperMeta">生化30题 + 细胞30题</p>
+        </div>
+        <button id="logoutBtn" class="ghost">退出</button>
+      </header>
+
+      <nav class="tabs">
+        <button data-tab="quiz" class="active">今日试卷</button>
+        <button data-tab="stats">薄弱点</button>
+        <button data-tab="history">历史成绩</button>
+        <button data-tab="review">复习计划</button>
+      </nav>
+
+      <section id="quizTab" class="tab-content active">
+        <div class="progress-wrap">
+          <div class="progress-row"><span id="progressText">0 / 60</span><span id="subjectText">未开始</span></div>
+          <div class="progress"><div id="progressBar"></div></div>
+        </div>
+        <div id="questions"></div>
+        <button id="submitBtn" class="submit" disabled>统一交卷</button>
+        <section id="result" class="panel result" hidden></section>
+      </section>
+
+      <section id="statsTab" class="tab-content"><div id="statsBox" class="panel">加载中…</div></section>
+      <section id="historyTab" class="tab-content"><div id="historyBox" class="panel">加载中…</div></section>
+      <section id="reviewTab" class="tab-content"><div id="reviewBox" class="panel">加载中…</div></section>
+    </section>
+  </main>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
