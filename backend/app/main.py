@@ -1,6 +1,10 @@
+import asyncio
+import os
+from contextlib import asynccontextmanager, suppress
+
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -26,7 +30,43 @@ from app.quiz_service import (
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="USTC Adaptive Quiz", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(app):
+    from app.worker import tick, integrations_tick
+    import logging
+
+    async def loop(fn, interval):
+        while True:
+            try:
+                await asyncio.to_thread(fn)
+            except Exception as exc:
+                logging.getLogger(__name__).error(
+                    "Training worker failed (%s)", type(exc).__name__
+                )
+            await asyncio.sleep(interval)
+
+    enabled = (
+        os.environ.get("DATABASE_URL")
+        and os.environ.get("QUIZ_WORKER_ENABLED", "1") == "1"
+    )
+    tasks = (
+        [
+            asyncio.create_task(loop(tick, 1)),
+            asyncio.create_task(loop(integrations_tick, 2)),
+        ]
+        if enabled
+        else []
+    )
+    yield
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+app = FastAPI(lifespan=lifespan, title="USTC Adaptive Quiz", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -72,13 +112,17 @@ def db_health():
             "questions": int(row["question_count"]),
         }
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Database unavailable: {type(exc).__name__}")
+        raise HTTPException(
+            status_code=503, detail=f"Database unavailable: {type(exc).__name__}"
+        )
 
 
 @app.post("/auth/login")
 def login(payload: LoginRequest, response: Response):
     if not password_is_valid(payload.password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
+        )
     username = __import__("os").environ.get("QUIZ_USERNAME", "owner")
     try:
         token = create_session_token(username)
@@ -158,3 +202,17 @@ def get_due_reviews(username: str = Depends(require_auth)):
 
 # Legacy routes above retain their original schemas and scoring semantics.
 app.include_router(reviewed_quiz_router)
+
+
+@app.get("/training", include_in_schema=False)
+def training_page():
+    return FileResponse(STATIC_DIR / "training.html")
+
+
+@app.get("/training-sw.js", include_in_schema=False)
+def training_service_worker():
+    return FileResponse(
+        STATIC_DIR / "training-sw.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )

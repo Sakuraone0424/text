@@ -1,99 +1,169 @@
-# 题库、28 题模式与验收说明
+# 肖涵自定义强化训练 V2
 
-本改动只用于独立开发分支与 PR 审查，不包含 production 部署。数据库测试只使用明确指定的开发库，在独立 schema 的强制回滚事务中运行；不会删除、重建或迁移现有 public schema。
+本 PR 延续 `feat/reviewed-dual-subject-28`，保留旧 60 题接口、旧迁移和历史成绩。代码已在开发环境运行；生产发布、私有资料导入和现有 ChatGPT 应用接入状态分别列在 [验收报告](acceptance.md)。
 
-## 旧版审查结果
+## 固定规格
 
-基线：`d0af668104905b31ab88d902df951781defd3bd4`。
+这是用户自定义训练结构，不是声称中科大官方考试固定采用的结构。
 
-- `001_initial.sql` 的八张业务表保存用户、知识点、单选题、每日试卷、题序、提交、答案、复习计划；`002` 补充种子题外部编号。旧题仅有来源字符串，无教材版本/章节/页码/证据/评分细则/审核状态。
-- `seed_data.py` 提供 72 道“系统初始题库（非真题）”，不是在线生成或大模型生成。旧 `migrate.py` 在每次执行时覆盖种子题内容和答案，存在改变历史展示/再次判分依据的风险。
-- 旧组卷每学科 30 道单选，优先到期错题，再按历史错误率及未见奖励加权抽样；日内不重复，但跨天可以重用。旧批改按 A-D 精确判分，满分 60；错题按 1/3/7 天安排复习。
-- 旧 `load_paper` 从当前题表读取内容，历史试卷不是独立内容快照。此次不重写历史记录，也不重算成绩；迁移/种子导入不再覆盖历史题目。
-- `/db/health` 仍按旧接口报告八张旧表及旧题数量，不代表 V2 审核库存充足。
+| 每个学科 | 数量 | 每题分值 | 小计 |
+|---|---:|---:|---:|
+| 单选 | 3 | 2 | 6 |
+| 填空 | 3 | 3 | 9 |
+| 名词解释 | 4 | 4 | 16 |
+| 简答 | 3 | 8 | 24 |
+| 论述 | 1 | 20 | 20 |
+| 合计 | 14 | | 75 |
 
-## 新版边界和未提供的规范
-
-新增独立 `/v2` 接口及 `reviewed_questions`、`question_audits`、`papers_v2`、`paper_items_v2`、`attempts_v2`、`answers_v2`、`reviews_v2`、`legacy_question_publications` 表。
-
-用户未提供新版规范原文、题型配额/分值、指定教材及版本。因此不内置声称符合“中科大官方规范”的配额，也不编造教材证据或导入所谓合格题。调用者必须明确提供 blueprint 的规范标识和双学科五题型配额，总题数严格为 28；每学科每题型至少一道。实际考试配额须由规范原文确认后配置。
-
-下例仅演示请求结构，不是官方配额：
+生物化学与分子生物学、细胞生物学结构相同：全卷 28 题、150 分，实际开始后限时 **60 分钟**。`training_spec.py` 是唯一规格定义；Blueprint 校验科目、固定数量、分值与 3600 秒时长，题目校验 max_points 和 rubric 之和，组卷前再次校验每科 75 分。旧示例 4/4/2/2/2 不再接受。历史 V2 试卷的快照及分值不被改写。
 
 ```json
 {
-  "specification": "example-only-replace-with-reviewed-spec-version",
+  "specification": "xiaohan-150-60-v1",
   "quotas": {
-    "biochemistry": {"single_choice": 4, "fill_blank": 4, "term": 2, "short_answer": 2, "essay": 2},
-    "cell_biology": {"single_choice": 4, "fill_blank": 4, "term": 2, "short_answer": 2, "essay": 2}
-  }
+    "biochemistry": {"single_choice":3,"fill_blank":3,"term":4,"short_answer":3,"essay":1},
+    "cell_biology": {"single_choice":3,"fill_blank":3,"term":4,"short_answer":3,"essay":1}
+  },
+  "points": {"single_choice":2,"fill_blank":3,"term":4,"short_answer":8,"essay":20},
+  "duration_seconds":3600
 }
 ```
 
-分值来自每道题的 `max_points` 和逐项 rubric；当前不推测官方考试总分。填空目前支持一个 `____` 空位、多个明确允许的同义答案；多空题应拆分或另行扩展结构，不能伪装成单空题。
+最后两个字段可以省略并使用上述固定默认值，不能改为其他数值。规范标识不同的已有当日卷不会被覆盖。
 
-## 发布审核与证据
+## 60 分钟作答协议
 
-每题须有：学科、题型、题干、标准答案、教材书名/作者/版本/有效 ISBN/章节/页码或图节定位/短摘录，以及总分和可加总的逐项评分标准。单选必须有四个不同选项和一个答案键；主观题不接受伪装的选择题选项；填空答案必须在显式允许列表中。
+学习者沿用原 Cookie、`x-api-key` 或 Bearer 认证。未开始时只返回试卷元数据，不提前下发题目。
 
-专家需提交五维审核，每项包含通过/不通过及理由：
+1. `POST /v2/papers` 准备完整试卷；缺题 HTTP 409，分学科分题型报告 required/available，不创建半张卷，不回填未审核种子题。
+2. 用户点击开始后 `POST /v2/papers/{id}/start`。服务端 `clock_timestamp()` 写入 started_at 和 deadline；重复调用保持原截止时间。
+3. `GET /v2/papers/{id}` 恢复题目、服务端时间、截止时间、剩余秒数、草稿及版本。用户换设备或刷新不会重置时间。
+4. `PUT /v2/papers/{id}/drafts/{question_id}`，传 `expected_version` 与 `value`。草稿可含 text、blanks、image_ids、flagged。纸面级版本和数据库行锁防止并发静默覆盖；409 要求先读取最新版本再明确合并。
+5. `POST /v2/papers/{id}/submit`，传 expected_version 和可选 answers 映射。`answers:{}` 使用服务端已存草稿；不要求填满。空白按 0 分，已作答主观题待批，尚未批完时总分 null。
+6. 过期请求只按截止前保存的内容交卷，不能接受迟到文字或图片。提交过程中跨过截止时间会回滚新合并的答案，保留先前草稿。重复交卷 409，不创建第二条成绩。
 
-| 字段 | 审核内容 |
-| --- | --- |
-| `scientific_correctness` | 对照教材核验科学事实、概念边界及答案 |
-| `exam_style` | 对照明确的真题/命题规范检查风格，不将种子题宣称为真题 |
-| `uniqueness` | 单选唯一正确项；填空允许答案边界；主观题评分点无歧义 |
-| `type_fit` | 题干、认知深度、答案长度与题型及分值匹配 |
-| `duplication` | 识别改写、同义重复、考点机械重复，补充字符检测的盲区 |
+API lifespan 默认运行独立的 deadline worker（需 DATABASE_URL，QUIZ_WORKER_ENABLED 默认 1）。即使浏览器离线，worker 每秒处理到期卷。访问过期卷也会补做幂等交卷。若 API 进程停机，恢复后处理积压记录，逻辑交卷时间仍为 deadline；写入检查始终拒绝超时补答。不是实时操作系统，不承诺数据库宕机期间仍能立即物理写入。
 
-另须填写 `evidence_verification`，记录实际核对的教材定位及证据为何支持答案。系统不会联网下载教材，也不会把“ISBN 校验通过”当作科学结论。审核者必须持有独立的 `QUIZ_REVIEW_API_KEY`；普通答题 Cookie/API key 无法发布或评分。此单用户系统以共享操作员密钥授权，`reviewer` 是操作记录标签，不是独立人员身份认证。
+Notion 或定时准备在另一条 worker 循环执行，不能因外部同步缓慢阻塞倒计时。单独运行 `python -m app.worker` 时要按部署方案避免不必要的重复 worker；数据库锁仍保护重复执行。
 
-自动检测对 NFKC 规范化、去标点和空白、折叠大小写后的题干计算 SequenceMatcher 相似度，阈值 `>=0.85` 即禁止发布；记录比较数量、相似题数、匹配比例、最大相似度和阈值。比较对象为已发布新题及全部旧题（排除该题自身的旧接口导出副本）；发布时再次检测，事务锁避免两个发布操作同时绕过检查。字符相似度不保证语义去重，五维专家审核仍必需。测试包含发布前后重复条件变化的复核，未声称完成多会话压力测试。
+## 手机兼容界面、照片与离线恢复
 
-题目内容不可原地修改，纠错需建新草稿并重新审核；审核记录只能追加。任何维度失败都会阻止发布；已发布题复审失败自动撤下，影响未来组卷而不修改既有试卷快照。撤回不自动撤销历史成绩。
+同一 FastAPI 服务增加 `/training`，旧首页增加链接。它是现有后端的兼容界面，不是声称替换或改造了现有 ChatGPT 内应用。
 
-## 接口与判分
+支持纵向滚动、点击选项、文本及多空输入、标记题、进度、统一交卷确认、拍照 capture 入口及相册入口。文本草稿在本机保留后自动送至服务端；Service Worker 只缓存训练页面和静态资源，**不缓存认证或私有 API 响应**。照片在 IndexedDB 暂存，断网/刷新后重连重试。上传成功前不能把照片当成已交付；本机配额耗尽或用户清除浏览器存储时无法保证本机数据保留，会显示存储/同步错误。
 
-- 操作员：`POST /v2/questions` 建草稿；`GET /v2/questions/{id}` 查内容及审核历史；`POST .../audit`；`POST .../publish`；`POST .../withdraw`；`GET /v2/quality/report` 查看库存和失败审核数。请求头为 `x-review-api-key`，密钥未配置时操作员接口返回 503。
-- `POST /v2/questions/{id}/export-legacy` 将已发布单选题幂等导出到旧题表并建立审核关联；填空及主观题不可导出。
-- 学习者沿用现有登录 Cookie、`x-api-key` 或 Bearer 认证；`POST /v2/papers` 传 blueprint 组卷，`GET /v2/papers/{id}` 读取本人试卷。组卷响应不泄露标准答案、教材摘录或 rubric。
-- 库存不足返回 HTTP 409，`detail.code=insufficient_reviewed_bank`，按学科和题型报告 required/available。整卷生成事务回滚，不创建半张试卷。只用已发布题，并排除本人旧版/新版试卷中相同或相似的已见题干；不会拿旧种子题或重复旧题补足。
-- 同人同日重复请求返回已有卷，若 blueprint 不同则 409，不覆盖试卷。不同用户不能读、提交或查阅对方成绩。试卷逐题保存不可变内容快照，撤题不影响已有试卷。
-- `POST /v2/papers/{id}/submit` 的 `answers` 是 question ID 到文本答案的映射，必须恰好包含该卷 28 个 ID，不能为空。重复提交 409。无效请求的全部写入回滚。
-- 单选自动判分；单空填空对 NFKC 后去首尾空格的显式允许答案匹配，保留科学含义上的大小写（例如 `mM` 不等于 `mm`）。主观题保持 `points=null`；存在未评分题时 `score=null,status=pending_review`，不会误报整卷分数。
-- 操作员 `POST /v2/papers/{paper_id}/answers/{question_id}/grade` 提交 `criterion_points` 数组、feedback、reviewer；每项不得超过快照 rubric 对应分数，只能评分未批主观题，不能覆盖已完成成绩。全部批完才返回整卷最终分数。
-- `GET /v2/papers/{id}/result` 返回本人提交后的答案、教材证据、rubric、反馈及评分状态。错题/失分题按批改日期安排 1/3/7 天复习；`GET /v2/review/due` 查询，`POST /v2/review/{attempt_id}/{question_id}/{stage}/complete` 只完成本人的到期复习。复习不把旧题重新填入新 28 题试卷。
+断线的本机内容须在 deadline 前同步，超过截止时间仍留在本机也不会补算。离线倒计时只是最后服务端时间的估算，最终判定始终由服务端完成。多设备真正冲突暂停同步并保留本机版本；相同答案丢失确认的情况可安全确认副本，不静默覆盖不同答案。
 
-旧 `/quiz/today`、`/quiz/submit`、`/history`、`/stats`、`/review/due` 的 60 题响应结构、旧成绩和历史试卷保留。新增旧接口组卷同样只选审核导出的单选题；原 72 道未审核种子题不会自动获得资格，库存不足返回 409。这是有意实施的质量门禁，而不是用未审核题保持表面成功。旧版跨天复习重用策略仍保留；严格不重复规则适用于新 28 题模式。
+`POST /v2/papers/{id}/images/{question_id}?expected_version=N` 接收 JPEG/PNG/WebP 原始字节，单张最多 8 MiB、20M 像素、每题最多 5 张。上传、解码和接收耗时都计入计时。原图留在私有 PostgreSQL，`GET /v2/images/{id}` 必须验证答卷归属，响应 no-store；相同照片重试不会重复添加。
 
-## 迁移与验证
+## 教材导入、分页和证据门禁
 
-迁移执行命令（仅在明确选择的开发库或以后独立批准的发布步骤运行）：
+当前没有已授权 Drive 连接器或教材文件，四本资料均未在本 PR 中宣称已读取。导入器只读取用户明确提供的本地私有文件，不自动下载私有链接，也不做新的 OCR。不要把教材放进 Git checkout；使用私有目录和数据库。
 
 ```sh
 cd backend
-python migrate.py
+# DATABASE_URL 由安全环境变量提供，先仅使用开发数据库。
+python -m app.sources /private/books/book-ocr.txt --metadata /private/books/book.json --original /private/books/book.pdf
 ```
 
-脚本采用事务和 advisory lock，登记迁移文件 SHA-256；重复运行跳过已应用文件，已应用文件被修改则报错。兼容无迁移登记表的旧库升级。001/002 原文件保持不变，003 只新增对象，不修改旧表、成绩、答案或试卷。任何一步失败回滚当次全部迁移。不提供删除数据的 down migration。
+支持 UTF-8 TXT、已有文本的 PDF、DOCX。扫描 PDF 没有正文会拒绝，提示使用已有 OCR。元数据样式：
 
-`python migrate.py --seed-legacy` 仅显式补入缺失的旧演示题；已有 external_id 题目不更新、不认证。默认迁移不播种。
+```json
+{
+  "file_id":"用户提供的OCR原始文件ID",
+  "original_file_id":"用户提供的PDF原始文件ID",
+  "title":"以文件实际书目信息为准",
+  "authors":"以原文为准",
+  "edition":"以原文为准",
+  "isbn":null,
+  "subject":"cell_biology",
+  "volume_offsets":[0,192],
+  "volume_pages":[192,193],
+  "expected_pages":385,
+  "pdf_pages":{},
+  "printed_pages":{}
+}
+```
+
+作者、版本、ISBN 不允许猜测。原文没有 ISBN 可为空；有 ISBN 时检查校验位及与文档元数据一致性。`pdf_pages` 可显式指定全书 OCR 页到物理 PDF 页的映射，`printed_pages` 单独记录印刷页。不会把印刷页或分卷 OCR 局部页码冒充物理页。
+
+分页支持 `[PAGE 001]`、`[第001页]`、`第001页`、`P001` 等独立标记。细胞第五版的第二卷重置为 001 时须显式 offsets `[0,192]`，全书覆盖 385 页；缺页、越界、未知重置会报错。OCR 格式不同应先补充解析规则与测试，不根据未读取文件猜测格式。实际物理 PDF 页数也会核查。
+
+每个知识单元保存章节、小节、段落、OCR 页、分卷、物理 PDF 页、印刷页及源文档关系。书目、原文哈希和原文件二进制只存私有库。来源按文件 ID+哈希幂等导入；待审材料可补原文件、修正元数据并保持单元 ID；已验证来源不可覆盖，纠错需导入新修订。
+
+`GET /v2/sources/search?q=...` 支持全文索引和中文子串检索；`POST /v2/sources/{id}/knowledge` 建立多对多知识路径标签；一个段落可关联多个知识点。`POST /v2/sources/{id}/verify` 需操作员、核验说明、实际原文件、正确页码和完整校验值。希腊字母、公式、方向符号等被标记为须对照原件；乱码不能直接验证。系统不声称正则表达式能够替代科学审查。
+
+题目 evidence 必须引用 source_unit_id，书名、作者、版本、ISBN、章节、正文短引文均须匹配私有索引。定位使用 `PDF:物理页`，没有 PDF 分页的材料用 `UNIT:段落序号`。缺原件、未核验、错页、伪造引文或书目不符均阻止审核/发布。组卷也排除失效证据。
+
+## 真题、考频与审核
+
+`POST /v2/exams` 记录原题编号、科目、年份、类型、原题/选项、源单元、知识点、参考答案类型、评分点、教材证据和原卷状态。题干须与来源正文匹配。官方答案须另有已验证的答案源单元；系统个人参考答案不能称官方。缺答案/评分/教材证据的真题仍可保留作分析，不会绕过正式题库的答案门禁。
+
+`GET /v2/exams/coverage` 输出生化 2004—2026、细胞 1998—2026 的逐年核查状态；未获取显示 original_not_acquired。已有记录分别报告原卷核验、完整卷、缺答案及缺教材证据。没有读取两份私有汇编，不能把文件名范围算成已核实逐年覆盖。
+
+`GET /v2/exams/frequencies` 按概念、结构功能、代谢、机制、比较、实验、综合类别和知识点统计。相同规范化题干在同一年、不同转录来源只计一次；不同年份重复考查仍分别计数。字符相似不能自动判定语义等价，变式与风格判断须人工审查。
+
+题目必须有参考答案、评分 rubric、指定教材证据及同科同型、经核实的真题风格参考 ID。五维专家审核包含科学正确性、真题风格、唯一性、题型适配、重复率；每项给出理由，并记录教材核验说明。score 为 0—100，发布阈值 90，但任何强制项失败都不可用总分绕过。
+
+自动去重：题干 NFKC、去空白标点、折叠大小写，SequenceMatcher 相似度 >=0.85 阻止发布；报告比较量、相似量、比例及最大相似度。发布时重查，事务锁防止审核后重复条件变化的竞态。此检测不保证语义去重，专家须检查同义改写、答案唯一性和干扰项合理性。
+
+操作员使用独立 `x-review-api-key`；`QUIZ_REVIEW_API_KEY` 未设置时相应接口 503。普通答题凭据不能发布或批改。题目内容、试卷快照、审核及批改事件受不可变/追加约束保护。
+
+## 组卷、自适应、评分与 FSRS
+
+候选只来自发布合格题。算法使用真实记录的考频、核心/机制/应用标签、错误率、章节覆盖、已见题和 FSRS 到期状态；优先分散章节。70/20/10 是训练倾向而非官方比例，也不是本版硬性配额。
+
+新题原则上不复用本人历史旧/新试卷题干。真实到期 FSRS 题允许复测，明确 `is_retest=true` 并计入 28 题，不冒充新题。没有合格题就报错，不补题或改分。
+
+单选自动判分。填空支持显式同义表达、中英文与缩写列表，保留科学大小写，不能自动把 mM 和 mm 等同；合理大小写变体应明确列入。多空使用 `blanks:[{accepted_answers:[...],points:...}]`，占位符 `____` 数量须一致，逐空分值合计 3 分，返回逐空得分。单空旧字段 accepted_answers 继续可用。
+
+主观题默认 pending_review，不按长度判分。`POST /v2/papers/{id}/answers/{qid}/grade` 按快照 rubric 逐项赋分，返回命中/缺失评分点、可选概念错误、表述问题、建议、教材依据。没有填写的分析字段不代表“无错误”。批改事件留存操作员、时间、评分细则和手写识别快照，不能覆盖完成成绩。重复评分拒绝，不额外改变记忆状态。
+
+手写图片先通过操作员 `POST /v2/images/{id}/transcription` 保存识别文本、置信度与确认状态。低置信度或未确认照片不能猜字或判零；确认前拒绝评分。当前没有后台 AI/OCR 模型调用，使用人工确认兼容流程。外部收费模型未接入，当前 ChatGPT 会话批改能力也未宣称已联通后端。
+
+新错题使用 **fsrs==6.3.0**，保存稳定性、难度、状态、到期时间及每次前后状态。`GET /v2/memory/due` 查询到期卡，`POST /v2/memory/{qid}/review` 提交 Again/Hard/Good/Easy（1—4）、版本与唯一 event_key；重复事件幂等。空白题建立待复测卡，不捏造历史回忆记录。旧 1/3/7 天记录原样保留，绝不称为 FSRS。兼容界面提供先回忆、再显示答案、最后反馈的流程。
+
+提交后可通过 reflection 接口或界面记录七类错误原因：概念不清、记忆遗漏、审题、机制、表述、计算、章节联系；未知原因不自动猜测，复盘记录只能追加，不修改成绩。
+
+`GET /v2/stats/weekly` 汇总本人近 7 天章节得分与待批题量；旧 `/stats` 保持原语义。
+
+## Notion、适配与自动化状态
+
+Notion 默认关闭。只有运行环境明确配置 `NOTION_SYNC_ENABLED=1`、NOTION_TOKEN、NOTION_DATABASE_ID，且用户通过 `/v2/archive/consent` 或界面明确启用归档后，才处理出站任务。数据库需有 Name（title）和 External ID（rich_text）属性，API 版本固定 2022-06-28。切勿把令牌放入 Git 或聊天。
+
+唯一 attempt_id 出站任务保存试卷、逐题答案/评分/证据、复盘、周度章节统计及 FSRS 状态。失败后退避重试；通过 External ID 找回不确定写入，避免重复建成绩页；追加有摘要校验的版本分块，不删除用户自己的块。只有读回内容摘要一致才是 verified。pending/synced/verified/failed 分别表示等待、已写未核验、已验证、失败。撤销许可停止后续处理，不删除历史记录或远端已存内容。
+
+`chatgpt_adapter.py` 提供版本化准备、开始、恢复、保存、交卷、查分协议与模拟契约测试，目的端须显式配置 HTTPS URL。它不是已发布的 ChatGPT Action，也没有伪造 app ID、后端调用关系或认证配置。
+
+北京时间 20:00 准备任务需要显式 `QUIZ_DAILY_PREP_ENABLED=1`，默认关闭。唯一任务键、行锁、重试时间、30 秒 SQL 超时及状态表防止重复发布；缺题显示 failed，不显示成功。生成不启动作答计时。这里只支持已部署进程内 worker，不声称提示词本身会定时运行。
+
+## 迁移、运行、部署和回滚
+
+保留原 001/002/003 文件字节不变。004 新增限时、草稿、图片、FSRS 与归档对象，005 私有来源/真题，006 批改审计，007 任务状态、008 追加式错题复盘。对旧表不做清空、替换或降级。旧 60 题 API 仍返回原结构；新生成的旧接口卷只选审核导出的单选题。原始旧卷和成绩保留。
+
+开发运行：
 
 ```sh
 cd backend
 python -m pip install -r requirements-dev.txt
-# 用明确选定的开发 PostgreSQL 连接；不得指向 production。
-TEST_DATABASE_URL=postgresql://agent@127.0.0.1:5432/quiz python -m pytest -ra -q -p no:cacheprovider
+# 仅对明确选择的开发数据库执行；生产步骤本 PR 未执行。
+python migrate.py
+# APP_PASSWORD、SESSION_SECRET、QUIZ_API_KEY、QUIZ_REVIEW_API_KEY 安全注入，勿输出。
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
 ```
 
-未设置 TEST_DATABASE_URL 时数据库测试明确 skip，不构成迁移/接口验收。CI 使用独立 PostgreSQL 17 测试服务，运行同一套测试；工作流没有部署步骤或 production 凭据。
+同服务 `/training` 为兼容入口；浏览器正式使用须 HTTPS，以保证 Secure Cookie、生效的 Service Worker 与照片权限。Python 3.12、PostgreSQL 17 用于本次验收。实际 Railway 配置可能在控制面另有启动前迁移命令，仓库 Dockerfile 本身只启动 uvicorn；本 PR 未读取或修改控制面。
 
-测试 schema 在外层强制回滚事务中创建，search_path 仅指向该 schema。迁移和 API 测试不改动已有 public 业务数据。验收详细结果见 [acceptance.md](acceptance.md)。
+未来独立批准发布时：先备份并验证恢复路径；在 staging 使用生产结构的脱敏副本运行迁移和测试；确认私有资料存储、密钥、TLS、worker、容量和 Notion 权限；在维护窗口执行增量迁移，再切换应用版本。数据库迁移 SHA-256 登记、事务和锁保证重复运行与失败回滚。不要修改已应用文件；不要把删除生产库当成回滚。
 
-## Railway 与 ChatGPT 真实调用边界
+应用回滚可切回原提交 `d0af668`（或本 PR 基线 `04f223c`）及其依赖，保留新增数据库对象和新成绩。原程序的旧迁移脚本会覆盖种子题，因此回滚应用时不要重新运行旧 seed/迁移入口；已修复的迁移 runner 应保留。不提供破坏数据的 down migration。
 
-可核实：`railway.json` 指定 `backend/Dockerfile`，容器只启动 `uvicorn app.main:app`，不会自动运行迁移；静态首页写“每日 60 题”，`app.js` 使用相对路径 fetch `/quiz/today`、`/quiz/submit` 等同源接口。仓库没有 ChatGPT Action/OpenAPI 导出、GPT 应用标识、外部调用域名、28 题客户端或 Railway 访问日志。
+验证命令：
 
-因此目前只证明“该仓库配置的 Railway 应用包含旧 60 题前后端”，不能证明当前线上版本、ChatGPT 28 题应用实际调用它，或两者共享数据库。FastAPI 自动生成的 `/openapi.json` 仅描述服务能力，不是已接入 ChatGPT 的证据。
+```sh
+cd backend
+python -m playwright install --with-deps chromium
+TEST_DATABASE_URL='明确选定的开发数据库连接' python -m pytest -ra -q -p no:cacheprovider
+```
 
-后续核实需提供 ChatGPT Action 的 schema/server URL/operationId（不要提供密钥）、Railway 服务域名及脱敏访问日志/请求 ID，对照具体请求路径与时间。接入 V2 须显式配置新 `/v2/papers` 等 operation；不得假定旧 `/quiz/today` 会返回 28 题。此次没有连接 Railway 管理面、调用 production、修改 Action 或部署应用。
+大多数测试使用独立 schema+强制回滚事务；真实 HTTP、浏览器、并发测试只创建/提交/清理本次随机生成的 `quiz_live_test_*` schema，不使用 public。未设置 TEST_DATABASE_URL 时数据库测试明确 skip，不能视为验收通过。

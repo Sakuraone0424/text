@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <title>肖涵 · 28题强化训练</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <style>
+      body {
+        line-height: 1.6;
+        overflow-wrap: anywhere;
+      }
+      .shell {
+        max-width: 960px;
+      }
+      .toolbar {
+        position: sticky;
+        top: 0;
+        background: #fff;
+        padding: 12px;
+        z-index: 2;
+        display: flex;
+        gap: 14px;
+        flex-wrap: wrap;
+        border-bottom: 1px solid #ddd;
+      }
+      article {
+        padding: 18px;
+        background: white;
+        border-radius: 12px;
+        margin: 16px 0;
+      }
+      textarea {
+        width: 100%;
+        min-height: 120px;
+        font-size: 16px;
+      }
+      input {
+        font-size: 16px;
+        max-width: 100%;
+      }
+      label {
+        display: block;
+        margin: 10px 0;
+      }
+      button {
+        min-height: 44px;
+      }
+      img {
+        max-height: 180px;
+        max-width: 100%;
+        display: inline-block;
+        margin: 8px;
+      }
+      #status {
+        white-space: pre-wrap;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      #conflict {
+        border: 2px solid #b45309;
+        padding: 12px;
+      }
+      article.flagged {
+        border: 2px solid #b45309;
+      }
+      .option {
+        display: block;
+        width: 100%;
+        text-align: left;
+        margin: 8px 0;
+      }
+      .option.chosen {
+        outline: 3px solid #2563eb;
+      }
+      .hint {
+        color: #475569;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <h1>28题强化训练</h1>
+      <p>生化与分子生物学、细胞生物学各14题 · 共150分 · 作答60分钟</p>
+      <a href="/">旧版60题与历史记录</a>
+      <form id="login">
+        <input
+          type="password"
+          id="password"
+          placeholder="访问密码"
+          autocomplete="current-password"
+          required
+        /><button>登录</button>
+      </form>
+      <div class="toolbar">
+        <b id="clock">尚未开始</b><span id="progress">0 / 28</span
+        ><button id="prepare">准备今日试卷</button
+        ><button id="start" hidden>开始答题（60分钟）</button
+        ><button id="submit" hidden>统一交卷</button>
+      </div>
+      <p id="status" role="status" aria-live="polite"></p>
+      <section id="conflict" hidden>
+        发现多设备版本冲突，本机答案已保留。<button id="remote">
+          使用服务端版本</button
+        ><button id="local">核对后保留本机待同步答案</button>
+      </section>
+      <section id="questions"></section>
+      <section id="result"></section>
+      <nav>
+        <button id="memory">错题复测</button
+        ><button id="weekly">周度统计</button
+        ><button id="archive">归档状态</button>
+      </nav>
+      <section id="learning"></section>
+    </main>
+    <script src="/static/training.js" defer></script>
+  </body>
+</html>
