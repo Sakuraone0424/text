@@ -13,6 +13,7 @@ from app.auth import (
     require_auth,
 )
 from app.db import get_db
+from app.routes_v2 import router as reviewed_quiz_router
 from app.quiz_service import (
     due_reviews,
     ensure_user,
@@ -153,3 +154,7 @@ def get_due_reviews(username: str = Depends(require_auth)):
         user_id = ensure_user(conn, username)
         items = due_reviews(conn, user_id)
         return {"count": len(items), "items": items}
+
+
+# Legacy routes above retain their original schemas and scoring semantics.
+app.include_router(reviewed_quiz_router)

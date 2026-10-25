@@ -94,6 +94,8 @@ def _candidate_rows(conn: Connection, user_id: int, subject: str) -> list[dict]:
             COALESCE(stats.wrong, 0) AS wrong_attempts
         FROM questions q
         JOIN topics t ON t.id = q.topic_id
+        JOIN legacy_question_publications lp ON lp.question_id = q.id
+        JOIN reviewed_questions rq ON rq.id = lp.reviewed_question_id AND rq.status = 'published'
         LEFT JOIN (
             SELECT
                 a.question_id,
@@ -131,6 +133,8 @@ def _due_review_ids(conn: Connection, user_id: int, subject: str, day: date) -> 
         FROM review_schedule rs
         JOIN questions q ON q.id = rs.question_id
         JOIN topics t ON t.id = q.topic_id
+        JOIN legacy_question_publications lp ON lp.question_id = q.id
+        JOIN reviewed_questions rq ON rq.id = lp.reviewed_question_id AND rq.status = 'published'
         WHERE rs.user_id = %s
           AND rs.completed_at IS NULL
           AND rs.due_date <= %s
@@ -144,6 +148,7 @@ def _due_review_ids(conn: Connection, user_id: int, subject: str, day: date) -> 
 
 def get_or_create_today_paper(conn: Connection, user_id: int, day: date | None = None) -> dict:
     day = day or today_cn()
+    conn.execute("SELECT pg_advisory_xact_lock(280028)")
     existing = conn.execute(
         "SELECT id FROM papers WHERE user_id = %s AND paper_date = %s",
         (user_id, day),
@@ -168,7 +173,7 @@ def get_or_create_today_paper(conn: Connection, user_id: int, day: date | None =
             selected = due + filler
             if len(selected) < TARGET_PER_SUBJECT:
                 raise ValueError(
-                    f"题库不足：{subject} 需要 {TARGET_PER_SUBJECT} 题，当前只能选出 {len(selected)} 题"
+                    f"题库不足：{subject} 需要 {TARGET_PER_SUBJECT} 题，当前审核发布题库只能选出 {len(selected)} 题（不使用未审核旧题补足）"
                 )
             subject_choices[subject] = selected
             used.update(selected)
@@ -250,6 +255,13 @@ def submit_paper(
     if paper_id is None:
         paper = get_or_create_today_paper(conn, user_id, day)
         paper_id = int(paper["paper_id"])
+
+    owned = conn.execute(
+        "SELECT id FROM papers WHERE id = %s AND user_id = %s FOR UPDATE",
+        (paper_id, user_id),
+    ).fetchone()
+    if not owned:
+        raise LookupError("Paper not found")
 
     existing = conn.execute(
         "SELECT id, score FROM attempts WHERE paper_id = %s AND user_id = %s",
