@@ -34,9 +34,9 @@ cd /workspace/text/backend
 TEST_DATABASE_URL=postgresql://agent@127.0.0.1:5432/quiz ../.venv/bin/python -m pytest -ra -q -p no:cacheprovider
 ```
 
-最终本地结果：**145 passed、0 failed、0 skipped**（25.30秒），另有一条依赖弃用提示。Ruff关键错误检查、Python compileall、两份JavaScript语法检查和git diff --check均通过。GitHub CI结果另在PR正文核对。
+最终本地结果：**146 passed、0 failed、0 skipped**（27.58秒），另有一条依赖弃用提示。Ruff关键错误检查、Python compileall、两份JavaScript语法检查和git diff --check均通过。GitHub CI结果另在PR正文核对。
 
-测试后只读核查：开发库public仍为原有8张表，临时quiz_test/quiz_live_test schema数量为0；001—008逐字节与本次开发基线9bf76ea一致。基线98项测试中，3项专用于已退役旧60题评分/规范化/导出成功行为的测试随业务移除，其余有效覆盖保留；旧接口成功断言改为410及历史只读断言，新增动态与安全覆盖50项，最终145项。不是继续宣称原50项逐字保留：最新明确退役要求取代了旧业务成功行为要求。
+测试后只读核查：开发库public仍为原有8张表，临时quiz_test/quiz_live_test schema数量为0；001—008逐字节与本次开发基线9bf76ea一致。基线98项测试中，3项专用于已退役旧60题评分/规范化/导出成功行为的测试随业务移除，其余有效覆盖保留；旧接口成功断言改为410及历史只读断言，新增动态与安全覆盖51项，最终146项。不是继续宣称原50项逐字保留：最新明确退役要求取代了旧业务成功行为要求。
 
 测试覆盖：
 
@@ -85,6 +85,7 @@ TEST_DATABASE_URL=postgresql://agent@127.0.0.1:5432/quiz ../.venv/bin/python -m 
 - 删除运行时代码：quiz_service.py、seed_data.py、旧static/index.html和app.js；迁移runner移除种子入口；旧导出/固定间隔复习不再可调用。
 - 只读替代：legacy_history.py承接历史查询，统一历史面板可看原题/原答/原分；不重新批改历史记录。合成旧数据生成器仅位于tests/historical_fixtures.py，不进入生产应用。
 - 新增009增量迁移，旧八张业务表和001—008不改写。不可变策略、追加分类、范围/年度样本、依赖、选题审计用于追踪证据与模型版本。
+- 新增归档载荷测试核验实际作答样本变化、算法/入卷依据、日期与模拟读回；真实Notion仍关闭。
 - 新增统计及实际集成测试：多标签贡献和转录去重、冲突年度拒绝、未知年份、少年度置信收缩、逐题而非逐分样本、主观可靠性、真实错因、未来数据截断、两科独立阶段、上海日期、FSRS只读、固定seed与JSON顺序、多seed趋势、下一张真实组卷响应成绩、门禁先于权重、无部分写入、暂停新卷保留旧卷完成。
 - 未实现或未核验：四本私有正文及真实原卷导入、旧60题档案可信知识映射、真实历史回测/学习提升、现有ChatGPT应用真实调用链、真实Notion读回、手写自动AI识别/AI批改、真机和生产部署。开发框架/模拟测试不能代替这些验收。
 

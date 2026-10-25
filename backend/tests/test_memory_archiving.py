@@ -188,3 +188,32 @@ def test_notion_http_adapter_is_idempotent_and_readback_checks_chunks():
     assert len(pages) == 1 and len(blocks) == before and blocks[0]["id"] == "user-note"
     assert not any(method == "DELETE" for method, _ in calls)
     provider.close()
+
+
+def test_archive_contains_observed_mastery_change_and_selection_basis(db, running):
+    uid, paper = running
+    pid = paper["paper_id"]
+    consent(db, uid)
+    qid = next(
+        i["id"] for i in paper["questions"] if i["question_type"] == "single_choice"
+    )
+    q.submit(db, uid, pid, {qid: "B"})
+    job = db.execute("SELECT payload FROM archive_jobs").fetchone()["payload"]
+    assert job["paper_date"] == paper["date"]
+    assert job["selection_analysis"]["algorithm_version"] == "knowledge-priority/1.0"
+    change = job["knowledge_mastery_change"]
+    assert change["status"] == "recorded_estimates"
+    assert "not_causal_gain" in change["meaning"]
+    observed = [r for r in change["topics"] if r["answer_samples_delta"] > 0]
+    assert len(observed) == 1
+    assert observed[0]["answer_samples_delta"] == 1
+    assert observed[0]["gap_delta"] > 0
+    assert all(
+        r["answer_samples_delta"] == 0 for r in change["topics"] if r not in observed
+    )
+    provider = FakeNotion()
+    archiving.process_one(db, provider)
+    assert (
+        db.execute("SELECT state FROM archive_jobs").fetchone()["state"] == "verified"
+    )
+    assert next(iter(provider.data.values()))["knowledge_mastery_change"] == change

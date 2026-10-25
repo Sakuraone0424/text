@@ -131,7 +131,7 @@ python -m app.sources /private/books/book-ocr.txt --metadata /private/books/book
 
 Notion 默认关闭。只有运行环境明确配置 `NOTION_SYNC_ENABLED=1`、NOTION_TOKEN、NOTION_DATABASE_ID，且用户通过 `/v2/archive/consent` 或界面明确启用归档后，才处理出站任务。数据库需有 Name（title）和 External ID（rich_text）属性，API 版本固定 2022-06-28。切勿把令牌放入 Git 或聊天。
 
-唯一 attempt_id 出站任务保存试卷、逐题答案/评分/证据、复盘、周度章节统计及 FSRS 状态。失败后退避重试；通过 External ID 找回不确定写入，避免重复建成绩页；追加有摘要校验的版本分块，不删除用户自己的块。只有读回内容摘要一致才是 verified。pending/synced/verified/failed 分别表示等待、已写未核验、已验证、失败。撤销许可停止后续处理，不删除历史记录或远端已存内容。
+唯一 attempt_id 出站任务保存试卷日期、逐题答案/评分/证据、各科成绩、复盘、周度章节统计、FSRS状态、动态算法/权重/入卷依据及带时间和配置的掌握估计对照。变化明确不代表本卷的因果提升，缺历史轨迹不补造。失败后退避重试；通过 External ID 找回不确定写入，避免重复建成绩页；追加有摘要校验的版本分块，不删除用户自己的块。只有读回内容摘要一致才是 verified。pending/synced/verified/failed 分别表示等待、已写未核验、已验证、失败。撤销许可停止后续处理，不删除历史记录或远端已存内容。
 
 `chatgpt_adapter.py` 提供版本化准备、开始、恢复、保存、交卷、查分协议与模拟契约测试，目的端须显式配置 HTTPS URL。它不是已发布的 ChatGPT Action，也没有伪造 app ID、后端调用关系或认证配置。
 

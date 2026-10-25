@@ -28,6 +28,11 @@ def enqueue(conn, user_id, paper_id):
     from app.quiz_v2 import result
 
     payload = result(conn, user_id, paper_id)
+    paper = conn.execute(
+        "SELECT paper_date FROM papers_v2 WHERE id=%s", (paper_id,)
+    ).fetchone()
+    payload["paper_date"] = paper["paper_date"].isoformat()
+    payload["knowledge_mastery_change"] = mastery_change(conn, user_id, paper_id)
     payload["reflections"] = [
         r["data"]
         for r in conn.execute(
@@ -48,6 +53,58 @@ def enqueue(conn, user_id, paper_id):
         "ON CONFLICT(attempt_id) DO UPDATE SET payload=EXCLUDED.payload,digest=EXCLUDED.digest,state='pending',next_retry=clock_timestamp(),error=NULL",
         (payload["attempt_id"], Jsonb(payload), digest(payload)),
     )
+
+
+def mastery_change(conn, user_id, paper_id):
+    """Observed estimate changes since preparation, never attributed solely to this paper."""
+    from app.selection import snapshot
+
+    run = conn.execute(
+        "SELECT context,as_of,algorithm_version,policy_id,config FROM selection_runs WHERE paper_id=%s",
+        (paper_id,),
+    ).fetchone()
+    if not run:
+        return {"status": "historical_trace_not_recorded"}
+    questions = [
+        r["snapshot"]
+        for r in conn.execute(
+            "SELECT snapshot FROM paper_items_v2 WHERE paper_id=%s ORDER BY position",
+            (paper_id,),
+        ).fetchall()
+    ]
+    current, policy, _ = snapshot(conn, user_id, questions)
+    changes = []
+    for subject, tags in current["topics"].items():
+        for tag, signals in tags.items():
+            previous = run["context"]["topics"].get(subject, {}).get(tag)
+            before = previous["mastery"] if previous else None
+            after = signals["mastery"]
+            changes.append(
+                {
+                    "subject": subject,
+                    "knowledge_tag": tag,
+                    "before": before,
+                    "after": after,
+                    "gap_delta": after["gap"] - before["gap"] if before else None,
+                    "answer_samples_delta": after["answer_samples"]
+                    - before["answer_samples"]
+                    if before
+                    else None,
+                }
+            )
+    return {
+        "status": "recorded_estimates",
+        "algorithm_version": current["algorithm_version"],
+        "before_algorithm_version": run["algorithm_version"],
+        "before_policy_id": run["policy_id"],
+        "after_policy_id": current["policy_id"],
+        "before_config": run["config"],
+        "after_config": policy.model_dump(mode="json"),
+        "before_as_of": run["as_of"].isoformat(),
+        "after_as_of": current["as_of"],
+        "meaning": "estimate_change_since_preparation_includes_other_training_time_decay_and_policy_changes_not_causal_gain",
+        "topics": changes,
+    }
 
 
 class NotionAdapter:
