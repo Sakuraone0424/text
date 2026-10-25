@@ -60,11 +60,7 @@ Notion 或定时准备在另一条 worker 循环执行，不能因外部同步�
 
 当前没有已授权 Drive 连接器或教材文件，四本资料均未在本 PR 中宣称已读取。导入器只读取用户明确提供的本地私有文件，不自动下载私有链接，也不做新的 OCR。不要把教材放进 Git checkout；使用私有目录和数据库。
 
-```sh
-cd backend
-# DATABASE_URL 由安全环境变量提供，先仅使用开发数据库。
-python -m app.sources /private/books/book-ocr.txt --metadata /private/books/book.json --original /private/books/book.pdf
-```
+私有资料接入改用严格的 `python -m app.source_intake`，先check预检，再选择专用开发连接和source_staging_* schema；完整参数、分卷清单和授权交接见 [private-source-intake.md](private-source-intake.md)。旧 `app.sources` 可执行名委托到同一隔离import入口，不再隐式写DATABASE_URL。
 
 支持 UTF-8 TXT、已有文本的 PDF、DOCX。扫描 PDF 没有正文会拒绝，提示使用已有 OCR。元数据样式：
 
@@ -139,7 +135,7 @@ Notion 默认关闭。只有运行环境明确配置 `NOTION_SYNC_ENABLED=1`、N
 
 ## 迁移、运行、部署和回滚
 
-保留已应用001—008文件字节不变。004 新增限时、草稿、图片、FSRS 与归档对象，005 私有来源/真题，006 批改审计，007 任务状态、008 追加式错题复盘。009新增范围、完整年度样本、追加分类、知识依赖、策略版本及选题审计；不清空、替换或降级历史业务表。旧 `/quiz/today`、`/quiz/submit`、`/review/due` 认证后返回410且不进入OpenAPI；旧静态页面、种子、导出到旧题库及1/3/7调度已移除。`/history`、`/stats` 保持只读语义；`/legacy/papers/{id}` 按归属返回原题、答案、原成绩，`/v2/history` 汇总历史，不重新批改。旧种子仅作为明确标记的测试夹具存在。
+保留已应用001—009文件字节不变。004 新增限时、草稿、图片、FSRS 与归档对象，005 私有来源/真题，006 批改审计，007 任务状态、008 追加式错题复盘。009新增范围、完整年度样本、追加分类、知识依赖、策略版本及选题审计；不清空、替换或降级历史业务表。旧 `/quiz/today`、`/quiz/submit`、`/review/due` 认证后返回410且不进入OpenAPI；旧静态页面、种子、导出到旧题库及1/3/7调度已移除。`/history`、`/stats` 保持只读语义；`/legacy/papers/{id}` 按归属返回原题、答案、原成绩，`/v2/history` 汇总历史，不重新批改。旧种子仅作为明确标记的测试夹具存在。
 
 开发运行：
 
@@ -158,7 +154,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8080
 
 发现问题先设置 `QUIZ_PREPARATION_ENABLED=0` 暂停新组卷、`QUIZ_DAILY_PREP_ENABLED=0` 停止每日准备；已开始的卷仍允许恢复、保存、到期交卷和批改。策略回退通过新建包含旧配置的新版本并重新分配完成，不覆盖审计。
 
-应用回退只使用在staging验证的、保留旧业务退役与证据门禁的兼容V2版本；不要直接切回main或旧基线恢复60题入口及种子。数据库保留009和全部成绩，不执行破坏性down；必要时暂停新卷、修复兼容版本后恢复。真实部署与备份恢复尚未执行，不能宣称已经验证生产回退。`/db/health` 检查全部9项迁移，配置数据库时 `/health` 同时检查就绪状态。
+应用回退只使用在staging验证的、保留旧业务退役与证据门禁的兼容V2版本；不要直接切回main或旧基线恢复60题入口及种子。数据库保留009/010和全部成绩，不执行破坏性down；必要时暂停新卷、修复兼容版本后恢复。真实部署与备份恢复尚未执行，不能宣称已经验证生产回退。010追加分卷原件、逐页覆盖及独立OCR/原件坐标；旧单文件资料不改写。`/db/health` 检查全部10项迁移，配置数据库时 `/health` 同时检查就绪状态。
 
 验证命令：
 

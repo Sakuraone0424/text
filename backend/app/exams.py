@@ -3,6 +3,9 @@
 import hashlib
 from psycopg.types.json import Jsonb
 from app.question_quality import stem_key
+from app.source_files import original_available_sql
+
+ORIGINAL_PRESENT = original_available_sql()
 
 CATEGORIES = {
     "basic_concept",
@@ -94,7 +97,7 @@ def coverage(conn):
                 },
             )
             raw = conn.execute(
-                "SELECT e.*,u.verified,d.original_content IS NOT NULL AS acquired FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.subject=%s AND e.year=%s",
+                f"SELECT e.*,u.verified,{ORIGINAL_PRESENT} AS acquired FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.subject=%s AND e.year=%s",
                 (subject, year),
             ).fetchall()
             effective = [
@@ -192,7 +195,7 @@ def trusted_records(conn, as_of):
     from app.dynamic_model import fractions
 
     rows = conn.execute(
-        "SELECT e.*,u.verified AND e.original_verified AND d.subject=e.subject AND d.original_content IS NOT NULL AND d.original_sha256 IS NOT NULL AS trusted,d.imported_at AS source_available_at,d.id AS source_document_id,d.original_sha256 AS original_sha256 "
+        f"SELECT e.*,u.verified AND e.original_verified AND d.subject=e.subject AND {ORIGINAL_PRESENT} AND d.original_sha256 IS NOT NULL AS trusted,d.imported_at AS source_available_at,d.id AS source_document_id,d.original_sha256 AS original_sha256 "
         "FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.indexed_at<=%s AND d.imported_at<=%s",
         (as_of, as_of),
     ).fetchall()
@@ -214,7 +217,7 @@ def trusted_records(conn, as_of):
     units = {
         r["id"]: r
         for r in conn.execute(
-            "SELECT u.id,(u.verified AND d.original_content IS NOT NULL) AS verified,d.subject FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=ANY(%s) AND d.imported_at<=%s",
+            f"SELECT u.id,(u.verified AND {ORIGINAL_PRESENT}) AS verified,d.subject FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=ANY(%s) AND d.imported_at<=%s",
             (unit_ids, as_of),
         ).fetchall()
     }
@@ -415,7 +418,7 @@ def style_issues(conn, content):
         return ["missing_exam_style_source"]
     for ref in refs:
         row = conn.execute(
-            "SELECT e.*,(u.verified AND d.original_content IS NOT NULL) AS verified FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.id=%s",
+            f"SELECT e.*,(u.verified AND {ORIGINAL_PRESENT}) AS verified FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.id=%s",
             (ref,),
         ).fetchone()
         if not row:

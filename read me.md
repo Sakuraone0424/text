@@ -7,3 +7,5 @@
 [接口、证据、运行与回滚说明](docs/reviewed-quiz.md) · [实际验收与外部依赖状态](docs/acceptance.md)
 
 [动态命题、证据边界与可重放设计](docs/dynamic-engine.md)
+
+[私有教材预检、分卷导入与授权交接](docs/private-source-intake.md)
