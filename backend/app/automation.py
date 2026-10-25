@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from app.training_sessions import server_now
 from app.question_quality import Blueprint
 from app.training_spec import COUNTS, SUBJECTS
-from app.quiz_v2 import create_paper, BankShortage
+from app.quiz_v2 import create_paper, BankShortage, PreparationPaused
 
 
 def prepare_daily(conn):
@@ -45,6 +45,11 @@ def prepare_daily(conn):
                 (paper["paper_id"], key),
             )
             done += 1
+        except PreparationPaused:
+            conn.execute(
+                "UPDATE automation_jobs SET state='failed',attempts=attempts+1,next_retry=%s,error='preparation_paused' WHERE job_key=%s",
+                (server_now(conn) + timedelta(minutes=5), key),
+            )
         except (BankShortage, ValueError, QueryCanceled):
             conn.execute(
                 "UPDATE automation_jobs SET state='failed',attempts=attempts+1,next_retry=%s,error='insufficient_or_incompatible_verified_bank' WHERE job_key=%s",

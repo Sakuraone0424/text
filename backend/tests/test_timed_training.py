@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 from app import quiz_v2 as q
 from app import training_sessions as sessions
-from app.quiz_service import ensure_user
+from app.common import ensure_user
 from app.question_quality import Blueprint, Question
 from app.training_spec import POINTS, validate_items
 from test_api_v2 import LEARNER, REVIEWER

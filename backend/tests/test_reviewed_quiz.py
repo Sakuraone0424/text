@@ -2,16 +2,11 @@ from datetime import timedelta
 import pytest
 import psycopg
 from app import quiz_v2 as q
-from app.quiz_service import (
-    ensure_user,
-    get_or_create_today_paper,
-    submit_paper,
-    today_cn,
-)
+from app.common import ensure_user, today_cn
 
 
 def test_no_legacy_fallback_or_partial_paper(db, blueprint):
-    from migrate import seed_legacy
+    from historical_fixtures import seed_legacy
 
     seed_legacy(db)
     uid = ensure_user(db, "shortage")
@@ -19,8 +14,7 @@ def test_no_legacy_fallback_or_partial_paper(db, blueprint):
         q.create_paper(db, uid, blueprint)
     assert len(exc.value.shortages) == 10
     assert db.execute("SELECT COUNT(*) AS n FROM papers_v2").fetchone()["n"] == 0
-    with pytest.raises(ValueError, match="审核发布"):
-        get_or_create_today_paper(db, uid)
+    assert db.execute("SELECT COUNT(*) AS n FROM papers").fetchone()["n"] == 0
 
 
 def test_audit_gate_immutability_and_revocation(db, question_factory, passing_audit):
@@ -150,34 +144,6 @@ def test_mixed_grading_pending_final_and_reviews(db, bank, blueprint):
         db.execute("SELECT finalized_at FROM attempts_v2").fetchone()["finalized_at"]
         is not None
     )
-
-
-def test_legacy_export_idempotent_and_unapproved_excluded(
-    db, question_factory, passing_audit
-):
-    from migrate import seed_legacy
-
-    seed_legacy(db)
-    for subject in ["biochemistry", "cell_biology"]:
-        for _ in range(30):
-            qid = q.create_question(db, question_factory(subject))["id"]
-            q.review_question(db, qid, passing_audit)
-            first = q.export_legacy(db, qid)
-            assert q.export_legacy(db, qid) == first
-    uid = ensure_user(db, "legacy-approved")
-    paper = get_or_create_today_paper(db, uid)
-    assert paper["count"] == 60 and len(paper["questions"]) == 60
-    approved = {
-        r["question_id"]
-        for r in db.execute(
-            "SELECT question_id FROM legacy_question_publications"
-        ).fetchall()
-    }
-    assert {r["id"] for r in paper["questions"]} == approved
-    result = submit_paper(
-        db, uid, {r["id"]: "A" for r in paper["questions"]}, paper["paper_id"]
-    )
-    assert result["total"] == 60 and result["score"] == 60
 
 
 def test_audits_are_append_only(db, question_factory, passing_audit):

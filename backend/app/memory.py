@@ -11,21 +11,30 @@ SCHEDULER = Scheduler(enable_fuzzing=False)
 
 def record_failure(conn, attempt_id, question_id):
     row = conn.execute(
-        "SELECT p.user_id,a.answer FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id "
-        "JOIN answers_v2 a ON a.attempt_id=t.id WHERE t.id=%s AND a.question_id=%s",
+        "SELECT p.user_id,a.answer,a.points,(i.snapshot->>'max_points')::int AS max_points FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id "
+        "JOIN answers_v2 a ON a.attempt_id=t.id JOIN paper_items_v2 i ON i.paper_id=t.paper_id AND i.question_id=a.question_id WHERE t.id=%s AND a.question_id=%s",
         (attempt_id, question_id),
     ).fetchone()
     uid = row["user_id"]
     now = server_now(conn).astimezone(timezone.utc)
-    conn.execute(
-        "INSERT INTO fsrs_cards(user_id,question_id,card,due) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-        (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now),
-    )
     try:
         value = json.loads(row["answer"])
     except ValueError:
         value = {"text": row["answer"]}
-    if value.get("text") or any(value.get("blanks", [])) or value.get("image_ids"):
+    if not isinstance(value, dict):
+        value = {"text": row["answer"]}
+    answered = bool(
+        value.get("text", "").strip()
+        or any(v.strip() for v in value.get("blanks", []))
+        or value.get("image_ids")
+    )
+    if not answered or row["points"] is None or row["points"] >= row["max_points"]:
+        return
+    conn.execute(
+        "INSERT INTO fsrs_cards(user_id,question_id,card,due) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now),
+    )
+    if answered:
         review(
             conn,
             uid,

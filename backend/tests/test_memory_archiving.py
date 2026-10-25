@@ -50,8 +50,7 @@ def test_retests_count_in_28_and_are_explicitly_labelled(db, running, blueprint)
         db,
         uid,
         blueprint,
-        __import__("app.quiz_service", fromlist=["today_cn"]).today_cn()
-        + timedelta(days=1),
+        __import__("app.common", fromlist=["today_cn"]).today_cn() + timedelta(days=1),
     )
     sessions.start(db, uid, next_paper["paper_id"])
     restored = q.load_paper(db, uid, next_paper["paper_id"])

@@ -1,5 +1,5 @@
 from app import quiz_v2 as q
-from app.quiz_service import ensure_user
+from app.common import ensure_user
 
 LEARNER = {"x-api-key": "learner-test-key"}
 REVIEWER = {"x-review-api-key": "operator-test-key"}
@@ -9,17 +9,14 @@ def test_legacy_api_contract_and_v2_shortage(client, blueprint):
     assert client.get("/health").json() == {"status": "healthy"}
     assert client.get("/quiz/today").status_code == 401
     response = client.get("/quiz/today", headers=LEARNER)
-    assert response.status_code == 409 and "审核发布" in response.json()["detail"]
+    assert response.status_code == 410 and "retired" in response.json()["detail"]
     response = client.post("/v2/papers", headers=LEARNER, json=blueprint.model_dump())
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "insufficient_reviewed_bank"
     assert len(response.json()["detail"]["shortages"]) == 10
     assert client.get("/history", headers=LEARNER).json() == {"items": []}
     assert client.get("/stats", headers=LEARNER).status_code == 200
-    assert client.get("/review/due", headers=LEARNER).json() == {
-        "count": 0,
-        "items": [],
-    }
+    assert client.get("/review/due", headers=LEARNER).status_code == 410
 
 
 def test_review_authorization_and_invalid_content(
@@ -147,38 +144,14 @@ def test_review_completion_is_owned_and_due(client, db, bank, blueprint, monkeyp
 def test_quality_report_requires_operator(client):
     assert client.get("/v2/quality/report", headers=LEARNER).status_code == 403
     report = client.get("/v2/quality/report", headers=REVIEWER).json()
-    assert (
-        report["approved_legacy_questions"] == 0
-        and report["duplicate_threshold"] == 0.85
-    )
+    assert report["historical_questions"] == 0 and report["duplicate_threshold"] == 0.85
 
 
-def test_legacy_http_paper_submit_and_history(
-    client, db, question_factory, passing_audit
-):
-    for subject in ["biochemistry", "cell_biology"]:
-        for _ in range(30):
-            qid = q.create_question(db, question_factory(subject))["id"]
-            q.review_question(db, qid, passing_audit)
-            q.export_legacy(db, qid)
-    paper = client.get("/quiz/today", headers=LEARNER).json()
-    assert set(paper) == {
-        "paper_id",
-        "date",
-        "count",
-        "submitted",
-        "score",
-        "questions",
-    }
-    assert paper["count"] == 60
-    payload = {
-        "paper_id": paper["paper_id"],
-        "answers": {str(i["id"]): "A" for i in paper["questions"]},
-    }
-    result = client.post("/quiz/submit", json=payload, headers=LEARNER).json()
+def test_retired_legacy_training_never_creates_records(client, db):
+    assert client.get("/quiz/today", headers=LEARNER).status_code == 410
     assert (
-        result["score"] == 60 and result["total"] == 60 and result["percent"] == 100.0
+        client.post("/quiz/submit", headers=LEARNER, json={"answers": {}}).status_code
+        == 410
     )
-    assert client.post("/quiz/submit", json=payload, headers=LEARNER).status_code == 409
-    assert client.get("/history", headers=LEARNER).json()["items"][0]["score"] == 60
-    assert client.get("/quiz/today", headers=LEARNER).json()["submitted"]
+    assert db.execute("SELECT COUNT(*) AS n FROM papers").fetchone()["n"] == 0
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts").fetchone()["n"] == 0

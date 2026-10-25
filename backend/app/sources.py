@@ -348,6 +348,18 @@ def evidence_issues(conn, content, *, verify_original=True):
                 issues.append("missing_or_changed_original")
         elif not row["original_present"]:
             issues.append("missing_or_changed_original")
+    if content.get("knowledge_tags"):
+        links = set()
+        for evidence in content["evidence"]:
+            links.update(
+                r["tag"]
+                for r in conn.execute(
+                    "SELECT tag FROM knowledge_links WHERE unit_id=%s",
+                    (evidence.get("source_unit_id"),),
+                ).fetchall()
+            )
+        if not set(content["knowledge_tags"]).issubset(links):
+            issues.append("missing_knowledge_tag_links")
     return sorted(set(issues))
 
 

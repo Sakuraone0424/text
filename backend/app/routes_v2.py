@@ -17,7 +17,8 @@ from app.question_quality import (
     Subject,
     QuestionType,
 )
-from app.quiz_service import ensure_user
+from app.common import ensure_user
+from app.dynamic_model import Policy
 from app import quiz_v2 as service
 
 router = APIRouter(prefix="/v2", tags=["reviewed-28"])
@@ -41,6 +42,8 @@ def operation(fn, username=None):
                 if username is not None
                 else fn(conn)
             )
+    except service.PreparationPaused as exc:
+        raise HTTPException(503, str(exc)) from exc
     except service.BankShortage as exc:
         raise HTTPException(
             409, {"code": "insufficient_reviewed_bank", "shortages": exc.shortages}
@@ -176,36 +179,6 @@ def grade(paper_id: int, question_id: int, payload: Grade):
     )
 
 
-@router.get("/review/due")
-def reviews(username: str = Depends(require_auth)):
-    return operation(lambda c, u: {"items": service.due_reviews(c, u)}, username)
-
-
-@router.post("/review/{attempt_id}/{question_id}/{stage}/complete")
-def complete_review(
-    attempt_id: int, question_id: int, stage: int, username: str = Depends(require_auth)
-):
-    def complete(c, u):
-        row = c.execute(
-            "UPDATE reviews_v2 r SET completed_at=NOW() FROM attempts_v2 a JOIN papers_v2 p ON p.id=a.paper_id "
-            "WHERE r.attempt_id=a.id AND p.user_id=%s AND r.attempt_id=%s AND r.question_id=%s "
-            "AND r.review_stage=%s AND r.due_date<=%s RETURNING r.question_id",
-            (u, attempt_id, question_id, stage, service.today_cn()),
-        ).fetchone()
-        if not row:
-            raise LookupError("Due review not found")
-        return {"completed": True}
-
-    return operation(complete, username)
-
-
-@router.post(
-    "/questions/{question_id}/export-legacy", dependencies=[Depends(require_reviewer)]
-)
-def export_legacy(question_id: int):
-    return operation(lambda c: service.export_legacy(c, question_id))
-
-
 @router.get("/quality/report", dependencies=[Depends(require_reviewer)])
 def quality_report():
     def report(c):
@@ -214,10 +187,7 @@ def quality_report():
             "FROM reviewed_questions GROUP BY 1,2,3 ORDER BY 1,2,3"
         ).fetchall()
         counts = c.execute(
-            "SELECT (SELECT COUNT(*) FROM questions) AS legacy_questions, "
-            "(SELECT COUNT(*) FROM legacy_question_publications lp JOIN reviewed_questions q "
-            "ON q.id=lp.reviewed_question_id WHERE q.status='published') AS approved_legacy_questions, "
-            "(SELECT COUNT(*) FROM question_audits WHERE NOT passed) AS failed_audits"
+            "SELECT (SELECT COUNT(*) FROM questions) AS historical_questions,(SELECT COUNT(*) FROM question_audits WHERE NOT passed) AS failed_audits"
         ).fetchone()
         return {
             **counts,
@@ -612,3 +582,237 @@ def reflect(
         return {"recorded": True, "replayed": False}
 
     return operation(write, username)
+
+
+class ScopeRegistration(StrictModel):
+    scope_key: str = Field(min_length=1, max_length=200)
+    subject: Subject
+    paper_code: str = Field(min_length=1, max_length=100)
+    syllabus: str = Field(min_length=1, max_length=500)
+    source_unit_id: StrictInt = Field(ge=1)
+    reviewer: str = Field(min_length=1, max_length=200)
+    note: str = Field(min_length=20, max_length=4000)
+
+
+@router.post("/exams/scopes", dependencies=[Depends(require_reviewer)])
+def register_exam_scope(payload: ScopeRegistration):
+    from app.exams import register_scope
+
+    return operation(lambda c: register_scope(c, payload.model_dump()))
+
+
+class ExamClassification(StrictModel):
+    scope_key: str = Field(min_length=1, max_length=200)
+    source_kind: Literal["real_exam", "simulation", "transcription", "unclassified"]
+    mapping_verified: bool = Field(strict=True)
+    tag_contributions: dict[str, float] = Field(default_factory=dict)
+    primary_tags: list[str] = Field(default_factory=list, max_length=30)
+    cognitive_level: Literal["core", "mechanism", "application"] | None = None
+    canonical_item_id: str | None = Field(default=None, max_length=200)
+    reviewer: str = Field(min_length=1, max_length=200)
+    note: str = Field(min_length=20, max_length=4000)
+
+
+@router.post(
+    "/exams/{record_id}/classification", dependencies=[Depends(require_reviewer)]
+)
+def classify_exam(record_id: int, payload: ExamClassification):
+    from app.exams import classify
+
+    return operation(
+        lambda c: classify(
+            c,
+            record_id,
+            payload.model_dump(exclude={"reviewer", "note"}),
+            payload.reviewer,
+            payload.note,
+        )
+    )
+
+
+class CompleteSample(StrictModel):
+    scope_key: str = Field(min_length=1, max_length=200)
+    year: StrictInt = Field(ge=1900, le=2100)
+    source_unit_id: StrictInt = Field(ge=1)
+    expected_questions: StrictInt = Field(ge=1, le=500)
+    reviewer: str = Field(min_length=1, max_length=200)
+    note: str = Field(min_length=20, max_length=4000)
+
+
+@router.post("/exams/samples", dependencies=[Depends(require_reviewer)])
+def register_complete_sample(payload: CompleteSample):
+    from app.exams import register_sample
+
+    return operation(lambda c: register_sample(c, payload.model_dump()))
+
+
+class PolicyRegistration(StrictModel):
+    username: str = Field(min_length=1, max_length=80)
+    config: Policy
+    reviewer: str = Field(min_length=1, max_length=200)
+    note: str = Field(min_length=20, max_length=4000)
+
+
+@router.post("/selection/policies", dependencies=[Depends(require_reviewer)])
+def register_policy(payload: PolicyRegistration):
+    from psycopg.types.json import Jsonb
+
+    def save(c):
+        for subject, key in payload.config.scopes.items():
+            if (
+                key
+                and not c.execute(
+                    "SELECT 1 FROM exam_scopes WHERE scope_key=%s AND subject=%s",
+                    (key, subject),
+                ).fetchone()
+            ):
+                raise ValueError("Policy scope is not reviewed for this subject")
+        uid = ensure_user(c, payload.username)
+        pid = c.execute(
+            "INSERT INTO selection_policies(config,reviewer,note) VALUES (%s,%s,%s) RETURNING id",
+            (
+                Jsonb(payload.config.model_dump(mode="json")),
+                payload.reviewer,
+                payload.note,
+            ),
+        ).fetchone()["id"]
+        c.execute(
+            "INSERT INTO selection_policy_assignments(user_id,policy_id) VALUES (%s,%s)",
+            (uid, pid),
+        )
+        return {"policy_id": pid}
+
+    return operation(save)
+
+
+@router.get("/selection/policies", dependencies=[Depends(require_reviewer)])
+def policy_history():
+    return operation(
+        lambda c: {
+            "policies": c.execute(
+                "SELECT p.*,a.user_id,a.assigned_at FROM selection_policies p JOIN selection_policy_assignments a ON a.policy_id=p.id ORDER BY a.id"
+            ).fetchall()
+        }
+    )
+
+
+@router.get("/selection/runs/{paper_id}", dependencies=[Depends(require_reviewer)])
+def internal_selection_run(paper_id: int):
+    def read(c):
+        row = c.execute(
+            "SELECT * FROM selection_runs WHERE paper_id=%s", (paper_id,)
+        ).fetchone()
+        if not row:
+            raise LookupError("Selection trace not found")
+        return row
+
+    return operation(read)
+
+
+@router.get("/papers/{paper_id}/analysis")
+def student_selection_analysis(paper_id: int, username: str = Depends(require_auth)):
+    def read(c, u):
+        service.owned_paper(c, u, paper_id)
+        if not c.execute(
+            "SELECT 1 FROM attempts_v2 WHERE paper_id=%s", (paper_id,)
+        ).fetchone():
+            raise ValueError("Selection analysis is available after submission only")
+        row = c.execute(
+            "SELECT * FROM selection_runs WHERE paper_id=%s", (paper_id,)
+        ).fetchone()
+        if not row:
+            raise LookupError("Historical selection trace was not recorded")
+        from app.selection import summary
+
+        return summary(row)
+
+    return operation(read, username)
+
+
+class DependencyRegistration(StrictModel):
+    subject: Subject
+    knowledge_tag: str = Field(min_length=1, max_length=300)
+    prerequisite_tag: str = Field(min_length=1, max_length=300)
+    source_unit_id: StrictInt = Field(ge=1)
+    excerpt: str = Field(min_length=1, max_length=2000)
+    reviewer: str = Field(min_length=1, max_length=200)
+    note: str = Field(min_length=20, max_length=4000)
+
+
+@router.post("/sources/dependencies", dependencies=[Depends(require_reviewer)])
+def knowledge_dependency(payload: DependencyRegistration):
+    def write(c):
+        row = c.execute(
+            "SELECT u.text,u.verified,d.subject FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
+            (payload.source_unit_id,),
+        ).fetchone()
+        if (
+            not row
+            or not row["verified"]
+            or row["subject"] != payload.subject
+            or payload.excerpt not in row["text"]
+        ):
+            raise ValueError("Dependency requires verified textbook evidence")
+        tags = {
+            r["tag"]
+            for r in c.execute(
+                "SELECT tag FROM knowledge_links WHERE unit_id=%s",
+                (payload.source_unit_id,),
+            ).fetchall()
+        }
+        if not {payload.knowledge_tag, payload.prerequisite_tag}.issubset(tags):
+            raise ValueError("Both knowledge points must be linked to the source")
+        cycle = c.execute(
+            "WITH RECURSIVE path(tag) AS (SELECT prerequisite_tag FROM knowledge_dependencies WHERE subject=%s AND knowledge_tag=%s UNION SELECT k.prerequisite_tag FROM knowledge_dependencies k JOIN path p ON p.tag=k.knowledge_tag WHERE k.subject=%s) SELECT 1 FROM path WHERE tag=%s",
+            (
+                payload.subject,
+                payload.prerequisite_tag,
+                payload.subject,
+                payload.knowledge_tag,
+            ),
+        ).fetchone()
+        if cycle or payload.knowledge_tag == payload.prerequisite_tag:
+            raise ValueError("Knowledge dependency must be acyclic")
+        c.execute(
+            "INSERT INTO knowledge_dependencies(subject,knowledge_tag,prerequisite_tag,source_unit_id,reviewer,note) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+            (
+                payload.subject,
+                payload.knowledge_tag,
+                payload.prerequisite_tag,
+                payload.source_unit_id,
+                payload.reviewer,
+                payload.note,
+            ),
+        )
+        return {"linked": True}
+
+    return operation(write)
+
+
+@router.get("/history")
+def unified_read_only_history(username: str = Depends(require_auth)):
+    def read(c, u):
+        legacy = [
+            {**r, "mode": "legacy_read_only"}
+            for r in c.execute(
+                "SELECT p.id AS paper_id,p.paper_date AS date,t.score,t.submitted_at FROM papers p JOIN attempts t ON t.paper_id=p.id WHERE p.user_id=%s ORDER BY p.paper_date DESC LIMIT 100",
+                (u,),
+            ).fetchall()
+        ]
+        recent = c.execute(
+            "SELECT p.id AS paper_id,p.paper_date,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
+            (u,),
+        ).fetchall()
+        return {
+            "legacy": legacy,
+            "training": [
+                {
+                    **r,
+                    "mode": "reviewed_28",
+                    "score": None if r["pending"] else r["graded_points"],
+                }
+                for r in recent
+            ],
+        }
+
+    return operation(read, username)

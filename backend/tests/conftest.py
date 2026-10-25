@@ -88,10 +88,14 @@ def question_factory(db):
         ).fetchone()["id"]
     styles = {}
     for subject, unit in units.items():
+        db.execute(
+            "INSERT INTO exam_scopes(scope_key,subject,paper_code,syllabus,source_unit_id,reviewer,note) VALUES (%s,%s,'synthetic','Synthetic test scope',%s,'test','Synthetic applicability verification only')",
+            (subject + "-style-scope", subject, unit),
+        )
         for kind in ("single_choice", "fill_blank", "term", "short_answer", "essay"):
             styles[(subject, kind)] = db.execute(
-                "INSERT INTO exam_records(source_unit_id,original_question_id,subject,year,question_type,stem,category,answer_kind,original_verified,canonical_key) VALUES (%s,%s,%s,2025,%s,'Synthetic exam fixture','basic_concept','missing',true,'synthetic') RETURNING id",
-                (unit, subject + kind, subject, kind),
+                "INSERT INTO exam_records(source_unit_id,original_question_id,subject,year,question_type,stem,category,answer_kind,original_verified,canonical_key,scope_key,source_kind) VALUES (%s,%s,%s,2025,%s,'Synthetic exam fixture','basic_concept','missing',true,'synthetic',%s,'real_exam') RETURNING id",
+                (unit, subject + kind, subject, kind, subject + "-style-scope"),
             ).fetchone()["id"]
     from app.training_spec import POINTS
 
@@ -179,7 +183,7 @@ def bank(db, question_factory, passing_audit, blueprint):
 @pytest.fixture
 def running(db, bank, blueprint):
     from app import quiz_v2 as q, training_sessions as sessions
-    from app.quiz_service import ensure_user
+    from app.common import ensure_user
 
     uid = ensure_user(db, "test-owner")
     paper = q.create_paper(db, uid, blueprint)

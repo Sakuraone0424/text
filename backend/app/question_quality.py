@@ -64,6 +64,7 @@ class Evidence(StrictModel):
 
 
 class Criterion(StrictModel):
+    knowledge_tags: list[str] = Field(default_factory=list, max_length=30)
     description: str = Field(min_length=1, max_length=2000)
     points: int = Field(strict=True, ge=1, le=100)
 
@@ -96,6 +97,10 @@ class Question(StrictModel):
 
     @model_validator(mode="after")
     def fit(self):
+        if any(
+            not set(c.knowledge_tags).issubset(self.knowledge_tags) for c in self.rubric
+        ):
+            raise ValueError("Rubric knowledge tags must belong to the question")
         if sum(c.points for c in self.rubric) != self.max_points:
             raise ValueError("Rubric points must sum to max_points")
         if self.max_points != POINTS[self.question_type]:

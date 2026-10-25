@@ -2,7 +2,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from app import automation
 from app.selection import pick
-from app.quiz_service import ensure_user
+from app.common import ensure_user
 
 
 def test_daily_automation_disabled_without_explicit_configuration(db, monkeypatch):
@@ -55,21 +55,55 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(db, bank, monkeyp
 
 
 def test_ranking_balances_chapters_and_uses_recorded_signals():
+    from app.dynamic_model import Policy
+
     def row(i, chapter):
         return {
             "id": i,
             "content": {
                 "subject": "biochemistry",
+                "question_type": "single_choice",
                 "evidence": [{"chapter": chapter}],
+                "knowledge_tags": ["mapped"],
                 "difficulty": "core",
-                "knowledge_tags": ["Km"],
             },
         }
 
     pool = [row(1, "A"), row(2, "A"), row(3, "B")]
-    selected = pick(pool, 2, Counter(), {}, Counter({("biochemistry", "Km"): 3}), set())
-    assert [r["id"] for r in selected] == [1, 3]
+    context = {
+        "topics": {
+            "biochemistry": {"mapped": {"priority": 0.5, "mastery": {"recent": []}}}
+        },
+        "exam_subjects": {"biochemistry": {"cognitive_counts": {}}},
+    }
+    decisions = []
     selected = pick(
-        pool, 1, Counter(), {2: {"answered": 3, "wrong": 3}}, Counter(), {2}
+        pool,
+        2,
+        Counter(),
+        context,
+        Policy(),
+        "fixed",
+        "biochemistry",
+        "single_choice",
+        decisions,
     )
-    assert selected[0]["id"] == 2
+    repeated = []
+    again = pick(
+        pool,
+        2,
+        Counter(),
+        context,
+        Policy(),
+        "fixed",
+        "biochemistry",
+        "single_choice",
+        repeated,
+    )
+    assert [r["id"] for r in selected] == [r["id"] for r in again]
+    first = selected[0]["content"]["evidence"][0]["chapter"]
+    remaining = {r["id"]: r["content"]["evidence"][0]["chapter"] for r in pool}
+    assert all(r["draw_weight"] > 0 for d in decisions for r in d["candidates"])
+    for candidate in decisions[1]["candidates"]:
+        if remaining[candidate["question_id"]] == first:
+            assert candidate["coverage_factor"] < 1

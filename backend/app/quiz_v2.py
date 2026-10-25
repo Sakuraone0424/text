@@ -1,6 +1,7 @@
 """Reviewed 28-question workflow; deliberately independent of legacy records."""
 
 import json
+import os
 
 from psycopg.types.json import Jsonb
 
@@ -12,8 +13,12 @@ from app.question_quality import (
     duplicate,
     duplication_metrics,
 )
-from app.quiz_service import today_cn
-from app.training_spec import POINTS, validate_items
+from app.common import today_cn
+from app.training_spec import COUNTS, SUBJECTS, validate_items
+
+
+class PreparationPaused(ValueError):
+    pass
 
 
 class BankShortage(ValueError):
@@ -131,17 +136,23 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         if existing["blueprint"] != spec:
             raise ValueError("Today already has a paper with a different blueprint")
         return load_paper(conn, user_id, existing["id"])
-    from app.selection import signals, pick
+    if os.environ.get("QUIZ_PREPARATION_ENABLED", "1") == "0":
+        raise PreparationPaused(
+            "New paper preparation is temporarily paused; existing sessions remain available"
+        )
+    from app.selection import snapshot, pick
+    from app.dynamic_model import ALGORITHM_VERSION, topics
     from collections import Counter
+    import secrets
 
-    performance, frequencies, due = signals(conn, user_id)
-    chapter_counts = Counter()
+    as_of = conn.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
     candidates = conn.execute(
-        "SELECT q.id, q.content FROM reviewed_questions q WHERE q.status='published' "
-        "AND (NOT EXISTS (SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
-        "WHERE p.user_id=%s AND i.question_id=q.id) OR EXISTS (SELECT 1 FROM fsrs_cards f WHERE f.user_id=%s AND f.question_id=q.id AND f.due<=clock_timestamp())) ORDER BY q.id",
-        (user_id, user_id),
+        "SELECT id,content FROM reviewed_questions WHERE status='published' ORDER BY id"
     ).fetchall()
+    seed = secrets.token_hex(16)
+    chapter_counts = Counter()
+    decisions = []
+    audit = []
     # Also reject semantically close stems already seen by this user; no revision recycling.
     seen = [
         r["stem"]
@@ -153,32 +164,73 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         ).fetchall()
     ]
     selected, shortages = [], []
-    for subject, quotas in spec["quotas"].items():
-        for kind, count in quotas.items():
-            pool = []
-            for row in candidates:
-                content = row["content"]
-                if (
-                    content["subject"] != subject
-                    or content["question_type"] != kind
-                    or content["max_points"] != POINTS[kind]
-                ):
-                    continue
-                from app.sources import evidence_issues
-                from app.exams import style_issues
+    from app.sources import evidence_issues
+    from app.exams import style_issues
+    from app.question_quality import Question
 
-                if evidence_issues(
-                    conn, content, verify_original=False
-                ) or style_issues(conn, content):
-                    continue
-                if row["id"] not in due and any(
-                    duplicate(content["stem"], s) for s in seen
-                ):
+    quality = []
+    for row in candidates:
+        content = row["content"]
+        reasons = []
+        try:
+            Question.model_validate(content)
+        except ValueError:
+            reasons.append("invalid_question_or_rubric")
+        if not reasons:
+            if evidence_issues(conn, content, verify_original=False):
+                reasons.append("textbook_evidence_not_valid")
+            if style_issues(conn, content):
+                reasons.append("exam_style_source_not_valid")
+        audit.append(
+            {
+                "question_id": row["id"],
+                "subject": content.get("subject"),
+                "question_type": content.get("question_type"),
+                "chapter": (content.get("evidence") or [{}])[0].get("chapter"),
+                "knowledge_tags": topics(content) if not reasons else [],
+                "is_retest": False,
+                "review_knowledge_tags": [],
+                "excluded_reasons": reasons,
+            }
+        )
+        if not reasons:
+            quality.append(row)
+    context, policy, due = snapshot(
+        conn, user_id, [r["content"] for r in quality], as_of
+    )
+    eligible = []
+    for row in quality:
+        content = row["content"]
+        item = next(r for r in audit if r["question_id"] == row["id"])
+        if row["id"] not in due and any(
+            duplicate(content["stem"], stem) for stem in seen
+        ):
+            item["excluded_reasons"].append("previously_seen_stem_without_due_review")
+            continue
+        item["is_retest"] = row["id"] in due
+        item["review_knowledge_tags"] = [
+            tag
+            for tag in item["knowledge_tags"]
+            if any(
+                c["due"]
+                for c in context["topics"][content["subject"]][tag]["review"]["cards"]
+            )
+        ]
+        eligible.append(row)
+    for subject in SUBJECTS:
+        for kind, count in COUNTS.items():
+            pool = []
+            for row in eligible:
+                content = row["content"]
+                if content["subject"] != subject or content["question_type"] != kind:
                     continue
                 if any(
                     duplicate(content["stem"], r["content"]["stem"])
                     for r in selected + pool
                 ):
+                    next(r for r in audit if r["question_id"] == row["id"])[
+                        "excluded_reasons"
+                    ].append("duplicate_candidate_stem")
                     continue
                 pool.append(row)
             if len(pool) < count:
@@ -188,10 +240,21 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                         "question_type": kind,
                         "required": count,
                         "available": len(pool),
+                        "missing": count - len(pool),
                     }
                 )
             selected.extend(
-                pick(pool, count, chapter_counts, performance, frequencies, due)
+                pick(
+                    pool,
+                    count,
+                    chapter_counts,
+                    context,
+                    policy,
+                    seed,
+                    subject,
+                    kind,
+                    decisions,
+                )
             )
     if shortages:
         raise BankShortage(shortages)
@@ -205,6 +268,26 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             "INSERT INTO paper_items_v2(paper_id,question_id,position,snapshot,is_retest) VALUES (%s,%s,%s,%s,%s)",
             (paper_id, row["id"], pos, Jsonb(row["content"]), row["id"] in due),
         )
+    selected_ids = {r["id"] for r in selected}
+    for item in audit:
+        item["selected"] = item["question_id"] in selected_ids
+        if not item["selected"] and not item["excluded_reasons"]:
+            item["excluded_reasons"] = ["not_drawn_in_fixed_quota"]
+    conn.execute(
+        "INSERT INTO selection_runs(paper_id,user_id,seed,algorithm_version,policy_id,as_of,config,context,candidates,decisions) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (
+            paper_id,
+            user_id,
+            seed,
+            ALGORITHM_VERSION,
+            context["policy_id"],
+            as_of,
+            Jsonb(policy.model_dump(mode="json")),
+            Jsonb(context),
+            Jsonb(audit),
+            Jsonb(decisions),
+        ),
+    )
     return load_paper(conn, user_id, paper_id)
 
 
@@ -227,6 +310,18 @@ def load_paper(conn, user_id, paper_id):
     from app.training_sessions import state
 
     timing = state(conn, user_id, paper_id)
+    run = conn.execute(
+        "SELECT candidates FROM selection_runs WHERE paper_id=%s", (paper_id,)
+    ).fetchone()
+    review_tags = (
+        {
+            r["question_id"]: r["review_knowledge_tags"]
+            for r in run["candidates"]
+            if r.get("selected")
+        }
+        if run
+        else {}
+    )
     # No solutions, excerpts or rubrics in the unsubmitted paper response.
     questions = [
         {
@@ -234,6 +329,7 @@ def load_paper(conn, user_id, paper_id):
             "position": i["position"],
             "blank_count": len(i["snapshot"].get("blanks", [])),
             "is_retest": i.get("is_retest", False),
+            "review_knowledge_tags": review_tags.get(i["question_id"], []),
             **{
                 k: i["snapshot"][k]
                 for k in ("subject", "question_type", "stem", "options", "max_points")
@@ -286,6 +382,8 @@ def grade(
     try:
         submitted = json.loads(row["answer"])
     except ValueError:
+        submitted = {"text": row["answer"]}
+    if not isinstance(submitted, dict):
         submitted = {"text": row["answer"]}
     for image_id in submitted.get("image_ids", []):
         recognized = conn.execute(
@@ -363,7 +461,38 @@ def result(conn, user_id, paper_id):
         conn.execute(
             "UPDATE attempts_v2 SET finalized_at=NOW() WHERE id=%s", (attempt["id"],)
         )
+    from app.selection import summary
+
+    run = conn.execute(
+        "SELECT * FROM selection_runs WHERE paper_id=%s", (paper_id,)
+    ).fetchone()
+    analysis = summary(run) if run else {"status": "historical_trace_not_recorded"}
     return {
+        "selection_analysis": analysis,
+        "subject_scores": {
+            subject: {
+                "score": None
+                if any(
+                    r["points"] is None
+                    for r in rows
+                    if r["snapshot"]["subject"] == subject
+                )
+                else sum(
+                    r["points"] for r in rows if r["snapshot"]["subject"] == subject
+                ),
+                "graded_points": sum(
+                    r["points"] or 0
+                    for r in rows
+                    if r["snapshot"]["subject"] == subject
+                ),
+                "max_points": sum(
+                    r["snapshot"]["max_points"]
+                    for r in rows
+                    if r["snapshot"]["subject"] == subject
+                ),
+            }
+            for subject in sorted({r["snapshot"]["subject"] for r in rows})
+        },
         "paper_id": paper_id,
         "attempt_id": attempt["id"],
         "status": "pending_review" if pending else "graded",
@@ -388,50 +517,3 @@ def result(conn, user_id, paper_id):
             for r in rows
         ],
     }
-
-
-def due_reviews(conn, user_id):
-    return conn.execute(
-        "SELECT r.question_id,r.review_stage,r.due_date,i.snapshot FROM reviews_v2 r "
-        "JOIN attempts_v2 a ON a.id=r.attempt_id JOIN papers_v2 p ON p.id=a.paper_id "
-        "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=r.question_id "
-        "WHERE p.user_id=%s AND r.due_date<=%s AND r.completed_at IS NULL ORDER BY r.due_date,r.question_id",
-        (user_id, today_cn()),
-    ).fetchall()
-
-
-def export_legacy(conn, question_id):
-    publish_question(conn, question_id)
-    old = conn.execute(
-        "SELECT question_id FROM legacy_question_publications WHERE reviewed_question_id=%s",
-        (question_id,),
-    ).fetchone()
-    if old:
-        return old
-    q = conn.execute(
-        "SELECT content FROM reviewed_questions WHERE id=%s", (question_id,)
-    ).fetchone()["content"]
-    if q["question_type"] != "single_choice":
-        raise ValueError(
-            "Only single-choice questions can be exported to the legacy bank"
-        )
-    topic_id = conn.execute(
-        "INSERT INTO topics(subject,name) VALUES (%s,%s) ON CONFLICT(subject,name) DO UPDATE SET name=EXCLUDED.name RETURNING id",
-        (q["subject"], q["evidence"][0]["chapter"]),
-    ).fetchone()["id"]
-    legacy_id = conn.execute(
-        "INSERT INTO questions(topic_id,stem,options,correct_answer,explanation,source) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-        (
-            topic_id,
-            q["stem"],
-            Jsonb(q["options"]),
-            q["answer"],
-            json.dumps(q["rubric"], ensure_ascii=False),
-            json.dumps(q["evidence"], ensure_ascii=False),
-        ),
-    ).fetchone()["id"]
-    conn.execute(
-        "INSERT INTO legacy_question_publications VALUES (%s,%s)",
-        (legacy_id, question_id),
-    )
-    return {"question_id": legacy_id}

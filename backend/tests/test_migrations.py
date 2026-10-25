@@ -3,7 +3,8 @@
 import shutil
 import pytest
 import psycopg
-from migrate import SQL_DIR, apply_migrations, seed_legacy
+from migrate import SQL_DIR, apply_migrations
+from historical_fixtures import seed_legacy
 
 TABLES = (
     "users",
@@ -86,13 +87,13 @@ def test_unversioned_upgrade_and_repeat_preserve_all_historical_rows(raw_db):
     assert snapshot(raw_db) == before
     seed_legacy(raw_db)
     assert snapshot(raw_db) == before
-    from app.quiz_service import load_paper, history
+    from app.legacy_history import load_paper, history
 
     assert load_paper(raw_db, uid, pid)["score"] == 41
     assert history(raw_db, uid)[0]["score"] == 41
     assert (
         raw_db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"]
-        == 8
+        == 9
     )
     assert (
         raw_db.execute("SELECT COUNT(*) AS n FROM reviewed_questions").fetchone()["n"]
@@ -138,7 +139,7 @@ def test_applied_migration_checksum_enforced(db, tmp_path):
     with pytest.raises(RuntimeError, match="Applied migration changed"):
         apply_migrations(db, tmp_path)
     assert (
-        db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"] == 8
+        db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"] == 9
     )
 
 

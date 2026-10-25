@@ -193,6 +193,8 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     login(page, base)
+    assert page.locator('a[href="/"]').count() == 0
+    assert page.locator("details").count() == 0
     assert page.locator("article").count() == 0
     page.locator("#start").click()
     page.locator("article").first.wait_for()
@@ -248,6 +250,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     page.on("dialog", lambda dialog: dialog.accept())
     page.locator("#submit").click()
     page.locator("#result h2").wait_for()
+    assert page.get_by_text("本卷命题依据（训练优先级，不是考试概率）").count() == 1
     result = client.get(f"/v2/papers/{pid}/result").json()
     assert result["pending"] == 16 and result["graded_points"] == 30
     with psycopg.connect(dsn) as conn:

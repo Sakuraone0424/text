@@ -115,6 +115,39 @@ def test_exam_year_coverage_and_duplicate_sources(db, question_factory):
     assert exams.add(db, record) is None
     record["original_question_id"] = "different-transcription"
     exams.add(db, record)
+    exams.register_scope(
+        db,
+        dict(
+            scope_key="synthetic-scope",
+            subject="biochemistry",
+            paper_code="test",
+            syllabus="test syllabus",
+            source_unit_id=unit,
+            reviewer="test",
+            note="Synthetic source applicability checked for tests only",
+        ),
+    )
+    sources.annotate(db, unit, ["Km"])
+    db.execute(
+        "UPDATE exam_records SET textbook_units=%s WHERE year=2024",
+        (__import__("psycopg.types.json", fromlist=["Jsonb"]).Jsonb([unit]),),
+    )
+    for row in db.execute("SELECT id FROM exam_records WHERE year=2024").fetchall():
+        exams.classify(
+            db,
+            row["id"],
+            dict(
+                scope_key="synthetic-scope",
+                source_kind="real_exam",
+                mapping_verified=True,
+                tag_contributions={},
+                primary_tags=[],
+                cognitive_level=None,
+                canonical_item_id=None,
+            ),
+            "test",
+            "Synthetic mapping checked for tests only",
+        )
     rates = exams.frequencies(db)
     assert next(r for r in rates if r["tag"] == "Km")["appearances"] == 1
     coverage = exams.coverage(db)
@@ -127,7 +160,7 @@ def test_exam_year_coverage_and_duplicate_sources(db, question_factory):
     )
     assert (
         covered["missing_answers"]
-        and covered["missing_textbook_evidence"]
+        and not covered["missing_textbook_evidence"]
         and not covered["complete_original"]
     )
     record["answer_kind"] = "official"

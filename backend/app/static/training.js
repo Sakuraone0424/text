@@ -279,7 +279,7 @@ function render() {
     if (value.flagged) article.classList.add("flagged");
     element(
       "h2",
-      `${q.position}. ${q.subject === "biochemistry" ? "生化与分子生物学" : "细胞生物学"} · ${names[q.question_type]} · ${q.max_points}分${q.is_retest ? " · FSRS复测" : ""}`,
+      `${q.position}. ${q.subject === "biochemistry" ? "生化与分子生物学" : "细胞生物学"} · ${names[q.question_type]} · ${q.max_points}分${q.is_retest ? " · FSRS复测" : q.review_knowledge_tags?.length ? " · 知识点复测变式" : ""}`,
       article,
     );
     element("p", q.stem, article);
@@ -402,6 +402,7 @@ $("submit").onclick = async () => {
 async function showResult() {
   if (!paper) return;
   deadline = null;
+  paper.timing.status = "submitted";
   $("start").hidden = true;
   $("submit").hidden = true;
   const result = await api(`/v2/papers/${paper.paper_id}/result`);
@@ -414,6 +415,7 @@ async function showResult() {
       : `成绩 ${result.score} / ${result.max_points}`,
     $("result"),
   );
+  renderAnalysis(result.selection_analysis, $("result"));
   for (const answer of result.answers) {
     const article = element("article", undefined, $("result"));
     element("p", answer.stem, article);
@@ -732,6 +734,109 @@ $("archive").onclick = async () => {
         `${states[job.state]} · 重试 ${job.attempts} 次`,
         $("learning"),
       );
+  } catch (e) {
+    status(e.message);
+  }
+};
+
+function renderAnalysis(analysis, parent) {
+  if (!analysis || !analysis.selected) {
+    element("p", "历史试卷未记录动态命题依据，不补造旧记录。", parent);
+    return;
+  }
+  const details = element("details", undefined, parent);
+  element("summary", "本卷命题依据（训练优先级，不是考试概率）", details);
+  const stages = {
+    cold_start: "冷启动",
+    accumulating: "数据积累",
+    stable: "稳定提升",
+    pre_exam: "考前强化",
+    mixed: "分学科学习阶段",
+  };
+  element(
+    "p",
+    `${analysis.algorithm_version} · ${stages[analysis.stage] || analysis.stage}`,
+    details,
+  );
+  if (analysis.legacy_unmapped_answers)
+    element(
+      "p",
+      `另有${analysis.legacy_unmapped_answers}条历史作答尚未完成可核验知识点映射，未用于本次掌握估计。`,
+      details,
+    );
+  const shown = new Set();
+  for (const selected of analysis.selected) {
+    for (const [tag, basis] of Object.entries(selected.basis)) {
+      const key = selected.subject + ":" + tag;
+      if (shown.has(key)) continue;
+      shown.add(key);
+      const yearText = basis.exam_years.length
+        ? `${basis.exam_years.join("、")}年，${basis.exam_distinct_questions}道独立原题`
+        : "可用真题统计不足";
+      element(
+        "p",
+        `${tag.replace(/^chapter:/, "章节：")}：${yearText}；最近${basis.recent_answer_samples}条有效作答中${basis.recent_lost_samples}条失分；${basis.review_due ? "有到期复习" : basis.review_near_due ? "接近复习时间" : "未标记为到期复习"}。${basis.degraded.length || basis.complete_year_sample < 3 ? "部分数据不足，保留覆盖探索；缺失年份不计作未考查。" : ""}`,
+        details,
+      );
+    }
+  }
+}
+$("history").onclick = async () => {
+  try {
+    if (deadline) throw new Error("请先完成当前限时训练，再查看历史档案。");
+    const data = await api("/v2/history");
+    $("learning").replaceChildren();
+    element("h2", "历史只读档案", $("learning"));
+    for (const item of data.training) {
+      const article = element(
+        "article",
+        `28题 · ${item.paper_date} · ${item.score === null ? "待批改" : item.score + "分"}`,
+        $("learning"),
+      );
+      const button = element("button", "查看已提交结果", article);
+      button.onclick = async () => {
+        try {
+          const result = await api(`/v2/papers/${item.paper_id}/result`);
+          element(
+            "p",
+            result.score === null
+              ? `待批改${result.pending}题`
+              : `得分${result.score}/${result.max_points}`,
+            article,
+          );
+          renderAnalysis(result.selection_analysis, article);
+        } catch (e) {
+          status(e.message);
+        }
+      };
+    }
+    for (const item of data.legacy) {
+      const article = element(
+        "article",
+        `历史记录 · ${item.date} · 原成绩${item.score}/60`,
+        $("learning"),
+      );
+      const button = element("button", "查看只读原卷", article);
+      button.onclick = async () => {
+        try {
+          const old = await api(`/legacy/papers/${item.paper_id}`);
+          const answers = Object.fromEntries(
+            old.answers.map((a) => [a.question_id, a]),
+          );
+          for (const q of old.questions) {
+            const answer = answers[q.id];
+            element(
+              "p",
+              `${q.stem} · 原作答：${answer?.selected_answer || "未作答"} · ${answer ? (answer.is_correct ? "原记录正确" : "原记录错误") : "无批改记录"}`,
+              article,
+            );
+          }
+          button.disabled = true;
+        } catch (e) {
+          status(e.message);
+        }
+      };
+    }
   } catch (e) {
     status(e.message);
   }

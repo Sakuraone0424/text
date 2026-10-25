@@ -18,14 +18,9 @@ from app.auth import (
 )
 from app.db import get_db
 from app.routes_v2 import router as reviewed_quiz_router
-from app.quiz_service import (
-    due_reviews,
-    ensure_user,
-    get_or_create_today_paper,
-    history,
-    stats_summary,
-    submit_paper,
-)
+from app.common import ensure_user
+from app.legacy_history import history, stats_summary, load_paper
+
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -66,7 +61,7 @@ async def lifespan(app):
             await task
 
 
-app = FastAPI(lifespan=lifespan, title="USTC Adaptive Quiz", version="1.0.0")
+app = FastAPI(lifespan=lifespan, title="肖涵 · 中科大考研智能答题", version="2.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -74,18 +69,15 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
-class Submission(BaseModel):
-    paper_id: int | None = None
-    answers: dict[int, str]
-
-
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "training.html")
 
 
 @app.get("/health")
 def health():
+    if os.environ.get("DATABASE_URL"):
+        db_health()
     return {"status": "healthy"}
 
 
@@ -93,28 +85,30 @@ def health():
 def db_health():
     try:
         with get_db() as conn:
-            row = conn.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM information_schema.tables
-                     WHERE table_schema = 'public'
-                       AND table_name IN (
-                           'users','topics','questions','papers',
-                           'paper_questions','attempts','answers','review_schedule'
-                       )) AS table_count,
-                    (SELECT COUNT(*) FROM questions) AS question_count
-                """
-            ).fetchone()
+            applied = {
+                r["name"]
+                for r in conn.execute("SELECT name FROM schema_migrations").fetchall()
+            }
+            required = {p.name for p in (BASE_DIR.parent / "sql").glob("*.sql")}
+            if not required.issubset(applied):
+                raise HTTPException(503, "V2 schema migrations are incomplete")
         return {
             "status": "healthy",
             "database": "connected",
-            "tables": int(row["table_count"]),
-            "questions": int(row["question_count"]),
+            "schema": "dynamic-v1",
+            "migration_count": len(applied),
+            "formal_training": {
+                "questions": 28,
+                "points": 150,
+                "duration_seconds": 3600,
+            },
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
-            status_code=503, detail=f"Database unavailable: {type(exc).__name__}"
-        )
+            503, detail=f"Database unavailable: {type(exc).__name__}"
+        ) from exc
 
 
 @app.post("/auth/login")
@@ -151,31 +145,27 @@ def me(username: str = Depends(require_auth)):
     return {"authenticated": True, "username": username}
 
 
-def _user_id(username: str) -> int:
-    with get_db() as conn:
-        return ensure_user(conn, username)
+@app.get("/quiz/today", deprecated=True, include_in_schema=False)
+@app.post("/quiz/submit", deprecated=True, include_in_schema=False)
+@app.get("/review/due", deprecated=True, include_in_schema=False)
+def retired_training(username: str = Depends(require_auth)):
+    raise HTTPException(410, "Legacy training retired; use /v2/papers")
 
 
-@app.get("/quiz/today")
-def get_today_quiz(username: str = Depends(require_auth)):
+@app.get("/legacy/papers/{paper_id}")
+def historical_paper(paper_id: int, username: str = Depends(require_auth)):
     try:
         with get_db() as conn:
-            user_id = ensure_user(conn, username)
-            return get_or_create_today_paper(conn, user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-
-
-@app.post("/quiz/submit")
-def submit_quiz(submission: Submission, username: str = Depends(require_auth)):
-    try:
-        with get_db() as conn:
-            user_id = ensure_user(conn, username)
-            return submit_paper(conn, user_id, submission.answers, submission.paper_id)
+            uid = ensure_user(conn, username)
+            result = load_paper(conn, uid, paper_id)
+            result["historical_read_only"] = True
+            result["answers"] = conn.execute(
+                "SELECT a.question_id,a.selected_answer,a.is_correct,t.score,t.submitted_at FROM answers a JOIN attempts t ON t.id=a.attempt_id WHERE t.paper_id=%s AND t.user_id=%s ORDER BY a.question_id",
+                (paper_id, uid),
+            ).fetchall()
+            return result
     except LookupError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+        raise HTTPException(404, str(exc)) from exc
 
 
 @app.get("/history")
@@ -192,15 +182,6 @@ def get_stats(username: str = Depends(require_auth)):
         return stats_summary(conn, user_id)
 
 
-@app.get("/review/due")
-def get_due_reviews(username: str = Depends(require_auth)):
-    with get_db() as conn:
-        user_id = ensure_user(conn, username)
-        items = due_reviews(conn, user_id)
-        return {"count": len(items), "items": items}
-
-
-# Legacy routes above retain their original schemas and scoring semantics.
 app.include_router(reviewed_quiz_router)
 
 

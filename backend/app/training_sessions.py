@@ -260,7 +260,7 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
                 Jsonb(feedback) if feedback else None,
             ),
         )
-        if points is not None and points < q["max_points"]:
+        if answered and points is not None and points < q["max_points"]:
             schedule_review(conn, aid, qid)
     conn.execute(
         "UPDATE training_sessions SET submitted_at=%s,version=version+1 WHERE paper_id=%s",
