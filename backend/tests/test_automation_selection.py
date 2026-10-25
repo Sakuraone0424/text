@@ -1,5 +1,5 @@
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import timedelta
 from app import automation
 from app.selection import pick
 from app.common import ensure_user
@@ -14,17 +14,20 @@ def test_daily_automation_disabled_without_explicit_configuration(db, monkeypatc
 def test_daily_preparation_only_after_20_and_reports_shortage(db, monkeypatch):
     ensure_user(db, "daily")
     monkeypatch.setenv("QUIZ_DAILY_PREP_ENABLED", "1")
+    # Keep the mocked schedule after the database's real retry timestamp. A
+    # fixed calendar date becomes the past and falsely leaves a new job pending.
+    from app.training_sessions import server_now
+
+    actual = server_now(db)
+    scheduled = actual.replace(hour=12, minute=0, second=0, microsecond=0)
+    if scheduled <= actual:
+        scheduled += timedelta(days=1)
     monkeypatch.setattr(
-        automation,
-        "server_now",
-        lambda c: datetime(2026, 10, 25, 11, 59, tzinfo=timezone.utc),
+        automation, "server_now", lambda c: scheduled - timedelta(minutes=1)
     )
     assert automation.prepare_daily(db) == 0
-    monkeypatch.setattr(
-        automation,
-        "server_now",
-        lambda c: datetime(2026, 10, 25, 12, 0, tzinfo=timezone.utc),
-    )
+    assert db.execute("SELECT COUNT(*) AS n FROM automation_jobs").fetchone()["n"] == 0
+    monkeypatch.setattr(automation, "server_now", lambda c: scheduled)
     assert automation.prepare_daily(db) == 0
     row = db.execute("SELECT * FROM automation_jobs").fetchone()
     assert row["state"] == "failed" and row["paper_id"] is None and row["attempts"] == 1

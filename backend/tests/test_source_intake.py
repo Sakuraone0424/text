@@ -824,3 +824,30 @@ def test_private_intake_does_not_assume_ocr_and_pdf_page_identity(tmp_path):
         == 2
     )
     assert "Confirm OCR-to-physical" in json.loads(report.read_text())["error"]
+
+
+def test_whole_book_audit_does_not_reread_all_original_bytes_per_paragraph(
+    db, tmp_path
+):
+    path, meta, specs = fixture(tmp_path, (10, 10))
+    doc = sources.import_source(db, path, meta, original_parts=specs)
+
+    class BoundOriginalReads:
+        byte_queries = 0
+
+        def execute(self, query, *args, **kwargs):
+            normalized = " ".join(query.lower().split())
+            if "from source_original_parts" in normalized and (
+                normalized.startswith("select * ")
+                or "content" in normalized.partition(" from ")[0]
+            ):
+                self.byte_queries += 1
+                assert self.byte_queries <= 1, (
+                    "Entire original set reread for each paragraph"
+                )
+            return db.execute(query, *args, **kwargs)
+
+    observed = BoundOriginalReads()
+    report = intake.database_report(observed, doc)
+    assert not report["issues"] and report["units"] == 20
+    assert observed.byte_queries == 1

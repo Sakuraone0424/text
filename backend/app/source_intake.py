@@ -197,6 +197,16 @@ def database_report(conn, document_id):
                     "issue": "original_page_count_mismatch",
                 }
             )
+    if doc["metadata"].get("original_kind") != "pdf_parts":
+        from app.source_files import sha, pdf_pages
+
+        if not original or sha(bytes(original)) != doc["original_sha256"]:
+            issues.append({"issue": "original_checksum_mismatch"})
+        elif (
+            doc["metadata"].get("original_pdf_pages")
+            and pdf_pages(bytes(original)) != doc["metadata"]["original_pdf_pages"]
+        ):
+            issues.append({"issue": "original_page_count_mismatch"})
     try:
         remapped = [dict(p) for p in pages]
         map_originals(remapped, parts, doc["metadata"].get("original_pdf_pages"))
@@ -220,8 +230,11 @@ def database_report(conn, document_id):
             "metadata": doc["metadata"],
             "original_content": original,
             "original_sha256": doc["original_sha256"],
+            "original_present": bool(original),
         }
-        for issue in sources.original_issues(conn, identity):
+        # Byte checks above cover every original once per document; checking
+        # each paragraph must not repeatedly transfer/hash the entire textbook.
+        for issue in sources.original_issues(conn, identity, verify_hash=False):
             issues.append({"unit_id": row["id"], "issue": issue})
         p = by_page.get(row["ocr_global_page"])
         if not p or any(
