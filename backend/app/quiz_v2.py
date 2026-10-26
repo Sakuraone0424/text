@@ -87,6 +87,11 @@ def review_question(conn, question_id: int, audit: Audit):
 
 def publish_question(conn, question_id: int):
     lock_bank(conn)
+    if conn.execute(
+        "SELECT 1 FROM candidate_review_packets p JOIN candidate_revision_links l ON l.old_key=p.candidate_key WHERE p.question_id=%s",
+        (question_id,),
+    ).fetchone():
+        raise ValueError("A superseded candidate cannot be published")
     row = conn.execute(
         "SELECT * FROM reviewed_questions WHERE id=%s FOR UPDATE", (question_id,)
     ).fetchone()

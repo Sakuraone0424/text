@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>私有候选题审核</title>
+    <link rel="stylesheet" href="/review.css" />
+    <script defer src="/review.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>候选题审核</h1>
+      <p>AI辅助草稿 · 等待人工确认 · 不进入真实训练</p>
+      <span id="identity"></span><button id="logout" hidden>退出</button>
+    </header>
+    <main>
+      <p id="message" role="status" aria-live="polite"></p>
+      <form id="login">
+        <h2>审核人登录</h2>
+        <label
+          >审核账号<input
+            name="username"
+            autocomplete="username"
+            required /></label
+        ><label
+          >密码<input
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            required /></label
+        ><button>进入私有审核</button>
+        <p>请使用私有 HTTPS 或 VPN 入口。不要把密码、教材或备份公开分享。</p>
+      </form>
+      <section id="workspace" hidden>
+        <p id="summary"></p>
+        <nav>
+          <label
+            >学科<select id="subject">
+              <option value="">全部</option>
+              <option value="biochemistry">生化</option>
+              <option value="cell_biology">细胞</option>
+            </select></label
+          ><label
+            >题型<select id="type">
+              <option value="">全部</option>
+              <option value="single_choice">单选</option>
+              <option value="fill_blank">填空</option>
+              <option value="term">名词解释</option>
+              <option value="short_answer">简答</option>
+              <option value="essay">论述</option>
+            </select></label
+          ><button id="preview">28题草稿预览</button
+          ><button id="backups">私有备份</button>
+        </nav>
+        <div class="layout">
+          <aside>
+            <h2>逐题列表</h2>
+            <div id="list"></div>
+          </aside>
+          <article id="detail">
+            <p>从列表选择一道题，逐项核对证据与评分标准。</p>
+          </article>
+        </div>
+        <section id="backup-panel" hidden>
+          <h2>私有备份交接</h2>
+          <p>
+            下载后在 Safari
+            分享菜单选择“存储到文件”。备份含私有教材与审核数据，请保存到你自己的受控位置。
+          </p>
+          <button id="refresh-backup">生成包含最新审核的新备份</button>
+          <p id="backup-info"></p>
+          <a href="/api/backup/download" download>下载私有备份包</a
+          ><label
+            >选择下载的ZIP核对SHA-256<input
+              type="file"
+              id="verify-file"
+              accept=".zip"
+          /></label>
+          <p id="verify-result"></p>
+          <p>
+            审核后请先生成新备份，旧包不包含后来提交的决定。恢复到新数据库前需要明确的独立非生产目标授权。不要覆盖原库；本机备份不保证随环境回收后仍存在。
+          </p>
+        </section>
+      </section>
+    </main>
+    <footer>
+      候选“通过”会留存身份、版本、时间及逐项确认，仍须通过来源与正式发布门禁。
+    </footer>
+  </body>
+</html>
