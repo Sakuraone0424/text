@@ -408,7 +408,7 @@ def archive_status(username: str = Depends(require_auth)):
 def source_search(q: str):
     from app.sources import search
 
-    return operation(lambda c: {"units": search(c, q)})
+    return operation(lambda c: {"units": search(c, q, collection_only=True)})
 
 
 class SourceVerification(StrictModel):
@@ -421,17 +421,17 @@ def verify_source(unit_id: int, payload: SourceVerification):
     from app.sources import verify_unit
 
     def verify(c):
-        verify_unit(c, unit_id, payload.reviewer, payload.note)
-        return {"verified": True}
+        result = verify_unit(c, unit_id, payload.reviewer, payload.note)
+        return result if isinstance(result, dict) else {"verified": True}
 
     return operation(verify)
 
 
 @router.get("/exams/coverage", dependencies=[Depends(require_reviewer)])
 def exam_coverage():
-    from app.exams import coverage
+    from app.ocr_reports import annual_report
 
-    return operation(lambda c: {"years": coverage(c)})
+    return operation(lambda c: {"years": annual_report(c)})
 
 
 @router.get("/exams/frequencies", dependencies=[Depends(require_reviewer)])
@@ -816,3 +816,69 @@ def unified_read_only_history(username: str = Depends(require_auth)):
         }
 
     return operation(read, username)
+
+
+class OCRReview(StrictModel):
+    review_kind: Literal["text", "science", "uncertainty", "exam_style"]
+    status: Literal["approved", "rejected"]
+    reviewer: str = Field(min_length=1, max_length=200)
+    note: str = Field(min_length=20, max_length=4000)
+    details: dict = Field(default_factory=dict)
+
+
+@router.post("/sources/{unit_id}/reviews", dependencies=[Depends(require_reviewer)])
+def review_ocr_source(unit_id: int, payload: OCRReview):
+    from app.ocr_sources import review_unit
+
+    return operation(
+        lambda c: review_unit(
+            c,
+            unit_id,
+            payload.review_kind,
+            payload.status,
+            payload.reviewer,
+            payload.note,
+            payload.details,
+        )
+    )
+
+
+@router.get("/sources/collection-status", dependencies=[Depends(require_reviewer)])
+def source_collection_status():
+    from app.ocr_reports import collection_status
+
+    return operation(collection_status)
+
+
+@router.get("/sources/{document_id}/coverage", dependencies=[Depends(require_reviewer)])
+def source_document_coverage(document_id: int):
+    from app.ocr_reports import document_report
+
+    return operation(lambda c: document_report(c, document_id))
+
+
+class BibliographyReview(StrictModel):
+    title: str = Field(min_length=1, max_length=300)
+    authors: str = Field(min_length=1, max_length=300)
+    edition: str = Field(min_length=1, max_length=100)
+    isbn: str | None = None
+    reviewer: str = Field(min_length=1, max_length=200)
+    note: str = Field(min_length=20, max_length=4000)
+
+
+@router.post(
+    "/sources/{document_id}/bibliography", dependencies=[Depends(require_reviewer)]
+)
+def review_ocr_bibliography(document_id: int, payload: BibliographyReview):
+    from app.ocr_sources import review_bibliography
+
+    data = payload.model_dump()
+    return operation(
+        lambda c: review_bibliography(
+            c,
+            document_id,
+            {k: data[k] for k in ("title", "authors", "edition", "isbn")},
+            payload.reviewer,
+            payload.note,
+        )
+    )

@@ -27,6 +27,10 @@ class StrictModel(BaseModel):
 
 
 class Evidence(StrictModel):
+    file_id: str | None = None
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    ocr_page: int | None = Field(default=None, ge=1)
+    paragraph_id: int | None = Field(default=None, ge=1)
     source_unit_id: int | None = Field(default=None, ge=1)
     textbook: str = Field(min_length=1, max_length=300)
     authors: str = Field(min_length=1, max_length=300)

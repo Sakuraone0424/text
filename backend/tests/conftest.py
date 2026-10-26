@@ -72,7 +72,10 @@ def question_factory(db):
         doc = db.execute(
             "INSERT INTO source_documents(file_id,title,edition,subject,sha256,original_sha256,original_content,metadata) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (
-                subject,
+                {
+                    "biochemistry": "1onpEwQsbL3ntkPOU1mFbgQKD2iFQi3n3",
+                    "cell_biology": "19dZD44bebkDX9EOAEnhdRsk5rN2zTCZS",
+                }[subject],
                 "SYNTHETIC TEST FIXTURE",
                 "Test edition",
                 subject,

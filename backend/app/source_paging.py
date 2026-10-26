@@ -4,7 +4,7 @@ import re
 from collections import Counter
 
 PAGE = re.compile(
-    r"^\s*(?:\[PAGE\s*(\d+)\]|\[第\s*(\d+)\s*页\]|[-=]*\s*第\s*(\d+)\s*页\s*[-=]*|P(?:AGE)?\s*0*(\d+)|\\?={3,}\s*page-(\d+)\s*={3,})\s*$",
+    r"^\s*(?:\[PAGE\s*(\d+)\]|\[第\s*(\d+)\s*页\]|[-=]*\s*第\s*(\d+)\s*页\s*[-=]*|P(?:AGE)?\s*0*(\d+)|\\?={3,}\s*(?:(上册|下册)\s+)?page-(\d+)\s*={3,})\s*$",
     re.I,
 )
 HEADING = re.compile(r"^(第[一二三四五六七八九十百\d]+[章节]|\d+(?:\.\d+){0,3}[、.\s])")
@@ -104,7 +104,14 @@ def parse_pages(text, metadata):
         match = PAGE.fullmatch(line)
         if match:
             flush()
-            current = int(next(v for v in match.groups() if v is not None))
+            current = int(
+                next(v for v in match.groups() if v is not None and v.isdecimal())
+            )
+            label = match.group(5)
+            if "page_label" in metadata and label != metadata["page_label"]:
+                raise ValueError(
+                    "OCR volume label differs from declared corrected file"
+                )
             if current < 1:
                 raise ValueError("Page numbers start at one")
             if current <= previous:
@@ -122,9 +129,15 @@ def parse_pages(text, metadata):
             if global_page in observed:
                 raise ValueError("Duplicate whole-book OCR page marker")
             observed.add(global_page)
-            physical = metadata.get("pdf_pages", {}).get(str(global_page), global_page)
+            physical = (
+                None
+                if metadata.get("source_mode") == "ocr_only"
+                else metadata.get("pdf_pages", {}).get(str(global_page), global_page)
+            )
             pages.append(
                 dict(
+                    marker_text=line,
+                    marker_label=label,
                     ocr_global_page=global_page,
                     volume=volume + 1,
                     ocr_page=page,
@@ -133,7 +146,7 @@ def parse_pages(text, metadata):
                 )
             )
             continue
-        if re.match(r"^\s*\\?=+\s*page", line, re.I):
+        if re.match(r"^\s*\\?=+.*page", line, re.I):
             raise ValueError(
                 "Malformed OCR page delimiter; expected ===== page-001 ====="
             )
@@ -157,8 +170,8 @@ def parse_pages(text, metadata):
         )
     if set(metadata.get("pdf_pages", {})) - set(map(str, observed)):
         raise ValueError("Physical mapping contains unobserved OCR page keys")
-    physical_pages = {p["pdf_page"] for p in pages}
-    if len(physical_pages) != len(pages):
+    physical_pages = {p["pdf_page"] for p in pages if p["pdf_page"] is not None}
+    if metadata.get("source_mode") != "ocr_only" and len(physical_pages) != len(pages):
         raise ValueError("Multiple OCR pages map to the same physical PDF page")
     if set(metadata.get("printed_pages", {})) - set(map(str, physical_pages)):
         raise ValueError("Printed mapping contains unobserved physical page keys")

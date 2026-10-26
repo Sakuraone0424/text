@@ -33,6 +33,17 @@ def input_files(args):
     metadata = json.loads(read_bounded(args.metadata, 1024 * 1024).decode("utf-8-sig"))
     if not isinstance(metadata, dict):
         raise ValueError("Metadata must be an object")
+    mode = args.mode or (
+        "pdf-tools" if args.original or args.original_parts else "ocr-only"
+    )
+    if mode == "ocr-only":
+        if args.original or args.original_parts:
+            raise ValueError("OCR-only intake does not require or accept PDF files")
+        metadata["source_mode"] = "ocr_only"
+        from app.source_policy import entry
+
+        entry(metadata, args.path)
+        return metadata, None
     if (
         type(metadata.get("expected_pages")) is not int
         or not 1 <= metadata["expected_pages"] <= 4000
@@ -72,6 +83,29 @@ def input_files(args):
 
 
 def page_report(prepared):
+    if prepared["metadata"].get("source_mode") == "ocr_only":
+        return {
+            "status": "ocr_preflight_passed_human_review_pending",
+            "verified": False,
+            "file_id": prepared["metadata"]["file_id"],
+            "source_sha256": prepared["sha256"],
+            "stages": {
+                "file_read": True,
+                "preflight_passed": True,
+                "database_imported": False,
+                "human_text_reviewed": False,
+                "scientific_reviewed": False,
+                "questions_published": False,
+            },
+            "ocr_page_markers": len(prepared["pages"]),
+            "paragraphs": len(prepared["rows"]),
+            "pages": prepared["pages"],
+            "pdf_physical_pages_verified": False,
+            "printed_pages_verified": False,
+            "quality_flags": dict(
+                Counter(f for r in prepared["rows"] for f in r["quality_flags"])
+            ),
+        }
     pages = prepared["pages"]
     total = prepared["metadata"].get("original_pdf_pages")
     mapped = {p["pdf_page"] for p in pages}
@@ -151,6 +185,10 @@ def database_report(conn, document_id):
     ).fetchone()
     if not doc:
         raise ValueError("Source document not found in the selected isolated schema")
+    if doc["metadata"].get("source_mode") == "ocr_only":
+        from app.ocr_reports import document_report
+
+        return document_report(conn, document_id)
     rows = conn.execute(
         "SELECT * FROM source_units WHERE document_id=%s ORDER BY ordinal",
         (document_id,),
@@ -279,7 +317,8 @@ def main(argv=None):
         p = sub.add_parser(command)
         p.add_argument("path")
         p.add_argument("--metadata", required=True)
-        choice = p.add_mutually_exclusive_group(required=True)
+        p.add_argument("--mode", choices=("ocr-only", "pdf-tools"))
+        choice = p.add_mutually_exclusive_group()
         choice.add_argument("--original")
         choice.add_argument("--original-parts")
         p.add_argument("--report", required=True)
@@ -294,8 +333,62 @@ def main(argv=None):
         sub.choices[command].add_argument(
             "--target", required=True, choices=("development", "staging")
         )
+    for command in ("collection-manifest", "collection-check"):
+        p = sub.add_parser(command)
+        p.add_argument("--directory", required=True)
+        p.add_argument("--report", required=True)
+    p = sub.add_parser("collection-status")
+    p.add_argument("--schema", required=True)
+    p.add_argument("--target", required=True, choices=("development", "staging"))
+    p.add_argument("--report", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command in ("collection-manifest", "collection-check"):
+            from app.source_policy import handoff
+            from app.source_files import sha, MAX_OCR_BYTES
+
+            report = handoff(args.directory)
+            if args.command == "collection-check":
+                for item in report["files"]:
+                    if not item["codex_located_local_file"]:
+                        item["error"] = "current_file_not_handed_off"
+                        continue
+                    try:
+                        raw = read_bounded(item["local_path"], MAX_OCR_BYTES)
+                        item["file_read"] = True
+                        item["source_sha256"] = sha(raw)
+                        prepared = sources.prepare_source(
+                            item["local_path"], item["metadata"], raw=raw
+                        )
+                        item["preflight_passed"] = True
+                        item["preflight"] = page_report(prepared)
+                    except (ValueError, OSError) as exc:
+                        item["error"] = str(exc)
+            report["counts"] = {
+                key: sum(bool(item[key]) for item in report["files"])
+                for key in (
+                    "user_reported_located",
+                    "codex_located_local_file",
+                    "file_read",
+                    "preflight_passed",
+                    "database_imported",
+                    "human_text_reviewed",
+                    "scientific_reviewed",
+                )
+            }
+            private_json(args.report, report)
+            return (
+                2
+                if args.command == "collection-check"
+                and report["counts"]["preflight_passed"] != 6
+                else 0
+            )
+        if args.command == "collection-status":
+            from app.ocr_reports import collection_status
+
+            with isolated_db(args.schema, args.target, readonly=True) as conn:
+                private_json(args.report, collection_status(conn))
+            return 0
         if args.command == "init":
             from migrate import apply_migrations
 
@@ -343,11 +436,11 @@ def main(argv=None):
                 if args.command == "audit":
                     report = database_report(conn, args.document_id)
                 else:
-                    from app.exams import coverage
+                    from app.ocr_reports import annual_report
 
                     report = {
-                        "meaning": "verified_database_records_only_year_mentions_are_not_coverage",
-                        "years": coverage(conn),
+                        "meaning": "transcription_candidates_are_not_verified_original_exams",
+                        "years": annual_report(conn),
                     }
                 private_json(args.report, report)
         print("Private report written; source review and publication remain separate")

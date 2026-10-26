@@ -1,124 +1,132 @@
-# 私有教材与原卷接入：准备、授权和隔离验收
+# 当前六文件OCR-only接入与核验
 
-日期：2026-10-25（Asia/Shanghai）。延续PR #1，不改变已验收的动态命题算法。此文及仓库不含教材正文、原PDF、凭据或真实资料核验结论。
+2026-10-26（Asia/Shanghai）。本说明替代此前旧OCR、PDF分卷和192＋193重置交接要求。只使用用户指定OCR文件夹下六份校订资料，不下载或请求其他教材、真题或PDF。旧PDF工具仅作独立兼容工具，见 [optional-pdf-intake.md](optional-pdf-intake.md)。
 
-## 当前状态与授权交接
+## 唯一资料清单
 
-四本教材OCR与两份真题汇编仅有用户提供的Drive定位ID；ID不是读取授权。本轮没有Drive连接器/运行身份，没有访问或公开分享文件。真实材料导入数为0，不能据模拟试验宣称教材已核验或正式题库已具备。
+文件夹ID：`1RDVTRbLGnfc6GwPzGCCjGADf1ocLFMt6`。代码唯一清单为 [ocr_collection.json](../backend/app/ocr_collection.json)，版本 `ocr-corrected-2026-10-26-v1`。各文件ID、路径、科目、格式及声明范围均集中在该文件；这些配置不是Drive访问凭据。
 
-六份定位信息已放入checkout之外、0600权限的私有交接清单 `/workspace/private-intake/handoff.json`，不提交Git。该清单不是可直接导入的元数据：原件分卷、作者/版本、实际页数和授权范围仍待填写。
+| 目录 | 文件 | 预期OCR页标/声明范围 |
+|---|---|---|
+| 生物化学/书本 | 生物化学_上册_校订版.txt | 1—654，`===== 上册 page-001 =====` |
+| 生物化学/书本 | 生物化学_下册_校订版.txt | 1—587，`===== 下册 page-001 =====` |
+| 生物化学/书本 | 生化高分笔记_校订版.txt | 1—289，`===== page-001 =====` |
+| 细胞生物学/书本 | 细胞生物学_第五版_校订版.txt | 连续1—385，`===== page-001 =====` |
+| 生物化学/真题 | 2004~2026年中国科学技术大学生物化学与分子生物学真题.docx | 声明2004—2026，逐年待核 |
+| 细胞生物学/真题 | 1998-2026年中国科学技术大学细胞生物学真题.docx | 声明1998—2026，逐年待核 |
 
-实际接入需要：
+四本合计预期1915个页标。该数不表示1915页科学校对完成，不是PDF物理页数，也不是书本印刷页核对结果。细胞文件不再使用192＋193 OCR重置映射；当前流程拒绝这种旧配置。支持可选行首反斜杠及两位/三位零填充；拒绝缺号、重复、倒退、非法册名/页标、未定位前置正文及声明范围不符。
 
-1. 用户通过受支持的私有连接或受控本地文件交接，明确授权读取这六份指定OCR，以及对应原始PDF的**全部分卷**；不需开放整个Drive，更不应改为公开链接。若没有连接器，可由用户将文件下载到checkout之外的私有目录后交接。现有OCR直接使用，不重新OCR。
-2. 每份OCR提供本地路径、源文件ID和独立确认的页数；每份PDF分卷提供本地路径、分卷文件ID、顺序、实际页数、全书物理页偏移，建议同时提供SHA-256用于交接比对。当前尚无真实分卷PDF的ID/清单。
-3. 对照实际封面/版权页核对书名、作者、版次、ISBN（无则留空），记录OCR局部分卷、全书OCR页、全书物理PDF页和印刷页的对应关系。不能由文件名推定版本或作者；不能假定PDF分卷恰为OCR的192/193页。
-4. 明确授权的development或staging数据库，使用专用最小权限账号和安全注入的 `SOURCE_STAGING_DATABASE_URL`，不使用生产连接。数据库应为独立实例；schema隔离提供第二层保护，但字符串 `--target staging` 无法证明某个DSN确实不是生产，交接人必须核对实际目标。
-5. 指定可签署教材/原卷、科学符号、知识点及真题范围的审核人。数据导入、完整性检查、内容核验、题目审核发布是独立步骤；本工具不自动核验或发布。
+## 当前真实接入状态
 
-## 分页与证据坐标
+用户已在其ChatGPT连接中定位并抽查六份文件；Codex独立检查没有可用Drive读取工具、凭据或身份，不能继承另一个执行环境的权限，也未尝试匿名下载。当前Codex真实文件读取0、预检通过0、入库0、正文人工审核0、题目发布0。
 
-支持独立分隔行 `===== page-001 =====`、`===== page-01 =====`，也支持用户文本中可能出现的行首反斜杠形式 `\===== page-001 =====`、大小写PAGE和旧 `[PAGE 1]` 格式。不是段落内出现这些字符就划页；疑似但不合法的分隔行拒绝。正文出现在首个页标之前、重复页、非法重置、声明范围缺页、越界和多OCR页映射同物理页均拒绝，不把整书悄悄合为无页码正文。
+私有交接清单 `/workspace/private-intake/handoff.json` 已更新为当前六文件，旧清单已归档为失效历史。真实缺文件报告在 `/workspace/private-intake/corrected-six-preflight-blocked.json`。它们在checkout之外、0600权限，不提交Git。旧合成PDF或旧OCR不会被搜索为替代来源。
 
-细胞第五版的**OCR**配置为：
+若当前Codex不能使用既有私有连接，只需用户通过已有合法方式提供**上述六个文件**，可在checkout之外按目录树交接。无需PDF、分卷、额外OCR或其他材料，也不要把Drive文件改为公开。文件字节取得后才能计算真实SHA和判断实际内容；不能先给文件猜哈希。
+
+## 状态必须分开
+
+| 状态 | 证据/操作 | 不代表 |
+|---|---|---|
+| 用户报告已定位 | 用户提供文件ID/路径 | Codex已连接Drive或已读文件 |
+| 本地文件已定位 | 在交接目录找到指定路径 | 来源身份已经远端核实 |
+| 文件已读取 | 有界读取TXT/DOCX实际字节、保存SHA | 页标完整或知识正确 |
+| 预检通过 | 全部声明页标/格式/索引检查通过 | 数据库已提交或人工审核 |
+| 正文已入库 | 隔离事务提交且独立读回 | 内容已人工核验 |
+| 文本人工复核 | 逐单元text审核，绑定单位摘要 | 科学内容或答案已审核 |
+| 科学审核 | science审核、必要的uncertainty处置 | 题目已发布或考试原卷已核验 |
+| 题目已审核发布 | 现有五维审核和分值/证据/风格门禁 | 所有教材/所有年度均已核验 |
+
+检索/旧接口中的source_units.verified在OCR模式仅承接text审核；新接口返回独立review_kind，不能用一个verified字段覆盖全部状态。报告按章列出索引单元、OCR页、文本与科学审核比例、风险待处理及知识点链接；未知章节明确unclassified，不能当作已完成章节校对。
+
+## OCR-only存储与证据
+
+TXT是教材原始交接文件，DOCX是真题原始交接文件；无需附加原PDF。保存其完整实际字节、SHA-256、格式、清单身份、上个版本和索引器版本。source_pages完整保存每个页标原文及册名；source_units保存章节、小节、正文、全书OCR页和段落ID。DOCX保留段落/表格路径，页数未知，按段落定位。
+
+OCR-only的pdf_page、printed_page、original_part均为null，不允许元数据注入“已核对物理/印刷页”。引用示例：
 
 ```json
 {
-  "file_id": "交接的OCR源ID",
-  "title": "以版权页核查为准",
-  "authors": "以版权页核查为准",
-  "edition": "以版权页核查为准",
-  "subject": "cell_biology",
-  "expected_pages": 385,
-  "volume_offsets": [0, 192],
-  "volume_pages": [192, 193],
-  "physical_mapping": "identity_confirmed",
-  "printed_pages": {},
-  "material_status": "private_pending"
+  "source_unit_id": 123,
+  "file_id": "清单中的文件ID",
+  "source_sha256": "实际文件的64位SHA-256",
+  "ocr_page": 42,
+  "paragraph_id": 123,
+  "locator": "OCR:42:UNIT:123",
+  "excerpt": "该段落中可逐字核对的短摘录"
 }
 ```
 
-`identity_confirmed`只能在实际确认全书OCR第N页对应全书物理PDF第N页之后填写，不是默认事实；未声明对应策略的私有预检拒绝。若不相同，设置 `physical_mapping:"explicit"`，并用 `pdf_pages` 对全部全书OCR页显式映射。例如2页OCR对应PDF第2、3页：`{"1":2,"2":3}`。不能把页数相同当成正文对应证明。
+这是Evidence中的来源字段示例；还须按API填写书目/章节等现有字段。DOCX引用使用 `DOCX:UNIT:123`，ocr_page为null。文件ID、实际SHA、OCR页、段落ID、定位器和原文短引文必须全部匹配，不能拿PDF页码替代OCR页。正式题目必须包含当前四本教材之一的证据，DOCX转录不能单独替代教材科学依据。
 
-坐标含义：
+原始字节/版本、正文和坐标、审核事件不可静默覆盖；文件SHA变化创建新版本和新单元、父版本可追踪，审核与知识链接均不复制。即使页码或文本相同也不自动继承复核。旧版本仍保留用于历史试卷；新组卷只允许当前六文件的当前版本。旧哈希不能通过重新导入悄悄恢复旧审核。详见 [data-versions.md](data-versions.md)。
 
-| 字段 | 含义 |
-|---|---|
-| volume、ocr_page | OCR分卷与该卷局部页；第二卷001仍为局部1 |
-| ocr_global_page | OCR全书序号；第二卷001为193 |
-| pdf_page | 按原PDF分卷顺序合成的全书物理页，用于 `PDF:N` 证据定位 |
-| original_part、original_page | 原PDF分卷编号和该PDF内实际页，不受OCR重置规则影响 |
-| printed_page | 人工提供的书本印刷页标签，可为罗马数字；缺失为null，不自动猜测 |
+## 私有预检、隔离导入与读回
 
-`printed_pages`以**全书物理页**字符串为键。印刷页未知不会伪装为物理页，也不声称已核查；报告列出所有缺口。空白OCR页保留在source_pages覆盖记录中，即使没有正文单元。分卷最后的空页仍须有页标；缺正文/空页须人工确认其确为空页。
-
-## 有界多分卷原件
-
-保留单原件100 MiB限制。分卷模式每卷最多100 MiB、最多16卷、合计最多512 MiB；单PDF1—2000页，全书最多4000页。OCR文件最多50 MiB；DOCX展开大小原有限制继续保留。先检查文件大小并有界读取，再解析；拒绝空文件、非PDF、加密或不可解析PDF、实际页数与交接不符、哈希不符、重复ID、偏移缺口/重叠/乱序、混用单原件与分卷。大卷需在用户控制下重新合理分卷，不能删除限制凑合导入。
-
-分卷清单示例仅演示结构，数值为**合成样例**；真实值须实际核对：
-
-```json
-[
-  {"path":"part-1.pdf", "file_id":"原件分卷1ID", "page_offset":0, "expected_pages":192},
-  {"path":"part-2.pdf", "file_id":"原件分卷2ID", "page_offset":192, "expected_pages":193}
-]
-```
-
-路径相对清单文件所在目录解析，可另填 `sha256` 与交接哈希比较。偏移从0起连续增加，必须按实际PDF页数计算；OCR分卷与原PDF分卷不要求一一对应。报告列出未被OCR映射的原件页，前言/封面等缺口由审核人解释，不能据此自动称全书正文完整。
-
-010增量迁移新增 `source_original_parts`，逐卷保存二进制、哈希、真实页数、字节数和偏移。文档头的original_sha256在分卷模式是有序规范化清单的SHA-256，**不是不存在的合并PDF哈希**；`original_content`为空。各卷不可覆盖/删除；纠错使用新资料修订。完整清单身份、实际卷哈希、单位的全书/分卷页关系在核验和题目证据审查中检查。真题来源存在性检查同样支持分卷，不会因没有单文件bytea而误判缺原件，也不会只凭正文存在就绕过原件。
-
-## 先预检，再隔离导入与独立读回
-
-所有资料、清单和报告置于私有目录，不能放入checkout或上传GitHub；下例使用 `/private/intake` 占位路径。报告不含正文或PDF字节，但仍有书目信息、文件标识和审计信息，按私有资料处理。报告以0600权限独占创建，拒绝覆盖已有文件/符号链接。每次运行选新文件名。
+文件、元数据和报告都放在checkout之外的私有目录，不把私有正文上传GitHub。报告不含教材正文，但有标识、SHA及审计信息，仍按私有资料处理，独占创建为0600，不能覆盖已有报告。
 
 ```sh
 cd backend
-python -m app.source_intake check /private/intake/cell-ocr.txt \
-  --metadata /private/intake/cell.json \
-  --original-parts /private/intake/cell-parts.json \
-  --report /private/intake/reports/cell-preflight-001.json
+python -m app.source_intake collection-manifest \
+  --directory /private/OCR --report /private/current-handoff-001.json
+python -m app.source_intake collection-check \
+  --directory /private/OCR --report /private/six-preflight-001.json
 ```
 
-预检不连接数据库，不做网络请求、不下载Drive、不运行OCR。单原件用互斥的 `--original /private/intake/book.pdf`。成功仍为 `pending_human_review / verified:false`；页标/映射等失败返回2并写私有rejected报告。报告包含OCR哈希、原件身份/各卷哈希和页数、逐页对应、空页、缺失印刷页、未映射原件页、正文字符/段落数、质量标记。年份文本仅叫 `year_mentions_not_verified_exam_coverage`，教材中提到2024不代表有2024真题。
+批量check只尝试清单中的六个路径，检查符号链接不能跳出交接根目录；不联网、不OCR、不用旧文件兜底。报告分别累计读取、预检、入库及审核状态。年份文本只作候选，不是考频样本。
 
-在明确选择的非生产数据库安全注入 `SOURCE_STAGING_DATABASE_URL` 后：
+manifest中的metadata可保存为每文件的私有JSON供单文件命令使用。教材采用清单的654/587/289/385、volume_offsets:[0]；DOCX无需expected_pages。source_mode是ocr_only，无需original、original-parts或physical_mapping。书目未知时保留待核查/未载明，不发明作者、版本或ISBN；从这六文件自身核对后可在导入前填写，或用下述追加书目复核，不改写原始身份。
 
 ```sh
-python -m app.source_intake init --target staging --schema source_staging_intake_001
-python -m app.source_intake import /private/intake/cell-ocr.txt \
-  --metadata /private/intake/cell.json --original-parts /private/intake/cell-parts.json \
-  --target staging --schema source_staging_intake_001 \
-  --report /private/intake/reports/cell-import-001.json
+python -m app.source_intake check /private/OCR/生物化学/书本/生物化学_上册_校订版.txt \
+  --metadata /private/config/biochemistry_upper.json \
+  --report /private/reports/upper-check-001.json
+# SOURCE_STAGING_DATABASE_URL经安全渠道注入，明确选择开发或staging，不使用生产。
+python -m app.source_intake init --target staging --schema source_staging_corrected_001
+python -m app.source_intake import /private/OCR/生物化学/书本/生物化学_上册_校订版.txt \
+  --metadata /private/config/biochemistry_upper.json \
+  --target staging --schema source_staging_corrected_001 \
+  --report /private/reports/upper-import-001.json
 python -m app.source_intake audit --document-id 1 \
-  --target staging --schema source_staging_intake_001 \
-  --report /private/intake/reports/cell-readback-001.json
+  --target staging --schema source_staging_corrected_001 \
+  --report /private/reports/upper-readback-001.json
+python -m app.source_intake collection-status \
+  --target staging --schema source_staging_corrected_001 \
+  --report /private/reports/collection-status-001.json
 python -m app.source_intake exam-coverage \
-  --target staging --schema source_staging_intake_001 \
-  --report /private/intake/reports/exam-years-001.json
+  --target staging --schema source_staging_corrected_001 \
+  --report /private/reports/years-001.json
 ```
 
-init只创建新 `source_staging_*` schema并运行版本化迁移，不复用或重建已有schema。import/audit要求schema已存在，禁止public或production目标，不回退使用 `DATABASE_URL`。旧 `python -m app.sources` 可执行名委托到同一严格import入口，也必须提供target/schema/report。
+不提供数据库连接时可以完成离线预检。写库只接受SOURCE_STAGING_DATABASE_URL及显式development/staging、已初始化source_staging_* schema，不使用DATABASE_URL，不允许public或production目标。target文字本身不能证明DSN非生产，运行者必须核对授权目标。init只创建新schema，不重建已有schema；不提供删除历史数据命令。报告失败、输入文件在预检与导入间变化或读回不一致会回滚。命令退出0后仍须独立audit，不把准备报告当成数据库提交证明。
 
-导入在事务内写原件、页面及单元，重复文件/哈希幂等；待审资料补原件保留单元ID。已核验资料不可重索引，已保存分卷不可替换，须新修订。预检后文件变化或数据库读回失败会拒绝并回滚；报告写入失败同样回滚。数据库提交失败时退出非0，不能根据留下的准备报告认定提交成功；**只有命令退出0并通过独立audit才完成持久化验收**。
+OCR文件最多50MiB；DOCX展开总量100MiB、表格嵌套上限8仍保留。乱码、图片依赖、结构式、表格、科学符号、不确定OCR和已报告缺题均单独标记；DOCX嵌图无转录的单元不能被猜字核验。库里material_status:synthetic_test资料不能被批准成真实教材。
 
-整书审计对每卷实际字节只读回校验一次，再逐单元核查清单/映射，避免每段重复传输全部大PDF。审计覆盖逐卷哈希/页数、索引摘要、页面覆盖、单元与页面对应、知识链接及书目缺项。索引摘要涵盖正文/章节/坐标/标记，能发现存储后变更，但不证明OCR语义或科学正确。报告 `integrity_checked_not_content_verified` 不等于教材核验完成。正文搜索和知识标签经审核人确认后补齐；本工具不猜测全部知识标签。
+## 人工任务与发布门禁
 
-`material_status:synthetic_test`用于模拟导入，核验入口明确拒绝将其变为真实教材；这种数据不得复制到正式题库。普通私有导入同样默认全部单元未核验、题目0发布。迁移不会把原有历史来源的新增坐标补成推测值，也不重写旧答卷或成绩；旧单文件原件仍可读取、校验。旧已核验资料若需补充新索引字段，使用新修订而非覆盖已核验内容。
+审核员使用既有独立x-review-api-key，不调用收费AI：
 
-## 年度真题覆盖验收
+- `GET /v2/sources/search?q=...`：仅检索当前六文件当前版本，返回OCR身份及独立审核状态。
+- `GET /v2/sources/collection-status`、`GET /v2/sources/{document_id}/coverage`：六文件阶段计数及各章节索引/审核任务。
+- `POST /v2/sources/{unit_id}/reviews`：review_kind为text/science/uncertainty/exam_style，status为approved/rejected，带reviewer及实质性note。追加记录，不覆盖旧结论。
+- text先核对OCR原文；science先有text；存在风险标记时，先做uncertainty处置。须逐项列resolved_flags、resolution:text_sufficient及充分explanation；内容无法从文字确证时应拒绝，不能猜图或公式。乱码/无转录图须校订原文件产生新版本。
+- `POST /v2/sources/{document_id}/bibliography`：追加带版本SHA的书目复核（title/authors/edition/isbn/reviewer/note），原始文档元数据不改写。无ISBN可为空；未载明信息不得伪装成已识别。
+- `POST /v2/sources/{unit_id}/knowledge`：为当前版本人工建立知识点关系；没有新版本链接时正式题目不能拿旧OCR链接兜底。
+- 正式题目还须参考答案、评分细则、固定分值、五维专家审核、唯一性/重复检测和经过人工核对的风格参考。未知章节、未审科学内容、身份不符或未解决风险均拒绝。审核通过不表示自动AI证明了科学真理。
 
-两个汇编按用户声明分别覆盖生化2004—2022、细胞1998—2022；必须逐年核实，不将文件名或年份提及当作覆盖。报告仍列生化2004—2026、细胞1998—2026的52个年度槽位；2023—2026材料未知，不默认为已取得。
+## 2026版真题汇编
 
-先对原卷OCR做相同预检/原件映射，再经审核员将原题编号、科目、年份、类型和真实来源单元写入现有 `/v2/exams`，审核后追加scope与classification；完整年度用 `/v2/exams/samples` 核对原件和去重数量。官方答案仍需独立核验来源；个人/资料答案不能冒充官方。导入器不会自动把正则匹配到的年份建立为已核实原题。
+仅依据这两份DOCX的实际正文建立候选。段落/表格逐项索引，显式年度标题和题号用于生成待审候选，题型、年份缺失、边界不明、表格/图像及转录缺口单列。文件名范围、年份提及、题号序列均不自动证明完整年度。对未能可靠分段的内容保留原段落任务，不猜补题干或答案；真实格式尚未读取，后续可能需按实际排版完善规则。
 
-覆盖报告区分原件获取、正文记录、来源核验、缺答案/教材证据、完整卷声明及可靠映射数量；考频使用现有已核验范围模型，未知年份不作零。只有真实原件、教材和审核全通过，才进一步审核正式题库；题库不足继续拒绝组卷，不用模拟材料凑数。
+年度报告覆盖生化2004—2026、细胞1998—2026，特别标记2023—2026。分别列候选题数/类型、未知年份、边界、明确缺口、参考答案标记、官方答案证据、教材映射及可信考频资格。OCR文件获取与原卷获取分开报告；当前DOCX转录不能被设置为原卷已核验、完整原卷或官方答案已证明，classification必须保留transcription。
 
-## 本轮开发验收与边界
+经人工复核的转录可提供命题风格参考，但不能冒充已核实原卷的考频样本。动态引擎保留已有真题、薄弱点、FSRS、置信度、章节软约束、去重及seed审计；可信真题资料不足时如实降级。候选统计不替代其可信考频输入，旧版本映射/考频也不自动沿用。
 
-同真实OCR分隔格式的合成385页、192+193页原PDF分卷完成CLI预检、隔离开发schema导入、全文搜索、一个明确模拟的知识链接、独立只读审计与52年覆盖报告。该schema中385个来源单元、385条页映射、2个原件分卷，**核验单元0、试卷0**；模拟资料核验尝试被拒绝。它验证工具链，不是真实教材接入。
+## 验收边界与交接后顺序
 
-自动测试涵盖实际分隔符/重置、空页/缺页、印刷页与物理页区分、前言偏移、格式/加密/大小/总量/页数/哈希异常、分卷证据门禁、事务失败/文件变化回滚、只读年度报告、旧单文件数据迁移兼容、既有训练全流程。最终数量及CI见PR与 [验收报告](acceptance.md)。
+代码和测试可在无真实文件时完成；真实资料处理必须等合法连接或六文件交接。获得文件后依次做SHA身份、全文页标、章节索引、知识点关系、乱码/符号任务、正文和科学审核；再核对逐年真题及题目审核。没有真实题库就保持缺题报错，不用模拟资料生成正式训练。
 
-没有合并main、生产部署或生产数据库修改。实际教材/真题核验必须待上述最小授权与文件交接后执行；不因本轮完成了可独立开发部分而把外部资料状态改成完成。
+独立合成六文件CLI验收解析1915个页标、1947单元、32条真题候选，隔离入库后审核0、试卷0、答卷0；合成资料核验尝试被拒绝，随后仅清理该次合成schema。它不改变真实六文件的0读取/0导入状态。最终测试及CI见 [acceptance.md](acceptance.md) 和PR #1。
+
+未合并main、未部署production、未修改生产Postgres、未删除历史成绩或公开任何真实教材/真题。

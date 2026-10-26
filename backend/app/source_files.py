@@ -177,7 +177,7 @@ def map_originals(pages, parts, original_count=None):
 def original_available_sql(alias="d"):
     # Presence only, as in the former single-file fast path. Full checksums are
     # independently required on verification and review/publication.
-    return f"({alias}.original_content IS NOT NULL OR ({alias}.metadata->>'original_kind'='pdf_parts' AND (SELECT COUNT(*) FROM source_original_parts op WHERE op.document_id={alias}.id)=jsonb_array_length({alias}.metadata->'original_parts_manifest') AND EXISTS(SELECT 1 FROM source_original_parts op WHERE op.document_id={alias}.id)))"
+    return f"(EXISTS(SELECT 1 FROM source_versions ov WHERE ov.document_id={alias}.id AND ov.source_sha256={alias}.sha256) OR {alias}.original_content IS NOT NULL OR ({alias}.metadata->>'original_kind'='pdf_parts' AND (SELECT COUNT(*) FROM source_original_parts op WHERE op.document_id={alias}.id)=jsonb_array_length({alias}.metadata->'original_parts_manifest') AND EXISTS(SELECT 1 FROM source_original_parts op WHERE op.document_id={alias}.id)))"
 
 
 def source_index_sha(rows, pages):

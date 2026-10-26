@@ -67,6 +67,18 @@ def parse(text, metadata):
 def prepare_source(
     path, metadata, original_path=None, original_parts=None, *, raw=None, existing=None
 ):
+    from app.source_policy import FILES
+
+    if metadata.get("file_id") in FILES and metadata.get("source_mode") != "ocr_only":
+        raise ValueError(
+            "Current six files require OCR-only mode; PDF tools cannot impersonate them"
+        )
+    if metadata.get("source_mode") == "ocr_only":
+        if original_path or original_parts:
+            raise ValueError("OCR-only mode does not accept PDF prerequisites")
+        from app.ocr_sources import prepare
+
+        return prepare(path, metadata, raw)
     for field in ("file_id", "title", "edition", "subject"):
         if not isinstance(metadata.get(field), str) or not metadata[field].strip():
             raise ValueError(f"Missing source metadata: {field}")
@@ -131,6 +143,18 @@ def prepare_source(
 
 
 def import_source(conn, path, metadata, original_path=None, original_parts=None):
+    from app.source_policy import FILES
+
+    if metadata.get("file_id") in FILES and metadata.get("source_mode") != "ocr_only":
+        raise ValueError(
+            "Current six files require OCR-only mode; PDF tools cannot impersonate them"
+        )
+    if metadata.get("source_mode") == "ocr_only":
+        if original_path or original_parts:
+            raise ValueError("OCR-only mode cannot mix original PDFs")
+        from app.ocr_sources import import_source as import_ocr
+
+        return import_ocr(conn, path, metadata)
     raw = read_bounded(path, MAX_OCR_BYTES)
     if not isinstance(metadata.get("file_id"), str):
         raise ValueError("Missing source metadata: file_id")
@@ -288,6 +312,10 @@ def import_source(conn, path, metadata, original_path=None, original_parts=None)
 
 
 def original_issues(conn, row, *, verify_hash=True):
+    if row["metadata"].get("source_mode") == "ocr_only":
+        from app.ocr_sources import integrity_issues
+
+        return integrity_issues(conn, row, verify_hash=verify_hash)
     if row["metadata"].get("original_kind") != "pdf_parts":
         if verify_hash:
             return (
@@ -341,11 +369,15 @@ def verify_unit(conn, unit_id, reviewer, note):
         (unit_id,),
     )
     row = conn.execute(
-        "SELECT u.*,d.original_content,d.original_sha256,d.metadata FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
+        "SELECT u.*,d.sha256,d.original_content,d.original_sha256,d.metadata FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
         (unit_id,),
     ).fetchone()
     if not row:
         raise LookupError("Source unit not found")
+    if row["metadata"].get("source_mode") == "ocr_only":
+        from app.ocr_sources import review_unit
+
+        return review_unit(conn, unit_id, "text", "approved", reviewer, note)
     if row["metadata"].get("material_status") == "synthetic_test":
         raise ValueError("Synthetic test material cannot be verified as a real source")
     if original_issues(conn, row):
@@ -366,7 +398,10 @@ def verify_unit(conn, unit_id, reviewer, note):
 
 
 def evidence_issues(conn, content, *, verify_original=True):
+    from app.source_policy import FILES
+
     issues = []
+    has_current_textbook = False
     for e in content["evidence"]:
         original_columns = (
             "d.original_content,d.original_sha256"
@@ -376,7 +411,7 @@ def evidence_issues(conn, content, *, verify_original=True):
             + " AS original_present"
         )
         row = conn.execute(
-            "SELECT u.*,d.title,d.edition,d.subject,d.metadata,"
+            "SELECT u.*,d.file_id,d.sha256,d.title,d.edition,d.subject,d.metadata,"
             + original_columns
             + " FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
             (e.get("source_unit_id"),),
@@ -384,7 +419,21 @@ def evidence_issues(conn, content, *, verify_original=True):
         if not row or not row["verified"]:
             issues.append("unverified_or_missing_textbook_unit")
             continue
-        bibliography = row["metadata"]
+        from app.source_policy import active_document
+
+        if not active_document(conn, row["document_id"]):
+            issues.append("outside_current_six_file_collection_or_superseded")
+        elif FILES.get(row["file_id"], {}).get("kind") == "textbook":
+            has_current_textbook = True
+        bibliography = dict(row["metadata"])
+        if bibliography.get("source_mode") == "ocr_only":
+            from app.ocr_sources import bibliography as bibliography_review
+
+            reviewed = bibliography_review(conn, row["document_id"])
+            if reviewed and reviewed["source_sha256"] == row["sha256"]:
+                bibliography.update(reviewed["bibliography"])
+                row["title"] = bibliography["title"]
+                row["edition"] = bibliography["edition"]
         if bibliography.get("material_status") == "synthetic_test":
             issues.append("synthetic_material_not_publishable")
             continue
@@ -402,14 +451,21 @@ def evidence_issues(conn, content, *, verify_original=True):
             or e["excerpt"] not in row["text"]
         ):
             issues.append("textbook_evidence_mismatch")
-        expected_locator = (
-            f"PDF:{row['pdf_page']}"
-            if row["pdf_page"] is not None
-            else f"UNIT:{row['ordinal']}"
-        )
-        if e["locator"] != expected_locator:
-            issues.append("textbook_page_mismatch")
-        issues.extend(original_issues(conn, row, verify_hash=verify_original))
+        if row["metadata"].get("source_mode") == "ocr_only":
+            from app.ocr_sources import evidence_issues as ocr_issues
+
+            issues.extend(ocr_issues(conn, row, e, verify_original))
+        else:
+            expected_locator = (
+                f"PDF:{row['pdf_page']}"
+                if row["pdf_page"] is not None
+                else f"UNIT:{row['ordinal']}"
+            )
+            if e["locator"] != expected_locator:
+                issues.append("textbook_page_mismatch")
+            issues.extend(original_issues(conn, row, verify_hash=verify_original))
+    if not has_current_textbook:
+        issues.append("missing_current_textbook_evidence")
     if content.get("knowledge_tags"):
         links = set()
         for evidence in content["evidence"]:
@@ -425,15 +481,29 @@ def evidence_issues(conn, content, *, verify_original=True):
     return sorted(set(issues))
 
 
-def search(conn, query, limit=20):
+def search(conn, query, limit=20, *, collection_only=False):
     if not query.strip() or len(query) > 500:
         raise ValueError("Search query must be 1-500 characters")
     # Substring fallback covers Chinese OCR without assuming an English tokenizer.
-    return conn.execute(
-        "SELECT u.id,u.document_id,u.chapter,u.section,u.pdf_page,u.printed_page,u.ocr_page,u.volume,u.ocr_global_page,u.original_part,u.original_page,u.verified,u.quality_flags,u.text "
-        "FROM source_units u WHERE to_tsvector('simple',text) @@ plainto_tsquery('simple',%s) OR strpos(text,%s)>0 ORDER BY u.id LIMIT %s",
+    from app.source_policy import current_source_sql
+
+    scope = " AND " + current_source_sql() if collection_only else ""
+    rows = conn.execute(
+        "SELECT u.id,u.document_id,u.ordinal,u.chapter,u.section,u.pdf_page,u.printed_page,u.ocr_page,u.volume,u.ocr_global_page,u.original_part,u.original_page,u.verified,u.quality_flags,u.text,d.file_id,d.sha256,d.metadata "
+        "FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE (to_tsvector('simple',u.text) @@ plainto_tsquery('simple',%s) OR strpos(u.text,%s)>0)"
+        + scope
+        + " ORDER BY u.id LIMIT %s",
         (query, query, min(limit, 50)),
     ).fetchall()
+    from app.ocr_sources import latest_review
+
+    for row in rows:
+        if row["metadata"].get("source_mode") == "ocr_only":
+            row["review_states"] = {
+                kind: latest_review(conn, row, kind)
+                for kind in ("text", "science", "uncertainty", "exam_style")
+            }
+    return rows
 
 
 def main():

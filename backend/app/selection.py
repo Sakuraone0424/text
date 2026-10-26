@@ -6,6 +6,7 @@ import math
 import random
 
 from app.dynamic_model import Policy, build_context, instant, topics
+from app.source_policy import current_source_sql
 
 
 def policy_for(conn, user_id, as_of):
@@ -133,7 +134,9 @@ def snapshot(conn, user_id, questions, as_of=None):
             }
         )
     dependencies = conn.execute(
-        "SELECT k.* FROM knowledge_dependencies k JOIN source_units u ON u.id=k.source_unit_id WHERE u.verified AND k.registered_at<=%s",
+        "WITH cutoff AS (SELECT %s::timestamptz AS at) SELECT k.* FROM knowledge_dependencies k JOIN source_units u ON u.id=k.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE u.verified AND "
+        + current_source_sql(at_sql="(SELECT at FROM cutoff)")
+        + " AND k.registered_at<=(SELECT at FROM cutoff)",
         (as_of,),
     ).fetchall()
     context = build_context(

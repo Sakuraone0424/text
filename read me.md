@@ -8,4 +8,4 @@
 
 [动态命题、证据边界与可重放设计](docs/dynamic-engine.md)
 
-[私有教材预检、分卷导入与授权交接](docs/private-source-intake.md)
+[当前六文件OCR-only预检、导入与交接](docs/private-source-intake.md)

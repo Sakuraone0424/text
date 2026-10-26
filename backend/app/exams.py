@@ -4,6 +4,9 @@ import hashlib
 from psycopg.types.json import Jsonb
 from app.question_quality import stem_key
 from app.source_files import original_available_sql
+from app.source_policy import current_source_sql
+
+CURRENT_SOURCE = current_source_sql()
 
 ORIGINAL_PRESENT = original_available_sql()
 
@@ -20,7 +23,8 @@ CATEGORIES = {
 
 def add(conn, record):
     unit = conn.execute(
-        "SELECT * FROM source_units WHERE id=%s", (record["source_unit_id"],)
+        "SELECT u.*,d.metadata FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
+        (record["source_unit_id"],),
     ).fetchone()
     if not unit:
         raise ValueError("Original transcript unit is missing")
@@ -28,6 +32,14 @@ def add(conn, record):
         raise ValueError("Exam stem does not match original source text")
     if record["category"] not in CATEGORIES:
         raise ValueError("Unknown exam analysis category")
+    if unit["metadata"].get("source_mode") == "ocr_only" and (
+        record.get("original_verified")
+        or record.get("complete_paper")
+        or record.get("answer_kind") == "official"
+    ):
+        raise ValueError(
+            "OCR transcription alone cannot establish original-exam or official-answer verification"
+        )
     if record.get("original_verified") and not unit["verified"]:
         raise ValueError("Original must be verified before asserting exam verification")
     if record.get("complete_paper") and not record.get("original_verified"):
@@ -77,9 +89,7 @@ def add(conn, record):
 
 def coverage(conn):
     rows = conn.execute(
-        "SELECT subject,year,COUNT(DISTINCT canonical_key) AS questions,bool_or(complete_paper AND original_verified) AS complete_original,"
-        "bool_or(original_verified) AS original_verified,bool_or(answer IS NULL) AS missing_answers,"
-        "bool_or(textbook_units='[]'::jsonb) AS missing_textbook_evidence FROM exam_records GROUP BY subject,year"
+        f"SELECT e.subject,e.year,COUNT(DISTINCT e.canonical_key) AS questions,bool_or(e.complete_paper AND e.original_verified) AS complete_original,bool_or(e.original_verified) AS original_verified,bool_or(e.answer IS NULL) AS missing_answers,bool_or(e.textbook_units='[]'::jsonb) AS missing_textbook_evidence FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE {CURRENT_SOURCE} GROUP BY e.subject,e.year"
     ).fetchall()
     found = {(r["subject"], r["year"]): r for r in rows}
     now = conn.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
@@ -97,7 +107,7 @@ def coverage(conn):
                 },
             )
             raw = conn.execute(
-                f"SELECT e.*,u.verified,{ORIGINAL_PRESENT} AS acquired FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.subject=%s AND e.year=%s",
+                f"SELECT e.*,u.verified,(d.metadata->>'source_mode'='ocr_only') AS ocr_only,{ORIGINAL_PRESENT} AS acquired FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.subject=%s AND e.year=%s AND {CURRENT_SOURCE}",
                 (subject, year),
             ).fetchall()
             effective = [
@@ -110,10 +120,14 @@ def coverage(conn):
                 and r["source_kind"] == "real_exam"
             ]
             row.update(
-                original_acquired=any(r["acquired"] for r in raw),
+                original_acquired=any(r["acquired"] and not r["ocr_only"] for r in raw),
+                ocr_transcription_file_acquired=any(
+                    r["acquired"] and r["ocr_only"] for r in raw
+                ),
                 text_extracted=bool(raw),
                 transcription_verified=any(
-                    r["verified"] and r["original_verified"] for r in raw
+                    r["verified"] and (r["original_verified"] or r["ocr_only"])
+                    for r in raw
                 ),
                 has_reference_answer=any(bool(r["answer"]) for r in raw),
                 has_official_answer_evidence=any(
@@ -194,10 +208,11 @@ def frequencies(conn):
 def trusted_records(conn, as_of):
     from app.dynamic_model import fractions
 
+    current = current_source_sql(at_sql="(SELECT at FROM cutoff)")
     rows = conn.execute(
-        f"SELECT e.*,u.verified AND e.original_verified AND d.subject=e.subject AND {ORIGINAL_PRESENT} AND d.original_sha256 IS NOT NULL AS trusted,d.imported_at AS source_available_at,d.id AS source_document_id,d.original_sha256 AS original_sha256 "
-        "FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.indexed_at<=%s AND d.imported_at<=%s",
-        (as_of, as_of),
+        f"WITH cutoff AS (SELECT %s::timestamptz AS at) SELECT e.*,u.verified AND e.original_verified AND d.subject=e.subject AND {ORIGINAL_PRESENT} AND {current} AND d.original_sha256 IS NOT NULL AS trusted,d.imported_at AS source_available_at,d.id AS source_document_id,d.original_sha256 AS original_sha256 "
+        "FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.indexed_at<=(SELECT at FROM cutoff) AND d.imported_at<=(SELECT at FROM cutoff)",
+        (as_of,),
     ).fetchall()
     annotations = {
         r["record_id"]: r
@@ -217,8 +232,8 @@ def trusted_records(conn, as_of):
     units = {
         r["id"]: r
         for r in conn.execute(
-            f"SELECT u.id,(u.verified AND {ORIGINAL_PRESENT}) AS verified,d.subject FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=ANY(%s) AND d.imported_at<=%s",
-            (unit_ids, as_of),
+            f"WITH cutoff AS (SELECT %s::timestamptz AS at) SELECT u.id,(u.verified AND {ORIGINAL_PRESENT} AND {current}) AS verified,d.subject FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=ANY(%s) AND d.imported_at<=(SELECT at FROM cutoff)",
+            (as_of, unit_ids),
         ).fetchall()
     }
     links = {}
@@ -294,6 +309,18 @@ def register_scope(conn, data):
 def validate_classification(conn, record, metadata):
     from app.dynamic_model import fractions
 
+    source = conn.execute(
+        "SELECT d.metadata FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
+        (record["source_unit_id"],),
+    ).fetchone()
+    if (
+        source
+        and source["metadata"].get("source_mode") == "ocr_only"
+        and metadata.get("source_kind") != "transcription"
+    ):
+        raise ValueError(
+            "OCR-only exam records must remain explicitly classified as transcription"
+        )
     scope = conn.execute(
         "SELECT subject FROM exam_scopes WHERE scope_key=%s",
         (metadata.get("scope_key"),),
@@ -311,11 +338,23 @@ def validate_classification(conn, record, metadata):
         mapped = set()
         for uid in record["textbook_units"]:
             row = conn.execute(
-                "SELECT u.verified,d.subject FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
+                "SELECT u.*,d.metadata,d.subject FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE u.id=%s",
                 (uid,),
             ).fetchone()
             if not row or not row["verified"] or row["subject"] != record["subject"]:
                 raise ValueError("Knowledge mapping unit is unavailable")
+            if row["metadata"].get("source_mode") == "ocr_only":
+                from app.ocr_sources import latest_review
+                from app.source_policy import active_document
+
+                if (
+                    not active_document(conn, row["document_id"])
+                    or not latest_review(conn, row, "text")
+                    or not latest_review(conn, row, "science")
+                ):
+                    raise ValueError(
+                        "OCR knowledge mapping requires current text and scientific review"
+                    )
             mapped.update(
                 r["tag"]
                 for r in conn.execute(
@@ -418,7 +457,7 @@ def style_issues(conn, content):
         return ["missing_exam_style_source"]
     for ref in refs:
         row = conn.execute(
-            f"SELECT e.*,(u.verified AND {ORIGINAL_PRESENT}) AS verified FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.id=%s",
+            f"SELECT e.*,d.id AS document_id,d.metadata,(u.verified AND {ORIGINAL_PRESENT} AND {CURRENT_SOURCE}) AS verified FROM exam_records e JOIN source_units u ON u.id=e.source_unit_id JOIN source_documents d ON d.id=u.document_id WHERE e.id=%s",
             (ref,),
         ).fetchone()
         if not row:
@@ -433,10 +472,27 @@ def style_issues(conn, content):
             "SELECT s.subject,u.verified FROM exam_scopes s JOIN source_units u ON u.id=s.source_unit_id WHERE s.scope_key=%s",
             (row["scope_key"],),
         ).fetchone()
+        source_ok = row["original_verified"] and row["source_kind"] == "real_exam"
+        if row["metadata"].get("source_mode") == "ocr_only":
+            from app.ocr_sources import latest_review
+
+            unit = conn.execute(
+                "SELECT * FROM source_units WHERE id=%s", (row["source_unit_id"],)
+            ).fetchone()
+            source_ok = (
+                not row["original_verified"]
+                and row["source_kind"] == "transcription"
+                and latest_review(conn, unit, "text")
+                and latest_review(conn, unit, "exam_style")
+                and (
+                    not unit["quality_flags"]
+                    or latest_review(conn, unit, "uncertainty")
+                )
+                and row["metadata"].get("source_kind") == "exam_transcription"
+            )
         if (
             not row["verified"]
-            or not row["original_verified"]
-            or row["source_kind"] != "real_exam"
+            or not source_ok
             or not scope
             or not scope["verified"]
             or scope["subject"] != content["subject"]

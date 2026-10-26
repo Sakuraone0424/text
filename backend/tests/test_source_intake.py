@@ -330,12 +330,19 @@ def test_multipart_evidence_still_requires_review_and_exact_mapping(
         "synthetic-test-reviewer",
         "Synthetic PDF mapping reviewed only inside rollback-only automated test",
     )
-    assert not sources.evidence_issues(db, data)
-    assert not sources.evidence_issues(db, data, verify_original=False)
+    assert set(sources.evidence_issues(db, data)) == {
+        "outside_current_six_file_collection_or_superseded",
+        "missing_current_textbook_evidence",
+    }
+    assert set(sources.evidence_issues(db, data, verify_original=False)) == {
+        "outside_current_six_file_collection_or_superseded",
+        "missing_current_textbook_evidence",
+    }
     question = type(question).model_validate(data)
     qid = quiz_v2.create_question(db, question)["id"]
-    assert quiz_v2.review_question(db, qid, passing_audit)["passed"]
-    quiz_v2.publish_question(db, qid)
+    assert not quiz_v2.review_question(db, qid, passing_audit)["passed"]
+    with pytest.raises(ValueError):
+        quiz_v2.publish_question(db, qid)
     db.execute("UPDATE source_units SET original_page=2 WHERE id=%s", (unit["id"],))
     assert "textbook_page_mismatch" in sources.evidence_issues(db, data)
     assert "textbook_page_mismatch" in sources.evidence_issues(
@@ -380,11 +387,13 @@ def test_multipart_original_is_recognized_by_exam_coverage_and_style_gate(
         "Synthetic original checked inside this isolated rollback test",
     )
     exams.add(db, record)
-    assert next(
+    assert not next(
         r
         for r in exams.coverage(db)
         if r["subject"] == "cell_biology" and r["year"] == 2024
-    )["original_acquired"]
+    )[
+        "original_acquired"
+    ]  # Optional PDF tool data is outside the active six-file bank.
     assert not any(
         r["trusted"] and r["source_kind"] == "real_exam"
         for r in exams.trusted_records(
@@ -434,7 +443,9 @@ def test_multipart_original_is_recognized_by_exam_coverage_and_style_gate(
             "SELECT id FROM exam_records WHERE source_unit_id=%s", (unit["id"],)
         ).fetchone()["id"]
     ]
-    assert not exams.style_issues(db, question)
+    assert exams.style_issues(db, question) == [
+        "unverified_or_mismatched_exam_style_source"
+    ]
 
 
 def cli_files(tmp_path):
@@ -717,7 +728,7 @@ def test_migration_010_preserves_existing_verified_single_source(raw_db, tmp_pat
     apply_migrations(raw_db)
     assert (
         raw_db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"]
-        == 10
+        == 11
     )
 
 
