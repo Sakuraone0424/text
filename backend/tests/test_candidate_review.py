@@ -444,8 +444,8 @@ def test_authenticated_backup_refresh_retains_old_snapshot(
         (destination / "new.zip").write_bytes(b"synthetic new backup")
         info = dict(
             filename="new.zip",
-            sha256="a" * 64,
-            bytes=20,
+            sha256=review_backup.checksum(destination / "new.zip"),
+            bytes=len(b"synthetic new backup"),
             snapshot_at="2026-10-26T00:00:00+00:00",
             restore_warning="Synthetic only",
         )
@@ -476,7 +476,7 @@ def test_private_backup_uses_allowlist_auth_and_no_store(
         json.dumps(
             dict(
                 filename=archive.name,
-                sha256="a" * 64,
+                sha256=__import__("hashlib").sha256(archive.read_bytes()).hexdigest(),
                 bytes=archive.stat().st_size,
                 restore_warning="Synthetic only",
             )

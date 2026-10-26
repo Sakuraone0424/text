@@ -204,6 +204,35 @@ def inspect(conn, key):
         ).fetchone()["status"]
         == "published"
     )
+    from app.question_quality import similarity
+
+    related = []
+    for other in conn.execute(
+        "SELECT p.candidate_key,p.question_snapshot FROM candidate_review_packets p WHERE p.candidate_key<>%s AND NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key)",
+        (key,),
+    ).fetchall():
+        question = other["question_snapshot"]
+        common = sorted(
+            {
+                a
+                for a in row["question_snapshot"]["knowledge_tags"]
+                for b in question["knowledge_tags"]
+                if a == b or a.startswith(b + "/") or b.startswith(a + "/")
+            }
+        )
+        score = similarity(row["question_snapshot"]["stem"], question["stem"])
+        related.append(
+            dict(
+                candidate_key=other["candidate_key"],
+                stem=question["stem"],
+                similarity=round(score, 4),
+                common_tags=common,
+                automated_only=True,
+            )
+        )
+    row["related_candidates"] = sorted(
+        related, key=lambda r: (bool(r["common_tags"]), r["similarity"]), reverse=True
+    )[:5]
     row["style_context"] = []
     for style in row["style_snapshot"]:
         contextual = conn.execute(
@@ -274,6 +303,25 @@ def decide(conn, key, reviewer, data):
         return prior
     if row["superseded_by"]:
         raise ValueError("This draft has a newer revision; open the latest packet")
+    from app.review_notes import latest, mark_submitted
+
+    note = latest(conn, key, reviewer)
+    if (
+        data.get("expected_note_version") is not None
+        and data["expected_note_version"] != note["version"]
+    ):
+        raise ValueError(
+            "Unsigned opinion changed on another device; reload before signing"
+        )
+    if (
+        data.get("expected_note_version") is not None
+        and note["version"]
+        and (
+            note["note"].strip() != data["note"].strip()
+            or note["checks"] != data["checks"]
+        )
+    ):
+        raise ValueError("Save the latest opinion before signing")
     if (
         data["revision_sha256"] != row["revision_sha256"]
         or data["expected_last_decision_id"] != row["last_decision_id"]
@@ -292,8 +340,8 @@ def decide(conn, key, reviewer, data):
             or current["unit_sha256"] != u["unit_sha256"]
         ):
             raise ValueError("Source version changed; review is stale")
-    return conn.execute(
-        "INSERT INTO candidate_human_decisions(candidate_key,revision_sha256,reviewer,action,checks,note,human_attestation,request_id) VALUES (%s,%s,%s,%s,%s,%s,true,%s) RETURNING *",
+    decision = conn.execute(
+        "INSERT INTO candidate_human_decisions(candidate_key,revision_sha256,reviewer,action,checks,note,human_attestation,request_id,note_draft_id) VALUES (%s,%s,%s,%s,%s,%s,true,%s,%s) RETURNING *",
         (
             key,
             row["revision_sha256"],
@@ -302,8 +350,11 @@ def decide(conn, key, reviewer, data):
             Jsonb(data["checks"]),
             data["note"].strip(),
             data["request_id"],
+            note.get("id"),
         ),
     ).fetchone()
+    mark_submitted(conn, key, reviewer, row, decision["id"])
+    return decision
 
 
 def summary(conn):
@@ -311,6 +362,7 @@ def summary(conn):
         "SELECT p.candidate_key,p.question_snapshot->>'subject' AS subject,p.question_snapshot->>'question_type' AS type,(SELECT action FROM candidate_human_decisions d WHERE d.candidate_key=p.candidate_key ORDER BY id DESC LIMIT 1) AS action FROM candidate_review_packets p WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) ORDER BY p.candidate_key"
     ).fetchall()
     qualified = 0
+    qualified_by = {}
     from app.sources import evidence_issues
     from app.exams import style_issues
 
@@ -329,6 +381,37 @@ def summary(conn):
             and not style_issues(conn, q["content"])
         ):
             qualified += 1
+            pair = (q["content"]["subject"], q["content"]["question_type"])
+            qualified_by[pair] = qualified_by.get(pair, 0) + 1
+    from app.training_spec import SUBJECTS, COUNTS
+
+    breakdown = []
+    for subject in SUBJECTS:
+        for kind, required in COUNTS.items():
+            group = [r for r in rows if r["subject"] == subject and r["type"] == kind]
+            breakdown.append(
+                dict(
+                    subject=subject,
+                    type=kind,
+                    total=len(group),
+                    approved=sum(r["action"] == "approve_candidate" for r in group),
+                    returned=sum(r["action"] == "return" for r in group),
+                    revision_requested=sum(r["action"] == "revise" for r in group),
+                    untouched=sum(r["action"] is None for r in group),
+                    formal_qualified=qualified_by.get((subject, kind), 0),
+                    required=required,
+                )
+            )
+    from app.ocr_sources import review_snapshot
+    from app.source_policy import current_source_sql
+
+    reviewed_units = conn.execute(
+        "SELECT DISTINCT u.* FROM source_units u JOIN source_documents d ON d.id=u.document_id JOIN source_review_events e ON e.unit_id=u.id WHERE e.review_kind='science' AND d.metadata->>'source_kind'='textbook' AND "
+        + current_source_sql()
+    ).fetchall()
+    source_science = sum(
+        r.get("science", False) for r in review_snapshot(conn, reviewed_units).values()
+    )
     return dict(
         candidates=rows,
         ai_assisted=len(rows),
@@ -340,5 +423,7 @@ def summary(conn):
         ),
         human_candidate_approved=sum(r["action"] == "approve_candidate" for r in rows),
         formal_qualified=qualified,
+        by_subject_type=breakdown,
+        textbook_science_reviewed_units=source_science,
         formal_qualification_note="Candidate decisions do not replace source, style, relation or final publication gates",
     )

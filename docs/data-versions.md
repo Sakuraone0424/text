@@ -1,5 +1,7 @@
 # 资料版本与有效性
 
+最新私有备份、手机续审与未开放入口见[2026-10-27验收](mobile-private-access-20261027.md)。016追加草稿/续审位置/可撤销会话；001—015不变，真实人工与正式发布仍0。
+
 首批题稿采用不可变candidate_review_packets、追加candidate_human_decisions和candidate_revision_links（014—015）。AI分析与人工决定分表；新版本不继承批准，旧版本不可发布。38个有效题稿、45份历史版本均不改变教材SHA/索引或既有213342工作项。详见[首批候选](first-candidate-batch.md)。
 
 审核准备覆盖层：evidence-work/1.6、transcript-review/1.4，不改变ocr-index/1.1原导入索引或原文SHA。013新增不可变pending队列；001—012保持原字节。每次分析快照可追溯，当前进度按版本过滤；辅助分析不是source_review_events人工签署。补充映射版本refined-exam-mapping/1.0单独保存。详见[当前进度](review-progress-20261026.md)。

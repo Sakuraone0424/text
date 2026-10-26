@@ -28,6 +28,10 @@ let session = null,
   items = [],
   current = null,
   backup = null;
+let opinion = null,
+  opening = 0,
+  signing = false,
+  localKeys = new Set();
 function text(tag, value, parent, cls) {
   const e = document.createElement(tag);
   e.textContent = value;
@@ -47,11 +51,13 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     let data = await response.json().catch(() => ({ detail: "服务暂不可用" }));
-    throw new Error(
+    const error = new Error(
       typeof data.detail === "string"
         ? data.detail
         : JSON.stringify(data.detail),
     );
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -76,12 +82,32 @@ async function enter() {
   $("workspace").hidden = false;
   $("logout").hidden = false;
   await load();
+  const position = await api("/api/position");
+  $("subject").value = position.subject_filter;
+  $("type").value = position.type_filter;
+  await refreshLocalKeys();
+  if (
+    position.candidate_key &&
+    items.some((i) => i.candidate_key === position.candidate_key)
+  )
+    await open(position.candidate_key);
 }
 async function load() {
   const data = await api("/api/candidates");
   items = data.candidates;
   $("summary").textContent =
     `AI辅助草稿 ${data.ai_assisted} · 等待处理 ${data.pending} · 人工候选通过 ${data.human_candidate_approved} · 正式合格 ${data.formal_qualified}`;
+  $("summary").textContent +=
+    " · 教材科学审核 " + data.textbook_science_reviewed_units;
+  const progress = $("type-progress");
+  progress.replaceChildren();
+  (data.by_subject_type || []).forEach((r) =>
+    text(
+      "p",
+      `${labels[r.subject]} · ${labels[r.type]}：候选${r.total}，人工通过${r.approved}，未处理${r.untouched}，退回${r.returned}，需修改${r.revision_requested}，正式合格${r.formal_qualified}/${r.required}`,
+      progress,
+    ),
+  );
   list();
 }
 function list() {
@@ -94,7 +120,7 @@ function list() {
   )) {
     const b = text(
       "button",
-      `${labels[row.subject]} · ${labels[row.type]} · ${row.candidate_key} · ${labels[row.action] || "待审"}`,
+      `${labels[row.subject]} · ${labels[row.type]} · ${row.candidate_key} · ${labels[row.action] || "待审"}${localKeys.has(row.candidate_key) ? " · 本机待同步" : ""}`,
       root,
     );
     b.type = "button";
@@ -106,7 +132,19 @@ function list() {
   }
 }
 async function open(key) {
-  current = await api("/api/candidates/" + encodeURIComponent(key));
+  if (signing && key !== current?.candidate_key)
+    throw new Error("正在保存人工决定，请稍后切换");
+  const sequence = ++opening;
+  if (opinion && opinion.dirty) {
+    await opinion.persist().catch(() => {});
+    await opinion
+      .flush()
+      .catch((e) => message("上一题意见未覆盖，已保留加密草稿。" + e.message));
+  }
+  const packet = await api("/api/candidates/" + encodeURIComponent(key));
+  if (sequence !== opening) return;
+  current = packet;
+  opinion = null;
   const q = current.question_snapshot,
     root = $("detail");
   root.replaceChildren();
@@ -148,7 +186,11 @@ async function open(key) {
     const d = document.createElement("details");
     d.open = true;
     root.append(d);
-    text("summary", `${e.chapter} · OCR ${e.ocr_page} · 单元 ${e.unit_id}`, d);
+    text(
+      "summary",
+      `${q.evidence[i].textbook} · ${e.chapter} · OCR ${e.ocr_page} · 单元 ${e.unit_id}`,
+      d,
+    );
     text("p", `${e.file_id} · SHA ${e.source_sha256}`, d);
     text("p", e.section, d);
     text("pre", q.evidence[i].excerpt, d);
@@ -205,6 +247,18 @@ async function open(key) {
   for (const [k, v] of Object.entries(analysis.axes))
     text("p", `${checks[k]}：${v}`, root);
   text("pre", analysis.uncertainties.join("\n"), root, "warning");
+  text("h3", "与其他候选题的重复线索", root);
+  text("p", "以下仅为文字相似或共同考点提示，不代表已完成唯一性审核。", root);
+  for (const related of current.related_candidates || []) {
+    const b = text(
+      "button",
+      `${related.candidate_key} · 文字相似${Math.round(related.similarity * 100)}%${related.common_tags.length ? " · 共同考点：" + related.common_tags.join("、") : ""} · ${related.stem}`,
+      root,
+    );
+    b.type = "button";
+    b.onclick = () =>
+      open(related.candidate_key).catch((e) => message(e.message));
+  }
   text("h3", "人工逐项确认", root);
   const confirm = text("div", "", root, "checks");
   for (const k of session.checks) {
@@ -226,7 +280,17 @@ async function open(key) {
   const noteLabel = text("label", "审核依据与修改意见（至少20字）", root);
   const note = document.createElement("textarea");
   note.id = "note";
+  note.maxLength = 5000;
   noteLabel.append(note);
+  const status = text("p", "意见尚未暂存；暂存不会签署审核。", root);
+  status.id = "note-status";
+  status.setAttribute("role", "status");
+  const conflicts = text("div", "", root, "warning");
+  conflicts.id = "note-conflict";
+  conflicts.hidden = true;
+  const draftButton = text("button", "保存草稿（不签署）", root);
+  draftButton.type = "button";
+  draftButton.onclick = () => opinion.flush().catch((e) => message(e.message));
   const actions = text("div", "", root, "actions");
   for (const [action, label] of [
     ["approve_candidate", "通过候选审核"],
@@ -245,6 +309,28 @@ async function open(key) {
       root,
     ),
   );
+  const movement = text("div", "", root, "actions");
+  for (const [direction, label] of [
+    [-1, "上一题"],
+    [1, "下一题"],
+  ]) {
+    const b = text("button", label, movement);
+    b.type = "button";
+    b.onclick = () => move(direction).catch((e) => message(e.message));
+  }
+  const reviewer = session.reviewer;
+  opinion = new ReviewOpinion(
+    reviewer,
+    current,
+    (path, options) => {
+      if (session?.reviewer !== reviewer)
+        throw new Error("审核账号已改变，请重新登录");
+      return api(path, options);
+    },
+    root,
+  );
+  await opinion.start();
+  await remember();
   list();
 }
 async function save(action) {
@@ -260,20 +346,30 @@ async function save(action) {
     throw new Error("通过前请逐项完成核对");
   if ($("note").value.trim().length < 20)
     throw new Error("请写明至少20字的审核依据或修改意见");
+  const target = current,
+    controller = opinion;
+  signing = true;
+  document
+    .querySelectorAll("#detail input,#detail textarea")
+    .forEach((e) => (e.disabled = true));
   document
     .querySelectorAll(".actions button")
     .forEach((b) => (b.disabled = true));
   try {
+    await controller.flush();
+    if (current !== target || !$("attest").checked)
+      throw new Error("请在当前题目重新确认本人签署");
     await api(
       "/api/candidates/" +
-        encodeURIComponent(current.candidate_key) +
+        encodeURIComponent(target.candidate_key) +
         "/decision",
       {
         method: "POST",
         body: JSON.stringify({
           action,
-          revision_sha256: current.revision_sha256,
-          expected_last_decision_id: current.last_decision_id,
+          revision_sha256: target.revision_sha256,
+          expected_last_decision_id: target.last_decision_id,
+          expected_note_version: controller.version,
           checks: checked,
           note: $("note").value.trim(),
           human_attestation: true,
@@ -282,9 +378,14 @@ async function save(action) {
       },
     );
     message("已保存人工记录；题目仍未发布。");
+    controller.dirty = false;
     await load();
     await open(current.candidate_key);
   } finally {
+    signing = false;
+    document
+      .querySelectorAll("#detail input,#detail textarea")
+      .forEach((e) => (e.disabled = false));
     document
       .querySelectorAll(".actions button")
       .forEach((b) => (b.disabled = false));
@@ -307,18 +408,36 @@ $("login").onsubmit = async (e) => {
 };
 $("logout").onclick = async () => {
   try {
+    if (opinion && opinion.dirty) {
+      await opinion.persist();
+      await opinion.flush();
+    }
     await api("/api/logout", { method: "POST" });
+    session = null;
+    opinion = null;
     location.reload();
   } catch (e) {
     message(e.message);
   }
 };
-$("subject").onchange = list;
-$("type").onchange = list;
+$("subject").onchange = () => {
+  list();
+  remember().catch(() => {});
+};
+$("type").onchange = () => {
+  list();
+  remember().catch(() => {});
+};
 $("preview").onclick = async () => {
   try {
+    if (signing) return;
+    if (opinion?.dirty) {
+      await opinion.persist();
+      await opinion.flush().catch(() => {});
+    }
     const data = await api("/api/preview");
     const root = $("detail");
+    opinion = null;
     root.replaceChildren();
     text("h2", data.label, root);
     text(
@@ -372,6 +491,55 @@ $("verify-file").onchange = async (e) => {
   }
 };
 enter().catch(() => message("请先登录审核账号。"));
+
+async function remember() {
+  if (!session) return;
+  await api("/api/position", {
+    method: "POST",
+    keepalive: true,
+    body: JSON.stringify({
+      candidate_key: current?.candidate_key || null,
+      subject_filter: $("subject").value,
+      type_filter: $("type").value,
+    }),
+  });
+}
+async function refreshLocalKeys() {
+  if (!session) return;
+  localKeys = new Set(
+    await ReviewVault.pending(session.reviewer).catch(() => []),
+  );
+  list();
+}
+async function move(direction) {
+  const filtered = items.filter(
+    (r) =>
+      (!$("subject").value || r.subject === $("subject").value) &&
+      (!$("type").value || r.type === $("type").value),
+  );
+  const at = filtered.findIndex(
+    (r) => r.candidate_key === current?.candidate_key,
+  );
+  const next = filtered[at + direction];
+  if (next) await open(next.candidate_key);
+  else message("已到当前列表边界。");
+}
+window.addEventListener("review-opinion-buffer", () =>
+  refreshLocalKeys().catch(() => {}),
+);
+window.addEventListener("online", () => opinion?.flush().catch(() => {}));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && opinion?.dirty) {
+    opinion.persist().catch(() => {});
+    opinion.flush().catch(() => {});
+  }
+});
+window.addEventListener("beforeunload", (event) => {
+  if (opinion?.dirty) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
 
 $("refresh-backup").onclick = async () => {
   const button = $("refresh-backup");

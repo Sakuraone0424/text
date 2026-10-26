@@ -87,7 +87,7 @@ def live_review(tmp_path):
 
 @pytest.mark.parametrize("width,height", [(390, 844), (820, 1180)])
 def test_touch_reviewer_complete_synthetic_flow(live_review, tmp_path, width, height):
-    from playwright.sync_api import sync_playwright,expect
+    from playwright.sync_api import sync_playwright, expect
 
     with sync_playwright() as p:
         executable = shutil.which("chromium") or shutil.which("chromium-browser")
@@ -107,6 +107,37 @@ def test_touch_reviewer_complete_synthetic_flow(live_review, tmp_path, width, he
         assert page.evaluate(
             "document.documentElement.scrollWidth <= window.innerWidth"
         )
+        # Unsigned opinions survive page reload; a declaration is never restored.
+        opinion = "Synthetic persisted unsigned opinion on test-only evidence"
+        page.locator("#note").fill(opinion)
+        expect(page.locator("#note-status")).to_contain_text(
+            "已保存到服务器", timeout=10000
+        )
+        page.reload()
+        expect(page.locator("#note")).to_have_value(opinion)
+        assert not page.locator("#attest").is_checked()
+        # Block saves to simulate connectivity loss; only encrypted local buffer survives.
+        page.route(
+            "**/api/candidates/*/note",
+            lambda route: (
+                route.abort() if route.request.method == "POST" else route.continue_()
+            ),
+        )
+        offline = "Synthetic encrypted offline opinion awaiting synchronization"
+        page.locator("#note").fill(offline)
+        expect(page.locator("#note-status")).to_contain_text("未同步", timeout=10000)
+        cached = page.evaluate(
+            "ReviewVault.get('synthetic-reviewer','synthetic-first-1')"
+        )
+        assert cached["note"] == offline
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.reload()
+        expect(page.locator("#note")).to_have_value(offline)
+        page.unroute("**/api/candidates/*/note")
+        page.get_by_role("button", name="保存草稿（不签署）", exact=True).click()
+        expect(page.locator("#note-status")).to_contain_text(
+            "已保存到服务器", timeout=10000
+        )
         for box in page.locator("[data-check]").all():
             box.check()
         page.locator("#attest").check()
@@ -115,7 +146,7 @@ def test_touch_reviewer_complete_synthetic_flow(live_review, tmp_path, width, he
         )
         page.get_by_role("button", name="通过候选审核", exact=True).click()
         page.get_by_text("已保存人工记录；题目仍未发布。", exact=True).wait_for()
-        expect(page.locator('#summary')).to_contain_text('人工候选通过 1')
+        expect(page.locator("#summary")).to_contain_text("人工候选通过 1")
         assert "正式合格 0" in page.locator("#summary").inner_text()
         page.screenshot(
             path=str(tmp_path / f"synthetic-review-{width}.png"), full_page=True

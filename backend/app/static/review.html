@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>私有候选题审核</title>
     <link rel="stylesheet" href="/review.css" />
+    <script defer src="/review-vault.js"></script>
+    <script defer src="/review-opinions.js"></script>
     <script defer src="/review.js"></script>
   </head>
   <body>
@@ -33,6 +35,10 @@
       </form>
       <section id="workspace" hidden>
         <p id="summary"></p>
+        <details>
+          <summary>分学科、题型审核进度</summary>
+          <div id="type-progress"></div>
+        </details>
         <nav>
           <label
             >学科<select id="subject">

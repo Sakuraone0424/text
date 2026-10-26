@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import zipfile
+import tempfile
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
@@ -18,6 +19,54 @@ def checksum(path):
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def verify_package(archive, index, pg_bin):
+    """Read-only archive check, not a claim of database restore success."""
+    archive = Path(archive)
+    if archive.stat().st_size != index["bytes"] or checksum(archive) != index["sha256"]:
+        raise ValueError("Backup ZIP SHA or size mismatch")
+    with zipfile.ZipFile(archive) as z:
+        if len(z.infolist()) != 3 or set(z.namelist()) != {
+            "database.dump",
+            "database-manifest.json",
+            "RESTORE.txt",
+        }:
+            raise ValueError(
+                "Unexpected files: credentials/configs must never be included"
+            )
+        if any(i.file_size > 2 * 1024**3 for i in z.infolist()):
+            raise ValueError("Backup member too large")
+        manifest = json.loads(z.read("database-manifest.json"))
+        with tempfile.TemporaryDirectory(
+            prefix="verify-private-", dir=archive.parent
+        ) as temp:
+            dump = Path(temp) / "database.dump"
+            with dump.open("xb") as target, z.open("database.dump") as source:
+                dump.chmod(0o600)
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    target.write(chunk)
+            if (
+                dump.stat().st_size != manifest["dump_bytes"]
+                or checksum(dump) != manifest["dump_sha256"]
+            ):
+                raise ValueError("Inner dump checksum mismatch")
+            # Decode all SQL without emitting private text to logs.
+            subprocess.run(
+                [str(Path(pg_bin) / "pg_restore"), "--file=/dev/null", str(dump)],
+                capture_output=True,
+                check=True,
+            )
+        if z.testzip() is not None:
+            raise ValueError("ZIP CRC mismatch")
+    return dict(
+        zip_sha256=index["sha256"],
+        dump_sha256=manifest["dump_sha256"],
+        members_allowlisted=True,
+        archive_fully_decoded=True,
+        restored_database_tested=False,
+        contains_credentials_files=False,
+    )
 
 
 def export(destination, schema, pg_bin, expected_database):
@@ -76,6 +125,8 @@ def export(destination, schema, pg_bin, expected_database):
                 "--format=custom",
                 "--no-owner",
                 "--no-acl",
+                "--schema=" + schema,
+                "--exclude-table-data=" + schema + ".reviewer_sessions",
                 "--snapshot=" + snapshot["snapshot"],
                 "--file=" + str(dump),
             ],
@@ -94,6 +145,11 @@ def export(destination, schema, pg_bin, expected_database):
             (schema,),
         ).fetchall():
             hashes = []
+            if r["tablename"] == "reviewer_sessions":
+                tables[r["tablename"]] = dict(
+                    rows=0, sorted_jsonb_row_sha256=hashlib.sha256(b"").hexdigest()
+                )
+                continue
             with c.cursor(name="handoff_table_hash") as cur:
                 cur.execute(
                     sql.SQL("SELECT to_jsonb(t)::text AS row FROM {} t").format(
@@ -124,6 +180,9 @@ def export(destination, schema, pg_bin, expected_database):
                 "SELECT file_id,sha256 FROM source_documents ORDER BY id"
             ).fetchall(),
             off_host_transfer=False,
+            excluded_runtime_table_data=["reviewer_sessions"],
+            authentication_sessions_restored=False,
+            dump_scope="selected_isolated_schema_only",
             hash_method="UTC PostgreSQL17 to_jsonb(row)::text; SHA256 each row; sort row hex hashes; SHA256 concatenation",
         )
     private_json(destination / "database-manifest.json", manifest)
