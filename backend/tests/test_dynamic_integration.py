@@ -595,7 +595,7 @@ def test_public_contract_exposes_only_v2_training_and_schema_readiness(client):
         "points": 150,
         "duration_seconds": 3600,
     }
-    assert health["migration_count"] == 12
+    assert health["migration_count"] == 13
 
 
 def test_preparation_pause_preserves_current_session_and_does_not_restore_legacy(

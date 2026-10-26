@@ -1,5 +1,7 @@
 # 开发验收与真实资料状态
 
+最新科学审核准备阶段见 [2026-10-26逐章/逐年进度](review-progress-20261026.md) 和 [保护与接续](review-continuity.md)。原库未重建、六文件未重复导入；001—012保持不变，013仅追加pending工作表。此前真实导入报告作为历史基线保留。当前已确认知识点/人工核对真题/正式题目均0，不以辅助分析替代真正审核。
+
 2026-10-26（Asia/Shanghai）。延续分支 `feat/reviewed-dual-subject-28` 和 [草稿PR #1](https://github.com/Sakuraone0424/text/pull/1)。本轮基线为 `4b070e2a2119c55e33432ac90f04bcb5edd69f47` 的237项测试；已优先完成用户ZIP真实六文件交接、预检、明确授权的独立本地入库及读回，详见 [真实资料验收](real-source-acceptance.md)。
 
 ## 本轮实际实现

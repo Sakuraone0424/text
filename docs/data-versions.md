@@ -1,5 +1,7 @@
 # 资料版本与有效性
 
+审核准备覆盖层：evidence-work/1.6、transcript-review/1.4，不改变ocr-index/1.1原导入索引或原文SHA。013新增不可变pending队列；001—012保持原字节。每次分析快照可追溯，当前进度按版本过滤；辅助分析不是source_review_events人工签署。补充映射版本refined-exam-mapping/1.0单独保存。详见[当前进度](review-progress-20261026.md)。
+
 当前清单：ocr-corrected-2026-10-26-v1；目录及六个身份见 [ocr_collection.json](../backend/app/ocr_collection.json)。文件ID是定位信息，SHA只能在合法取得实际字节后计算；不把用户报告已定位等同Codex已读。
 
 - 四本校订TXT分别654、587、289、385连续OCR页，合计1915；无192＋193重置，无PDF/印刷页核验声明。
