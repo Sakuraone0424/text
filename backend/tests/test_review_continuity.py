@@ -32,6 +32,7 @@ def test_opinion_history_conflicts_and_signing(db, reviewer, packet):
     )
     with pytest.raises(RaiseException), db.transaction():
         db.execute("UPDATE reviewer_note_versions SET note='changed'")
+    assert reviewer.post(url + "/decision", json=decision(row)).status_code == 409
     signed = decision(row, expected_note_version=0, note=body["note"])
     assert reviewer.post(url + "/decision", json=signed).status_code == 409
     signed.update(expected_note_version=1, human_attestation=False)

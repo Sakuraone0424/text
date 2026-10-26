@@ -307,6 +307,12 @@ def decide(conn, key, reviewer, data):
 
     note = latest(conn, key, reviewer)
     if (
+        note["version"]
+        and note["state"] == "editing"
+        and data.get("expected_note_version") is None
+    ):
+        raise ValueError("Current unsigned opinion version is required before signing")
+    if (
         data.get("expected_note_version") is not None
         and data["expected_note_version"] != note["version"]
     ):
