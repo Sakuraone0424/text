@@ -63,6 +63,12 @@ def parse_pages(text, metadata):
             raise ValueError(
                 "Printed page labels must be explicit nonempty strings, never guessed"
             )
+    layout = None
+    if metadata.get("source_mode") == "ocr_only":
+        from app.source_structure import book_layout
+
+        layout = book_layout(text, PAGE)
+    marker_index = 0
     volume, previous, page = 0, 0, None
     chapter, section = metadata.get("chapter", "unclassified"), ""
     rows, pages, buffer = [], [], []
@@ -100,10 +106,18 @@ def parse_pages(text, metadata):
                 )
             buffer.clear()
 
-    for line in text.splitlines():
+    for line_index, line in enumerate(text.splitlines()):
         match = PAGE.fullmatch(line)
         if match:
             flush()
+            marker_index += 1
+            if layout:
+                if marker_index in layout["toc_pages"]:
+                    chapter = "unclassified"
+                    section = "contents"
+                elif marker_index - 1 in layout["toc_pages"]:
+                    chapter = "unclassified"
+                    section = ""
             current = int(
                 next(v for v in match.groups() if v is not None and v.isdecimal())
             )
@@ -150,10 +164,17 @@ def parse_pages(text, metadata):
             raise ValueError(
                 "Malformed OCR page delimiter; expected ===== page-001 ====="
             )
-        if HEADING.match(line.strip()):
+        in_toc = bool(layout and marker_index in layout["toc_pages"])
+        if layout and line_index in layout["headings"] and not in_toc:
+            new_chapter = layout["headings"][line_index]
+            if chapter != new_chapter:
+                flush()
+                chapter = new_chapter
+                section = ""
+        if HEADING.match(line.strip()) and not in_toc:
             flush()
             section = line.strip()
-            if re.match(r"^第.+章", line.strip()):
+            if not layout and re.match(r"^第.+章", line.strip()):
                 chapter = section
         if not line.strip():
             flush()

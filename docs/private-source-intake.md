@@ -19,11 +19,19 @@
 
 ## 当前真实接入状态
 
-用户已在其ChatGPT连接中定位并抽查六份文件；Codex独立检查没有可用Drive读取工具、凭据或身份，不能继承另一个执行环境的权限，也未尝试匿名下载。当前Codex真实文件读取0、预检通过0、入库0、正文人工审核0、题目发布0。
+用户已通过私有ZIP交接六文件，本轮无需访问Drive。实际六文件SHA/字节长度全部匹配manifest，预检6/6；用户明确授权后导入独立本地PostgreSQL `ustc_ocr_staging_20261026`，schema `source_staging_real_20261026`，独立新连接读回6/6。正文人工/科学审核均0，发布题目0。详见 [真实资料验收](real-source-acceptance.md)。这不证明远端Drive身份、原始试卷或科学内容已核验。
 
-私有交接清单 `/workspace/private-intake/handoff.json` 已更新为当前六文件，旧清单已归档为失效历史。真实缺文件报告在 `/workspace/private-intake/corrected-six-preflight-blocked.json`。它们在checkout之外、0600权限，不提交Git。旧合成PDF或旧OCR不会被搜索为替代来源。
+私有文件与报告位于checkout之外 `/workspace/private-intake/real-handoff-20261026`，目录0700、文件0600；`handoff-verification.json`保存实际manifest/archive SHA，`analysis-final`保存逐章/逐年/风险报告及待审映射。旧缺文件报告仅为历史结果，不再代表当前状态。原文、ZIP、manifest和包含摘录的报告都不提交GitHub。
 
-若当前Codex不能使用既有私有连接，只需用户通过已有合法方式提供**上述六个文件**，可在checkout之外按目录树交接。无需PDF、分卷、额外OCR或其他材料，也不要把Drive文件改为公开。文件字节取得后才能计算真实SHA和判断实际内容；不能先给文件猜哈希。
+可复现交接命令（新目录，不覆盖旧证据）：
+
+```sh
+cd backend
+python -m app.handoff_bundle /private/handoff.zip --destination /private/new-handoff
+python -m app.local_corpus /private/new-handoff --destination /private/new-handoff/analysis
+```
+
+解压先验证路径、六个身份、全部SHA/长度及有界ZIP展开，再创建目标目录；拒绝目录外文件、符号链接、重复条目和未知来源。正文索引识别真实数字目录、分行章标题与Word自动编号；目录页码不作OCR页码。`analysis/config`是绑定实际manifest SHA的导入元数据，继续使用下方显式隔离导入流程。`python -m app.pending_mappings FILE.jsonl --schema source_staging_NAME --target development`仅导入待审建议，须设置同一明确授权的 `SOURCE_STAGING_DATABASE_URL`；不创建正式知识链接或批准记录。
 
 ## 状态必须分开
 

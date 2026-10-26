@@ -32,7 +32,7 @@ def flags(text, initial=None):
     result = set(initial or [])
     for pattern, flag in [
         (r"\ufffd|\x00", "corrupt_ocr"),
-        (r"见图|如图|图像|照片|\[图片\]|\[图\]", "image_dependent"),
+        (r"见图|如图|图像|照片|原图|图示|封面图|\[图片\]|\[图\]", "image_dependent"),
         (r"结构式|化学结构", "chemical_structure"),
         (r"见表|如下表|\t|\|.+\|", "complex_table"),
         (r"\?\?\?|□|待辨|无法辨认|OCR不确定", "ocr_uncertain"),
@@ -59,6 +59,12 @@ def prepare(path, metadata, raw=None):
             )
     item = entry(metadata, path)
     raw = read_bounded(path, MAX_OCR_BYTES) if raw is None else raw
+    if metadata.get("expected_sha256") is not None and metadata[
+        "expected_sha256"
+    ] != sha(raw):
+        raise ValueError(
+            "Actual source SHA-256 differs from the private handoff manifest"
+        )
     metadata = dict(metadata)
     if any(
         metadata.get(k)
@@ -82,7 +88,7 @@ def prepare(path, metadata, raw=None):
     metadata.update(
         source_mode="ocr_only",
         source_kind=item["kind"],
-        indexer_version="ocr-index/1.0",
+        indexer_version="ocr-index/1.1",
         page_label=item.get("page_label"),
         volume_offsets=[0],
     )
@@ -92,9 +98,36 @@ def prepare(path, metadata, raw=None):
         rows, pages = [], []
         chapter = "unclassified"
         section = ""
-        for text, position, in_table, has_image, untranscribed in docx_blocks(raw):
+        from app.transcript_analysis import year_heading
+
+        blocks = []
+        for (
+            text,
+            position,
+            in_table,
+            has_image,
+            untranscribed,
+            numbering,
+        ) in docx_blocks(raw):
+            lines = text.splitlines()
+            for line_number, line in enumerate(lines, 1):
+                if line.strip():
+                    blocks.append(
+                        (
+                            line.strip(),
+                            position
+                            + (f"/line{line_number}" if len(lines) > 1 else ""),
+                            in_table,
+                            has_image,
+                            untranscribed,
+                            numbering if line_number == 1 else None,
+                        )
+                    )
+        for text, position, in_table, has_image, untranscribed, numbering in blocks:
             section = position
-            if re.search(r"(?<!\d)(?:19|20)\d{2}\s*年", text) and len(text) < 200:
+            if numbering:
+                section += f"|num:{numbering['id']}:{numbering['level']}:{numbering['format']}:{numbering['value']}"
+            if year_heading(text, item) is not None:
                 chapter = text
             rows.append(
                 dict(
@@ -361,58 +394,19 @@ def evidence_issues(conn, row, evidence, verify_hash=True):
 
 
 def index_transcript(conn, doc, units, item):
-    year = None
-    qtype = None
-    number = None
-    types = {
-        "单项选择": "single_choice",
-        "单选": "single_choice",
-        "填空": "fill_blank",
-        "名词解释": "term",
-        "简答": "short_answer",
-        "论述": "essay",
-    }
-    for unit in units:
-        text = unit["text"]
-        years = re.findall(r"(?<!\d)((?:19|20)\d{2})\s*年", text)
-        if re.search(r"年份不详|年份未知|年份待确认|未标年份", text):
-            year = None
-            qtype = None
-        heading = len(text) < 200 and re.search(r"真题|试题|试卷|考试|考研", text)
-        heading = heading and not re.search(
-            r"(?:19|20)\d{2}\s*[-~—至]\s*(?:19|20)\d{2}", text
-        )
-        if heading and len(set(years)) == 1:
-            qtype = None
-            number = None
-            year = (
-                int(years[0])
-                if item["year_start"] <= int(years[0]) <= item["year_end"]
-                else None
-            )
-        for name, kind in types.items():
-            if name in text and len(text) < 100:
-                qtype = kind
-        match = re.match(r"^\s*(\d{1,3})[.、．)）]\s*(.+)", text)
-        concerns = ["transcription_not_original_exam_verified"] + unit["quality_flags"]
-        if not year:
-            concerns.append("year_unassigned")
-        if not qtype:
-            concerns.append("question_type_unknown")
-        if match:
-            number = match[1]
-        elif not heading:
-            concerns.append("question_boundary_unconfirmed")
+    from app.transcript_analysis import candidates
+
+    for candidate in candidates(units, item):
         conn.execute(
             "INSERT INTO exam_transcript_candidates(document_id,unit_id,year,question_number,question_type,transcription,concerns) VALUES (%s,%s,%s,%s,%s,%s,%s)",
             (
                 doc,
-                unit["id"],
-                year,
-                number if match else None,
-                qtype,
-                text,
-                Jsonb(concerns),
+                candidate["unit_id"],
+                candidate["year"],
+                candidate["question_number"],
+                candidate["question_type"],
+                candidate["transcription"],
+                Jsonb(candidate["concerns"]),
             ),
         )
 
@@ -443,6 +437,69 @@ def docx_blocks(raw):
             "Invalid DOCX container, XML, encryption or expansion limit"
         ) from exc
 
+    from docx.oxml.ns import qn
+
+    definitions = document.part.numbering_part.element
+    abstracts = {
+        a.get(qn("w:abstractNumId")): a
+        for a in definitions.findall(qn("w:abstractNum"))
+    }
+    nums = {n.get(qn("w:numId")): n for n in definitions.findall(qn("w:num"))}
+    counters = {}
+
+    def numbering_for(paragraph):
+        props = paragraph._p.xpath("./w:pPr/w:numPr")
+        style = paragraph.style
+        seen = set()
+        while not props and style is not None and style.style_id not in seen:
+            seen.add(style.style_id)
+            props = style.element.xpath("./w:pPr/w:numPr")
+            style = style.base_style
+        if not props:
+            return None
+        numid = props[0].find(qn("w:numId"))
+        ilvl = props[0].find(qn("w:ilvl"))
+        if numid is None:
+            return None
+        numid = numid.get(qn("w:val"))
+        level = int(ilvl.get(qn("w:val"))) if ilvl is not None else 0
+        definition = nums.get(numid)
+        if definition is None or numid == "0":
+            return None
+        aid = definition.find(qn("w:abstractNumId"))
+        abstract = abstracts.get(aid.get(qn("w:val"))) if aid is not None else None
+        lvl = (
+            next(
+                (
+                    x
+                    for x in abstract.findall(qn("w:lvl"))
+                    if int(x.get(qn("w:ilvl"))) == level
+                ),
+                None,
+            )
+            if abstract is not None
+            else None
+        )
+        fmt = lvl.find(qn("w:numFmt")) if lvl is not None else None
+        start = lvl.find(qn("w:start")) if lvl is not None else None
+        initial = int(start.get(qn("w:val"))) if start is not None else 1
+        for override in definition.findall(qn("w:lvlOverride")):
+            if int(override.get(qn("w:ilvl"))) == level:
+                begin = override.find(qn("w:startOverride"))
+                if begin is not None:
+                    initial = int(begin.get(qn("w:val")))
+        key = (numid, level)
+        counters[key] = counters.get(key, initial - 1) + 1
+        for child in list(counters):
+            if child[0] == numid and child[1] > level:
+                counters.pop(child)
+        return dict(
+            id=numid,
+            level=level,
+            format=fmt.get(qn("w:val")) if fmt is not None else "unknown",
+            value=counters[key],
+        )
+
     def visit(container, path="body", depth=0, in_table=False):
         if depth > 8:
             raise ValueError("DOCX table nesting exceeds limit")
@@ -468,6 +525,7 @@ def docx_blocks(raw):
                         in_table,
                         has_image,
                         has_image and not text,
+                        numbering_for(part),
                     )
 
     return list(visit(document))
