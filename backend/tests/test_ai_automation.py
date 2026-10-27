@@ -692,3 +692,27 @@ def test_approved_https_origin_behind_proxy_and_cross_origin_rejection(
     assert (
         client.post("/v2/model/command", headers=headers, json=body).status_code == 503
     )
+
+
+@pytest.mark.parametrize(
+    "now,previous,expected",
+    [
+        ("2026-10-27T19:59:00+00:00", None, False),
+        ("2026-10-27T20:00:00+00:00", None, True),
+        ("2026-10-27T21:00:00+00:00", "2026-10-27T20:00:01+00:00", False),
+    ],
+)
+def test_private_backup_beijing_schedule_and_restart_idempotence(
+    now, previous, expected
+):
+    from datetime import datetime
+    from app.scheduled_backup import due
+
+    assert due({"snapshot_at": previous}, datetime.fromisoformat(now)) is expected
+
+
+def test_scheduled_backup_is_disabled_without_storage_authorization(monkeypatch):
+    from app.scheduled_backup import tick
+
+    monkeypatch.delenv("QUIZ_PRIVATE_BACKUP_ENABLED", raising=False)
+    assert not tick()
