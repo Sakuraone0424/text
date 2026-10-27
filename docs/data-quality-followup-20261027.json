@@ -1,0 +1,60 @@
+{
+  "analysis_version": "transcript-review/1.5",
+  "evidence_work_next_version": "evidence-work/1.7",
+  "indexed_source_rows": 2741,
+  "main_questions_checked": 1921,
+  "year_items": 52,
+  "source_rows_in_review_analysis": 2741,
+  "duplicate_groups": 77,
+  "duplicate_occurrences": 181,
+  "duplicate_classifications": {
+    "shared_concept_across_subjects_keep_separate": 9,
+    "term_recurrence_across_years_not_duplicate_error": 47,
+    "same_year_compilation_variants_do_not_merge_without_paper_identity": 17,
+    "cross_year_full_question_recurrence_pending_provenance": 4
+  },
+  "same_year_groups": 17,
+  "cross_subject_groups": 10,
+  "question_issue_counts": {
+    "embedded_image_pending_transcription": 22,
+    "referenced_figure_not_bound_to_main_question_requires_location_review": 3,
+    "source_type_unspecified": 20
+  },
+  "reported_gap_flag_false_positives": 3,
+  "ocr_uncertain_flag_contextual_false_positive": 1,
+  "source_flags_changed": 0,
+  "embedded_image_units": 25,
+  "embedded_assets_located": 25,
+  "original_verified": 0,
+  "ready": 0,
+  "science_events": 0,
+  "source_content_modified": false,
+  "old_index_rows_reimported": 0,
+  "candidate_textual_reviews": 38,
+  "candidate_local_revision_proposals": 8,
+  "candidate_text_supported_pending_science": 30,
+  "candidate_science_approved": 0,
+  "original_candidate_versions": 45,
+  "active_candidates": 38,
+  "docx_structure_summary": {
+    "structural_paragraphs": 30,
+    "paragraphs_with_internal_images": 28,
+    "paragraphs_with_omml": 2,
+    "omml_objects": 2,
+    "math_paragraphs_without_index_unit": 2,
+    "math_locations_without_index_unit": [
+      {
+        "document_id": 5,
+        "position": "body/1371"
+      },
+      {
+        "document_id": 5,
+        "position": "body/1377"
+      }
+    ]
+  },
+  "external_ai_calls": 0,
+  "cloud_mutations": 0,
+  "source_database_mutations": 0,
+  "private_details_in_public_report": false
+}

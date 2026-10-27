@@ -36,6 +36,7 @@ def units(texts, numbering=None, positions=None):
         ("二 名词解释", "term"),
         ("二、填充和选择题：（每小题3分／共1小题）", "mixed"),
         ("六、叙述题和计算题", "mixed"),
+        ("二、选择填空(每题2分，共40分)", "mixed"),
     ],
 )
 def test_real_heading_shapes(text, expected):
@@ -209,3 +210,80 @@ def test_pending_work_is_resumable_readback_and_never_approval(db, tmp_path):
         db.execute(
             "INSERT INTO evidence_review_work(work_key,algorithm,kind,subject,source_unit_ids,evidence,priority,status) VALUES ('bad','test','test','biochemistry','{}','{}',1,'approved')"
         )
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("二 简要解释以下名词（每题2分，共6分）", "term"),
+        ("简要回答以下问题(每题4分，共8分）", "short_answer"),
+    ],
+)
+def test_instruction_sections_require_explicit_per_item_and_total_points(
+    text, expected
+):
+    result = heading(text)
+    assert result["type"] == expected
+    assert result["declared_questions"] is None  # points are not a stated item count
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "1. 简要回答以下问题（共8分）",
+        "解释以下名词（8分）",
+        "简要回答以下问题：为什么合成条件成立？",
+    ],
+)
+def test_instruction_question_is_not_misclassified_as_section(text):
+    assert heading(text) is None
+
+
+def test_instruction_section_stops_fill_blank_type_bleeding():
+    rows = units(
+        [
+            "2026年合成考试试题",
+            "一、填空题",
+            "合成空____",
+            "二 简要解释以下名词（每题2分，共2分）",
+            "Synthetic concept",
+            "简要回答以下问题(每题4分，共4分）",
+            "Synthetic mechanism",
+        ],
+        {
+            3: "|num:1:0:decimal:1",
+            5: "|num:2:0:decimal:1",
+            6: "|num:9:0:chineseCounting:3",
+            7: "|num:3:0:decimal:1",
+        },
+    )
+    qs, years, parsed = questions_and_years(rows, dict(year_start=2026, year_end=2026))
+    assert [q["question_type"] for q in qs] == ["fill_blank", "term", "short_answer"]
+    assert years[0]["trusted_frequency_eligible"] == 0
+    assert parsed[5]["analysis"]["role"] == "section_heading"
+    assert "每题" not in qs[1]["text"]
+
+
+def test_parser_upgrade_keeps_prior_pending_queue_visible_without_summing_versions(db):
+    for key, algorithm in [
+        ("old", "evidence-work/1.6"),
+        ("older", "evidence-work/1.5"),
+        ("future", "evidence-work/9.0"),
+    ]:
+        db.execute(
+            "INSERT INTO evidence_review_work(work_key,algorithm,kind,subject,source_unit_ids,evidence,priority) VALUES (%s,%s,'concept_mapping','biochemistry','{}','{}',1)",
+            (key, algorithm),
+        )
+    result = progress(db)
+    assert result["pending_work_algorithm"] == "evidence-work/1.6"
+    assert result["normalized_pending_concepts"] == 1
+    assert not result["pending_work_algorithm_is_current"]
+    assert result["science_checked"] == 0
+    db.execute(
+        "INSERT INTO evidence_review_work(work_key,algorithm,kind,subject,source_unit_ids,evidence,priority) VALUES ('current',%s,'concept_mapping','biochemistry','{}','{}',1)",
+        (VERSION,),
+    )
+    result = progress(db)
+    assert result["pending_work_algorithm"] == VERSION
+    assert result["normalized_pending_concepts"] == 1
+    assert result["pending_work_algorithm_is_current"]

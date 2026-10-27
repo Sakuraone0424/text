@@ -10,9 +10,12 @@ from psycopg.types.json import Jsonb
 from app.source_policy import FILES
 from app.source_intake import private_json
 from app.local_corpus import private_jsonl
-from app.review_transcripts import questions_and_years
+from app.review_transcripts import (
+    questions_and_years,
+    VERSION as TRANSCRIPT_REVIEW_VERSION,
+)
 
-VERSION = "evidence-work/1.6"
+VERSION = "evidence-work/1.7"
 RISKS = {
     "energy_cofactor": r"ATP|ADP|NADH|NADPH|NADP\+|FADH",
     "reaction_direction": r"→|⇌|↔|反应方向|氧化|还原",
@@ -239,7 +242,7 @@ def build(conn):
         )
         for q in qs:
             q.update(
-                reference=ref(byid[q["unit_id"]]), algorithm="transcript-review/1.4"
+                reference=ref(byid[q["unit_id"]]), algorithm=TRANSCRIPT_REVIEW_VERSION
             )
             add(
                 "exam_question",
@@ -375,6 +378,21 @@ def refined_mapping_work(questions, concepts):
     return work
 
 
+def stored_work_version(conn):
+    """Report the latest compatible stored queue; never sum historical versions.
+
+    A parser-only upgrade must not hide an existing pending queue before an
+    explicitly requested new analysis run has persisted its version.
+    """
+    current = tuple(int(n) for n in VERSION.split("/", 1)[1].split("."))
+    versions = []
+    for row in conn.execute("SELECT DISTINCT algorithm FROM evidence_review_work"):
+        match = re.fullmatch(r"evidence-work/(\d+)\.(\d+)", row["algorithm"])
+        if match and (number := tuple(map(int, match.groups()))) <= current:
+            versions.append((number, row["algorithm"]))
+    return max(versions)[1] if versions else VERSION
+
+
 def progress(conn):
     from app.ocr_sources import review_snapshot
     from app.source_policy import current_source_sql
@@ -385,6 +403,7 @@ def progress(conn):
         + current_source_sql()
     ).fetchall()
     reviews = review_snapshot(conn, units)
+    work_version = stored_work_version(conn)
     counts = dict(
         text_checked=sum(v.get("text", False) for v in reviews.values()),
         science_checked=sum(v.get("science", False) for v in reviews.values()),
@@ -409,11 +428,13 @@ def progress(conn):
     counts["mapping_confirmation_status"] = (
         "requires_explicit_relation_level_reviewer_decision; source text/science reviews alone do not confirm a relation"
     )
+    counts["pending_work_algorithm"] = work_version
+    counts["pending_work_algorithm_is_current"] = work_version == VERSION
     counts["pending_work_by_kind"] = {
         r["kind"]: r["n"]
         for r in conn.execute(
             "SELECT kind,count(*) AS n FROM evidence_review_work WHERE algorithm=%s GROUP BY kind",
-            (VERSION,),
+            (work_version,),
         ).fetchall()
     }
     counts["supplemental_pending_work"] = {
@@ -444,7 +465,7 @@ def progress(conn):
     # Report source evidence reviews separately from structural re-segmentation.
     tasks = conn.execute(
         "SELECT evidence FROM evidence_review_work WHERE kind='exam_question' AND algorithm=%s",
-        (VERSION,),
+        (work_version,),
     ).fetchall()
     counts["text_reviewed_transcript_questions"] = sum(
         all(

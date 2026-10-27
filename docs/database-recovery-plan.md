@@ -35,6 +35,44 @@ PGHOST="$PRIVATE_NEW_SOCKET" PGPORT=55437 PGUSER=agent   "$PG_BIN/pg_restore" --
 6. pg_restore使用单事务、exit-on-error、no-owner/no-acl，不使用clean/create。恢复后全68表/18迁移/六SHA/页标/候选45与38现行独立读回；再最小权限API登录读写、重启持久性和费用验收。没有实际云端执行就不能报告云恢复通过。
 7. 失败保留新目标、日志、源包，不自动删表/schema/库，不覆盖原库。只有确认空目标且重新获准后才能重试；任何资源清理、容量增加、生产切换单独审批。
 
-## 新版API运行状态的待解释项
+## 最新外部回执与PG17/2GB执行边界
 
-用户报告新测试API部署dbd42628-159d-4c33-a03b-1ee333482277、SHA63042da、/health200，但没有独立测试PG。当前代码在QUIZ_REQUIRE_RAILWAY_IDENTITY=1且无合格DB时应返回503。因此200不能证明数据库就绪。云恢复前须只读核对该服务实际QUIZ_REQUIRE_RAILWAY_IDENTITY值及DATABASE_URL是否存在/脱敏目标身份（不读取或回传凭据），确保未借用原生产；不据此断言已连生产或关门禁。本轮没有云连接，无配置改动或重复Webhook检查。
+用户提供的Railway连接方回执：原生产部署未变；测试项目只有API，无PG/卷/Worker，变量名列表未发现DATABASE_URL。/health200仅证明当前API存活，不能证明接库。本轮没有Railway查询或修改，不重复部署触发检查。
+
+恢复容量按本地真实测量：数据约448MB、集群目录约992MB含约520MB WAL；2GB是起步容量，不是峰值保证。仅使用PG17、UTF8；备份来自17系列，扩展、排序规则、磁盘余量须在新目标实际核对。卷使用率70%预警、80%暂停新增批处理并人工评估；不自动扩容。恢复前记录实际PG服务UUID、卷UUID、集群system identifier和私网地址，任何未知身份均阻断。
+
+### 最小角色与连接配置
+
+管理员只在批准的新目标创建空数据库及以下角色，不复用原生产账号：
+
+|角色|用途与权限|收尾|
+|---|---|---|
+|ustc_restore_operator|LOGIN、NOSUPERUSER/NOCREATEDB/NOCREATEROLE；仅新库CONNECT/CREATE，身份核查所需pg_control_system EXECUTE；no-owner恢复产生的对象归此角色|验收后NOLOGIN、撤销库CREATE，核对无遗留连接；不删除对象所有者|
+|ustc_read_app|LOGIN、NOSUPERUSER/NOCREATEDB/NOCREATEROLE；库CONNECT、资料schema USAGE、68表SELECT、身份函数EXECUTE；default_transaction_read_only=on|初期仅做检索验收，0源表写权限，不是正式答题写账号|
+|未来业务写角色|必须按题卷、答卷、成绩、任务、账本等业务逐表/序列列白名单，来源字节及历史事件不授UPDATE/DELETE|另行实施/验收，不用GRANT ALL或给Agent任意SQL|
+
+本轮在本地用事务内临时授权验证最小身份读取，随后rollback；已有只读应用角色68表可读、0表可写。密码仅经可信Secret渠道配置，不写本文、源码、普通日志或备份。禁用不必要PUBLIC权限须限新库且先验证扩展依赖。
+
+|作用域|配置要求|
+|---|---|
+|API|DATABASE_URL=新私网PG的只读账号；QUIZ_DB_SCHEMA=source_staging_real_20261026；QUIZ_REQUIRE_RAILWAY_IDENTITY=1|
+|双重身份|QUIZ_ISOLATED_TARGET_APPROVED=1仅获准后设置；QUIZ_APPROVED_RAILWAY_PROJECT_ID/ENVIRONMENT_ID/SERVICE_ID分别为上列测试项目、环境、API UUID；QUIZ_APPROVED_DB_HOST/PORT/NAME/USER/SYSTEM_ID全部来自新目标实际值|
+|恢复工具|RECOVERY_TARGET_PROJECT_ID/ENVIRONMENT_ID为固定测试身份；RECOVERY_TARGET_DATABASE_SERVICE_ID必须是未来新PG UUID，不是API UUID；RECOVERY_DATABASE_URL使用操作角色，数据库批准USER随角色相应核对|
+|授权|RECOVERY_READ_AUTHORIZED、RECOVERY_WRITE_AUTHORIZED、RECOVERY_PRIVATE_TRANSFER_AUTHORIZED按实际新授权设置；不能以本轮本地授权放行云端|
+|保持关闭|AI_AUTOMATION_ENABLED=0、DEEPSEEK_API_AUTHORIZED=0、DEEPSEEK_PRIVATE_DATA_AUTHORIZED=0；不启Worker或每日后台任务|
+
+### 获准后的顺序及验收
+
+1. 取得Workspace账期Usage、有限运行窗口费用批准、新PG/卷创建及私有备份传输/恢复批准。记录目标四项UUID（项目、环境、PG服务、卷），明确排除原项目和500MB卷。
+2. 经管理员创建独立空库及角色，核对PG17、编码、扩展、全用户schema空白、集群身份、私网和容量。用批准身份运行现有empty-target保护检查；未通过不能restore。
+3. 确认私网内一次性执行渠道及PG17客户端实际可用，再传输已核验原包。私人GitHub下载如需凭据，只使用另行安全配置的该仓库只读Secret，不复用ChatGPT/Codex登录凭据。没有执行渠道就停在准备状态，不额外建常驻Worker。
+4. 本地/目标双验外层SHA及内部dump/manifest；执行既有restore单事务、exit-on-error、no-owner/no-acl；禁止--clean/--create/DROP。不覆写任何有数据的目标。
+5. 独立新连接执行verify-restored：68表逐表行数及排序JSONB摘要、18迁移文件SHA、六源文件SHA、1915页标、12396单元、38现行/45版本、修订关联、80外键、39序列及索引。比较完整Manifest而非仅看pg_restore退出码。
+6. 只读API核验真实检索、认证拒绝、身份不符fail-closed；重启新PG后再读回。未来答题写入另用业务账号及独立探针，不能把探针当真实成绩。ready仍0；公式/图像索引缺口详见本轮数据报告，恢复成功不等于科学内容齐全。
+7. 验收操作角色关闭登录，保存脱敏回执及新库备份；用户后续真实学习前还须完成业务权限、科学审核与付费API授权。未实际云运行不报告恢复通过。
+
+### 回滚与验证资源删除（均未执行）
+
+恢复失败：保留原包、新目标和脱敏错误日志，隔离新库，不自动清空/重试；再次恢复需重新确认空目标并批准新恢复目标。API如已接新库，退回此前无DATABASE_URL配置只限测试API；开启身份门禁后预期503，不能为恢复健康200关闭保护。旧production完全不动。
+
+验证窗口结束后，删除资源须再批准**具体新PG服务UUID和新卷UUID**：先确认没有新学习数据或已有独立可恢复备份、解绑测试API的新连接、停止仅该验证实例；核对依赖后删除获准的新服务/卷，再读取资源清单和计费停止情况。不得删除整个项目/环境、现有API、原生产PG或原备份；停止计算后保留的卷仍可能计费。没有删除回执不能报告资源已释放。

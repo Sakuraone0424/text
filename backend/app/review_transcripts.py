@@ -4,16 +4,36 @@ import re
 from collections import Counter
 from app.transcript_analysis import candidates, TYPES, section_heading
 
-VERSION = "transcript-review/1.4"
+VERSION = "transcript-review/1.5"
 
 
 def heading(text):
     cleaned = re.sub(r"^\s*([一二三四五六七八九十]+)\s+(?=\S)", r"\1、", text)
     result = section_heading(cleaned)
     if not result and re.match(
-        r"^[一二三四五六七八九十]+[、丶.．]\s*(?:填充和选择题|叙述题和计算题)", cleaned
+        r"^[一二三四五六七八九十]+[、丶.．]\s*(?:填充和选择题|叙述题和计算题|选择填空)",
+        cleaned,
     ):
         result = dict(type="mixed", label="mixed", declared_questions=None)
+    if not result:
+        # Some compilations express section names as instructions, including
+        # Word-generated Chinese list numbers absent from the extracted text.
+        # Require a per-question and total score declaration: an ordinary
+        # question asking to explain terms must not become a section header.
+        body = re.sub(r"^[一二三四五六七八九十]+[、丶.．]\s*", "", cleaned)
+        label = re.match(
+            r"^(?:简要)?(解释(?:以下|下列)名词|回答(?:以下|下列)问题)\s*[（(]", body
+        )
+        if (
+            label
+            and re.search(r"每(?:小)?题\s*\d+\s*分", body)
+            and re.search(r"共\s*\d+\s*分", body)
+        ):
+            result = dict(
+                type="term" if label[1].startswith("解释") else "short_answer",
+                label=label[1],
+                declared_questions=None,
+            )
     if not result:
         return None
     # "第1、2题各..." is not a declaration of total question count.
