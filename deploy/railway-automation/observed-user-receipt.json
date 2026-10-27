@@ -43,5 +43,7 @@
     "original_postgres_average_memory_mb": 58,
     "combined_average_cpu_vcpu": "0.0022",
     "is_monthly_billing": false
-  }
+  },
+  "historical_snapshot_only": true,
+  "superseded_by": "deploy/railway-automation/current-user-receipt.json"
 }

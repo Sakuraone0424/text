@@ -1,55 +1,40 @@
-# 私有备份交付与隔离恢复
+# 私人备份与隔离恢复：当前有效流程
 
-状态：包可读且SHA一致为**已完成且独立验证**；用户取得/持久保存为**因权限或交付能力阻塞**；恢复脚本为**已准备但尚未执行**。
+最新真实验收见[recovery-validation-20261027.md](recovery-validation-20261027.md)及[data-foundation-audit-20261027.md](data-foundation-audit-20261027.md)。**本地独立恢复已真实通过；Railway恢复未获授权、未执行。** 此决定取代此前“等待手机/Google Drive保存”“尚未异库恢复”的旧描述。
 
-## 原包与实际交接能力
+## 唯一已验证备份与保留策略
 
-63,472,028字节；SHA256 `4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a`。本轮仅重新核对包SHA、位置/权限及manifest，不重复以前已完成的全库哈希扫描。文件在仓库外0600；包含dump、manifest、RESTORE.txt，18迁移、68表，登录会话数据明确不导出。
+用户已接受长期位置为私人GitHub仓库Sakuraone0424/ustc-private-backup-transfer，分支backup-transfer-20261027-4e84fde3，提交12793ae231a4bce77f9ed0bfcaaf8885660e167a；原ZIP作为Git文件经明确授权上传，远端独立新clone验证通过。没有公开分享或Git LFS。用户知悉删分支不保证历史副本立即清除。
 
-位置由 `/workspace/private-intake/first-batch-20261026/active-backup.json` 的index指向；实际包在snapshot-a5359e90696142d18b9d1beb2c3074fe。当前会话有入站附件download_file工具，但无出站upload/artifact工具；/mnt/data不存在，/workspace/shared和library-files未有官方持久导出约定。提供现有工作区文件链接供用户尝试，不声称该链接在iOS必然支持下载。**未收到真实保存回执，仍不算长期保全。** 不另造sandbox链接，不把复制到同机另一目录当异地备份。
+文件USTC-private-review-backup.zip，63,472,028字节，SHA-256 `4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a`。内含database.dump、database-manifest.json、RESTORE.txt；18迁移、68表，认证会话数据不导出。本地原件仍位于仓库外snapshot-a5359e90696142d18b9d1beb2c3074fe，0600，永不以恢复成功为由自动删除。无需再转存Drive或iPhone。
 
-若当前界面支持下载：Safari或ChatGPT文件界面保存到用户“文件”App，核对大小和SHA，记录实际保存回执。若不支持：须用户指定授权私有存储或认证HTTPS渠道，再说明认证、有效期、TLS、日志、不公开链接、保留期限与费用并执行；不自动上传Drive/对象存储。未确认附件上限，不能臆造限制，故没有制作无处交付的分卷。若确需分卷，应对每卷与合并包计算SHA，保留顺序和二进制合并方法；原包永不删除。
+这只是Codex隔离source_staging_real_20261026备份，不是Railway原生产全库备份。实际users、attempts、attempts_v2及FSRS为0，不能假设含原生产旧成绩；方案C仍需单独的生产备份和历史成绩迁移验证。本轮不改原生产。
 
-本ZIP仅是原Codex隔离source_staging_real_20261026的备份，**不是原Railway production全库备份，不能假设包含其旧成绩**。方案C切换之前仍需独立授权的生产备份、历史成绩校验与兼容迁移；当前绝不能停旧服务或覆盖500MB卷。
+## 本地实际恢复步骤与接续
 
-## 实测容量与兼容
-
-本轮仅做只读容量/版本查询：原专用库约436,401,843字节；schema关系合计426,655,744字节；六份原字节合计7,541,935字节，最大单文件1,749,006字节；服务端PG17.11，仅plpgsql1.0。源表与索引已存在，不需要重新OCR或重导文件。
-
-原Railway500MB卷已有旧成绩，不能恢复其上。即使空卷，源关系约427MB还不含目标PG基础文件、WAL、恢复峰值和增长。建议独立PG17新目标至少2GB起步，另预留私有包/展开dump约127MB位置；按实际`pg_restore --list`、WAL及云端磁盘指标核查，不能用压缩包63MB推断数据库只需63MB。当前没有云端容量读数或新库批准，不创建资源。恢复校验对大字节表按单行读取，其余批量游标，避免把整个原文集载入内存；临时验证进程仍需观测峰值，不能据此承诺固定小内存可运行。
-
-## 已实现脚本
-
-`backend/app/recovery_check.py`支持package、empty-target、restore、verify-restored。默认不连接、不创建库；restore必须同时有明确私有传输及写入授权。任何动作先校验传入的可信包SHA，源schema固定。示例`ARCHIVE`为仓库外现有包路径，`PG_BIN`为PG17客户端目录：
+已在新0700目录initdb PG17.11，--auth-local=peer、--auth-host=scram-sha-256、UTF8，localhost端口55437，不同于原5432集群。通过system identifier确认独立；新空DB由管理员单独创建，整库对象检查通过。
 
 ```sh
-PYTHONPATH=backend .venv/bin/python -m app.recovery_check package --archive "$ARCHIVE" --sha256 4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a
-# 以下命令仅在目标与授权实际配置后执行：
-PYTHONPATH=backend .venv/bin/python -m app.recovery_check empty-target --archive "$ARCHIVE" --sha256 4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a
-PYTHONPATH=backend .venv/bin/python -m app.recovery_check restore --archive "$ARCHIVE" --sha256 4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a --pg-bin "$PG_BIN"
-PYTHONPATH=backend .venv/bin/python -m app.recovery_check verify-restored --archive "$ARCHIVE" --sha256 4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a
+# 使用已核验的包和独立新目标；不要把此命令指向原库
+PGHOST="$PRIVATE_NEW_SOCKET" PGPORT=55437 PGUSER=agent   "$PG_BIN/pg_restore" --dbname ustc_restore_verified_20261027   --single-transaction --exit-on-error --no-owner --no-acl "$VERIFIED_DUMP"
 ```
 
-未在真实目标执行以上连接/恢复命令。测试用合成包、模拟restore子进程，以及真实测试库的rollback只读身份/非空拒绝检查；不是异库恢复演练通过。
+没有--clean、--create、DROP或对源库的写入。恢复后新连接逐表核对Manifest的行数/排序JSONB哈希、迁移文件SHA、六来源原字节SHA；进一步重新解析原文件、核对1915页标和12396索引，检查80外键、39序列和索引。新集群实际重启后再次68表校验通过。83项针对性测试在此恢复DB连接上执行，夹具独立rollback schema。只读应用角色HTTP健康/正文/候选读取实际通过，写入被拒绝；独立probe schema提交/重启读回不是正式学习数据。
 
-## 授权与双重身份
+接续指针`/workspace/private-intake/backup-user-handoff/local-rehearsal-target.json`；实际PG目录`/workspace/private-intake/ustc-restore-rehearsal-a84gic2k/pgdata`。凭据配置仅0600私有文件，不进Git/报告/新备份。临时环境可能回收，可由私人仓库恢复；本地库/原包均保留。
 
-- 独立项目/环境为交接表固定UUID；目标PG服务UUID仍未知，必须实际读取且与API服务不同。设置RECOVERY_TARGET_PROJECT_ID、RECOVERY_TARGET_ENVIRONMENT_ID、RECOVERY_TARGET_DATABASE_SERVICE_ID；RECOVERY_READ_AUTHORIZED只有读取授权后设1。
-- RECOVERY_DATABASE_URL仅通过目标服务端Secret；独立核对后设置QUIZ_APPROVED_DB_HOST/PORT/NAME/USER/SYSTEM_ID。恢复工具先验证端点、库名、用户，拒绝hostaddr/service/options覆盖；连接后读取current_database、session_user和pg_control_system集群标识，再确认PG17。公网数据库端点必须sslmode=verify-full（并实际验证可信证书）；否则只能在Railway受控私网执行恢复，不能通过公开TCP代理明文发送dump/凭据。不是只看数据库同名“railway”。本地普通API/迁移连接也只允许明确loopback；本地CLI不能因没有Railway环境变量而直接使用远端生产URL，远端操作需经指定平台身份或独立恢复工具。原生产/原源库的已知集群标识可列入QUIZ_PROTECTED_DB_SYSTEM_IDS。
-- 真恢复另需RECOVERY_WRITE_AUTHORIZED=1和RECOVERY_PRIVATE_TRANSFER_AUTHORIZED=1；未获批准保持未设置。不能因这些环境变量存在就绕过固定项目/环境、独立DB服务、端点、集群、空库和包校验。
-- 空库检查覆盖全部非系统schema的表、分区、序列、视图、物化视图、外表及用户函数/类型/额外扩展，不只是source_staging为空；不符合就拒绝，不自动清理。
-- 恢复用独立操作账号，应用用不同低权限账号。目标管理员可单独GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system()给应用身份，以读取集群标识；不授超级用户、CREATEDB、CREATEROLE或生产权限。应用仅CONNECT、schema USAGE、必要SELECT、业务表DML/序列权限；源原字节/迁移/不可变事件不授UPDATE/DELETE。实际权限清单须结合18迁移和API路径审核，再在目标HTTP写入测试验证；不能以GRANT ALL替代。
+## 云端恢复前置：尚未执行
 
-## 真恢复、读回与回滚验收
+固定Project c6028313-e1f4-43cc-a63d-b7ff474a3a24，Environment ca9c95e7-81b8-495e-a51b-f01607a8eeab（名字production），现有API15083462-a2f4-49d0-9a72-0873208e0669。目前没有独立PG服务或Worker；未来PG服务UUID必须实际创建后取得，不能拿API UUID或随意值绕过校验。原项目c8ace6c2-e725-4e19-b064-3c71b44d4fde/环境54a1a3e3-9a24-4182-8441-5670d1ba9f04明确禁止写入。
 
-脚本先检查PG17客户端、独立空目标，再解出0600临时dump并核对内层SHA/大小；以参数数组执行pg_restore，明确`--dbname`、single-transaction、exit-on-error、no-owner/no-acl。凭据仅通过最小libpq环境传入，不出现在命令行；不继承PGOPTIONS/PGSERVICE，不执行clean/create/drop/truncate，stderr不公开输出正文。
+1. 先取得整个Workspace资源用量并批准一个独立PG17及建议2GB卷、有限验证窗口。不可使用500MB旧卷；实测数据/WAL见容量报告。不得以本地恢复授权替代新云资源批准。
+2. 获准后确认新PG UUID、版本、数据库/用户、空库（全部非系统schema）、实际容量及集群标识；与原生产集群和本地源集群区分。还未创建时这些值保持未知，不能伪造。
+3. 私有备份传输和一次真实云恢复另需批准。Secret配置使用安全服务端渠道，不把URL/密码/令牌交给对话、Git或日志；不复制旧production URL。走受控私网，或有可信证书的公网verify-full，不能公开明文TCP传dump。
+4. 单独迁移/恢复操作角色负责建结构；应用角色NOSUPERUSER/NOCREATEDB/NOCREATEROLE，仅CONNECT、schema USAGE、资料SELECT及明确列出的业务表DML/序列权限；来源字节/迁移/不可变事件禁止UPDATE/DELETE。集群身份读取仅授必需的pg_control_system函数EXECUTE，不授超级用户。不用GRANT ALL替代权限清单。
+5. 调用现有app.recovery_check的empty-target、restore、verify-restored；保持固定UUID、端点/库名/用户和PG集群双重校验。RECOVERY_READ_AUTHORIZED、RECOVERY_WRITE_AUTHORIZED、RECOVERY_PRIVATE_TRANSFER_AUTHORIZED仅按实际授权开启。此CLI仍是云端保护工具，不伪造Railway身份来跑本地恢复。
+6. pg_restore使用单事务、exit-on-error、no-owner/no-acl，不使用clean/create。恢复后全68表/18迁移/六SHA/页标/候选45与38现行独立读回；再最小权限API登录读写、重启持久性和费用验收。没有实际云端执行就不能报告云恢复通过。
+7. 失败保留新目标、日志、源包，不自动删表/schema/库，不覆盖原库。只有确认空目标且重新获准后才能重试；任何资源清理、容量增加、生产切换单独审批。
 
-成功退出后**新连接**逐表对比68表清单及UTC PostgreSQL17 to_jsonb行哈希、18迁移及仓库SHA、六文件身份和原字节SHA。应得12,396单元、1,915页标、38现行/45版本/7修订，不能只看pg_restore退出码。登录会话恢复后应为空。
+## 新版API运行状态的待解释项
 
-随后还需授权的应用账号实际登录API、读取资料状态、保存预算0/AI暂停的配置、独立连接读回；重启API/数据库后重复读取，检查卷持久性。该真实写入/重启测试**尚未完成**，脚本返回api_write_restart_tested=false，不伪造学习成绩或提前生成28题。
-
-失败时保留源库、原包、目标日志；单事务错误应回滚本次恢复，但仍须独立检查目标。读回失败不自动删schema或重试；只有重新获准的真正空目标才能再次恢复。不修改原production，不以清空旧成绩解决冲突。切换旧系统属于方案C的独立批准，当前不执行。
-
-## 本轮交接能力复查
-
-原63,472,028字节ZIP仍存在且权限0600，未删除、迁移或重复导入。当前工具目录只有入站download_file，没有出站附件/持久发布接口；工作区文件链接不等于官方持久下载承诺。本轮不重复全量扫描，不创建公网通道。用户实际保存成功及大小/SHA回执仍缺失，因此backup_handoff_confirmed保持false。恢复程序继续只以合成包、Mock restore及独立测试库负向检查验收，不对真实教材库执行恢复。
+用户报告新测试API部署dbd42628-159d-4c33-a03b-1ee333482277、SHA63042da、/health200，但没有独立测试PG。当前代码在QUIZ_REQUIRE_RAILWAY_IDENTITY=1且无合格DB时应返回503。因此200不能证明数据库就绪。云恢复前须只读核对该服务实际QUIZ_REQUIRE_RAILWAY_IDENTITY值及DATABASE_URL是否存在/脱敏目标身份（不读取或回传凭据），确保未借用原生产；不据此断言已连生产或关门禁。本轮没有云连接，无配置改动或重复Webhook检查。

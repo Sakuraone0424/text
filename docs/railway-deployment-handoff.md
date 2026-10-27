@@ -1,6 +1,6 @@
 # Railway执行交接（不含Secret；先只读，不自动部署）
 
-状态：**已准备但尚未执行**。用户提供的外部只读核查不是本Codex独立查询。本地从48739e48继续；远端PR #1仍为cadf521、Draft。最终待同步目标为本轮最终消息记录的完整SHA；执行方在同一checkout运行`git rev-parse HEAD`解析，不能把本文件所在提交的父提交或旧cadf521当成新目标。代码未推送前，不修改Railway为不存在于GitHub的SHA。
+状态：**最新测试API已由用户部署63042da，独立数据库尚未创建**。用户提供Deployment dbd42628-159d-4c33-a03b-1ee333482277 SUCCESS、/health200。原生产保持原部署。没有本Codex云端操作；旧“运行cadf521、等待SHA同步”仅为过去状态，后续不重复同步同一SHA。原Webhook/自动部署/推送后安全检查已闭环，不重复索要。备份已在授权私人GitHub完成独立读回，本地PG17真实恢复及83项针对性测试已完成，详见恢复报告。
 
 ## 固定资源边界
 
@@ -11,24 +11,16 @@
 | 唯一测试项目 | c6028313-e1f4-43cc-a63d-b7ff474a3a24 / amiable-vibrancy | 不重复创建项目 |
 | 唯一测试环境 | ca9c95e7-81b8-495e-a51b-f01607a8eeab / production | production只是名称，不能改用同名原环境 |
 | 唯一现有测试服务 | 15083462-a2f4-49d0-9a72-0873208e0669 / automation-staging | 不重复创建服务 |
-| 用户提供的暂存Patch | a68e1281-f8a6-4c14-9570-0fabfbb1180c | 16项、STAGED、非破坏性；用户查询时无Deployment ID；此处尚未独立读取原diff |
+| 测试当前部署 | dbd42628-159d-4c33-a03b-1ee333482277 | 用户报告SUCCESS、63042da、/health200；独立PG/Worker不存在 |
+| 当前Patch | null | 原16项Patch已由用户手动提交，不再暂存，禁止复用旧Patch ID |
 
-无Secret输入见`deploy/railway-automation/observed-user-receipt.json`。未知字段为null，不能补成false或0冒充证据。
+无Secret输入见`deploy/railway-automation/current-user-receipt.json`（observed-user-receipt.json仅保留为旧测试夹具/历史快照）。未知字段为null，不能补成false或0冒充证据。
 
-## 连接方立即执行的只读操作
+## 下一步：独立数据库，不重复部署安全检查
 
-1. 读取上述项目/环境/服务的**实际UUID**、服务Source、active配置、暂存Patch全部diff、Patch状态、最后部署、自动部署/PR预览开关、域名/卷。不要查询或回传Secret值，只回传变量名及三项AI开关是否为0；Patch diff先服务端脱敏。若工具只能返回全部变量明文，不调用该明文字段，缺项标记未知，不把凭据带入对话。枚举工作区所有服务及用量，不能只查测试项目。
-2. 核对Patch仍是STAGED且无服务启动。若已改变，停止使用旧Patch ID，返回新ID、差异和部署ID；不能擅自撤销别人的变更。
-3. 确认开发分支push与PR同步不会触发自动部署/预览。回执中的false必须表示当前已生效的监听关闭（同时核对active与staged配置和项目PR预览），不能只抄尚未提交的desired=false。未知时不推送。若需关闭测试服务的自动部署，先确认是这个服务；仅暂存关闭、检查是否触发部署，不调用deploy/apply。无法保证仅暂存的接口不要调用。
-4. 当前GitHub Actions只有Backend acceptance，push/pull_request运行测试，无部署步骤；这不证明Railway独立GitHub监听关闭。`gh pr view 1 --json headRefOid,statusCheckRollup`核对远端。
+63042da已经部署，无需再创建仅更新同一Source SHA的变更。现有Patch状态只以连接方实际最新读取为准，不复用旧a68e1281。当前优先取得工作区Usage和数据库恢复授权，流程见database-recovery-plan.md。
 
-本地验证回执（只验证所提供数据，不代表实时查询）：
-
-```sh
-PYTHONPATH=backend .venv/bin/python -m app.deployment_check --receipt deploy/railway-automation/observed-user-receipt.json --head "$(git rev-parse HEAD)" --phase push
-```
-
-当前预期退出2：自动部署/预览未确认关闭。连接方填入刚刚读取的非密钥回执再验。确认安全后Codex推送原分支、跑CI；连接方再将GitHub实际HEAD与验收SHA、暂存Source SHA逐一核对。
+本地恢复验收已经完成，不能冒充Railway恢复。现有/health200与“无独立PG”的组合尚不能证明就绪，须核对实际身份门禁值及DATABASE_URL是否存在/脱敏目标归属；不回传凭据、不修改配置。原生产quiz-backend部署7cf3bb5a-207d-4a32-befc-917401d7738b及Postgres e6d15d87-bd61-4ec6-abaf-2e5c2f85b9e8保持不变。
 
 ## 配置逐字段操作清单
 
@@ -36,9 +28,9 @@ PYTHONPATH=backend .venv/bin/python -m app.deployment_check --receipt deploy/rai
 
 | 字段组 | 当前已知旧值 | 目标/操作 | 暂存/触发/费用与验证 |
 |---|---|---|---|
-| 1 Source仓库 | 用户确认已暂存指定GitHub来源 | Sakuraone0424/text，核实仓库根目录`/` | 仅核对，绑定变更可能触发构建，未确认不写 |
+| 1 Source仓库 | 现有旧部署已绑定指定GitHub来源 | Sakuraone0424/text，核实仓库根目录`/` | 仅核对，绑定变更可能触发构建，未确认不写 |
 | 2 分支 | feat/reviewed-dual-subject-28 | 保持；不改main/原production | 只改测试服务，确认autoDeploy关闭 |
-| 3 Source提交 | cadf521c32b4f5b919655a303b18c95b89f23a31 | **安全push及新CI后**精确设置本轮验收SHA | 只暂存；部署前再次比较，不能提前声称新代码上线 |
+| 3 Source提交 | 用户报告现部署63042da7e31819237971b4289689c949af0d55b7 | 本轮保持，不重复同步 | 文档变更不作为业务代码已部署的证明 |
 | 4 Dockerfile | 存在但具体值未独立取得 | deploy/railway-automation/Dockerfile | 核对实际build context包含backend/；不使用根旧railway.json覆盖 |
 | 5 RAILWAY_DOCKERFILE_PATH | 用户确认存在，值未知 | 与第4项一致；当前工具若使用原生build.dockerfilePath，以受支持字段为准，消除冲突前先读diff | 不猜新旧接口参数，不设置两个矛盾来源 |
 | 6 构建上下文/依赖 | 未独立取得 | 仓库根；Python3.12、SDK0.2.1rc2、PG17客户端；optional CA不要求云端存在该Secret | 本地新镜像构建已完成，云端仍需验收 |
@@ -65,8 +57,6 @@ deploy预检要求新SHA一致、AI关闭、工作区预计用量≤额度且完
 
 真正部署只有费用、恢复与授权条件通过后由连接方执行，记录新Patch ID、精确SHA、Deployment ID、日志、域名及用量。失败时停留在未部署状态，保留旧Patch/read-only快照；不得回滚原production、删卷或清库。若新测试服务已启动，停止/回退也仅限用户批准的新服务操作；先记录日志与私有数据持久状态。
 
-## 第一轮连接方回执补充
+## 状态纠正
 
-用户转交的外部只读结果：上述Patch仍STAGED、16项、destructive=false；测试部署数0；源码仍固定cadf521；Dockerfile与/health匹配；9项AI/执行控制变量及RAILWAY_DOCKERFILE_PATH只能读取名称，值隐藏，故ai_flags仍为null。原两服务SUCCESS、无暂存修改、500MB卷。两个项目Webhook列表为空**不能证明GitHub Automatic Deployments或PR预览关闭**。
-
-当前连接工具不提供上述开关或完整账单字段。下一步由用户在控制台查看测试服务实际生效的Automatic Deployments与项目PR预览开关（包含任何暂存覆盖），回传对应UUID、页面截图/观测时间；并取得整个My Projects当前账期Usage及预测。不要提交Patch或启用服务来探测。只确认关闭后，更新无密钥回执再运行push预检；费用与恢复等门禁继续独立阻断。
+此前“0部署、16项STAGED”已被最新外部只读回执推翻，不作为当前事实。原16项由用户手动部署提交，旧代码SUCCESS不等于新版部署或真实数据库/DeepSeek验收完成。源码同步需新Patch，当前无待提交Patch。

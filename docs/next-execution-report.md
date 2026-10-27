@@ -1,54 +1,36 @@
-# 本轮执行结果与证据
+# 当前执行报告：真实恢复与数据基础核验（2026-10-27）
 
-本轮起点本地48739e48、远端cadf521，延续原Draft PR #1。最终本地SHA以`git rev-parse HEAD`与最终交付消息/仓库外execution-receipt记录；不把文档自身嵌入父提交SHA当作最终HEAD。
+业务代码及云端用户报告SHA仍63042da7e31819237971b4289689c949af0d55b7；原PR #1 Draft不变。完整真实结果见[恢复报告](recovery-validation-20261027.md)、[逐章逐年表](data-foundation-audit-20261027.md)、[机器可读摘要](recovery-validation-20261027.json)。本轮仅文档/无密钥回执变更，没有业务代码或迁移修改，不重复Webhook检查和410项全量测试。
 
-| 项目 | 状态 | 实际证据/局限 |
+|阶段|状态|实际结果|
 |---|---|---|
-| 私有原包位置/权限/SHA | 已完成且独立验证 | 63,472,028字节、0600、4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a；读manifest68表18迁移；未重复全库扫描 |
-| 备份用户取得/持久转移 | 因交付能力或授权阻塞 | 给出本会话现有工作区文件链接供尝试；无出站artifact工具，无实际保存回执；未上传第三方 |
-| 资源UUID与外部输入 | 已完成且独立验证（代码） | 指定测试三UUID固化，原项目/环境UUID拒绝，不能只改一组env放行未知目标；16项Patch状态来自用户外部核查而非本环境API |
-| 数据库独立身份 | 已完成但尚待云端验证 | 连接前端点/库名/用户，连接后PG集群标识；API、Worker与迁移CLI统一；默认失败停止 |
-| Docker/健康 | 已完成但尚待云端验证 | 新镜像本地构建，强制平台身份、三AI开关0，缺DB时健康503；本地非root/只读/无网络冒烟，不是Railway上线 |
-| 推送预检 | 已准备但尚未执行 | deployment_check对当前用户回执拒绝：自动部署/PR预览未知；GitHub工作流仅测试，无云部署步骤，但Railway独立监听未知 |
-| GitHub同步/新远端CI | 因权限或触发状态阻塞 | 本轮仍不push，不修改main；PR说明可记录本地结果，远端代码仍cadf521、旧CI379成功。新409不是远端CI |
-| Railway配置 | 已准备但尚未执行 | handoff含固定目标、逐字段新旧/暂存/触发/费用/回滚；无新建服务、无apply/deploy；旧Config as Code不能套用新服务 |
-| 成本三方案 | 因用量或费用阻塞 | 成本页含计费式、存储、窗口和未知项；没有原服务实测，不能证明整个工作区≤5美元≈¥35 |
-| 数据库恢复 | 已准备但尚未执行 | recovery_check含空库拒绝、授权、PG17单事务、独立读回；Mock子进程测试及真实测试库身份/非空拒绝通过；未创建目标/真实恢复 |
-| DeepSeek | 因授权阻塞 | 公开中文价格和SDK版本复核；真实目录/推理/私有外发0，未接OpenAI Agents API |
-| 28题真实训练及iOS | 已准备但尚未执行 | ready0故无真实卷；既有业务合成回归保留；真机清单不等于验收通过 |
+|备份核验|已完成且独立验证|原63,472,028字节ZIP的SHA/CRC、内层dump与Manifest一致，原件未改；私人GitHub长期备份已在前轮独立回验|
+|真实本地独立恢复|已完成且独立验证|新PG17.11集群、独立端口55437、新空DB，实际pg_restore单事务完成，68表行数/内容摘要、18迁移、六文件原字节SHA匹配|
+|恢复结构及重启|已完成且独立验证|80外键无孤儿、39序列安全、索引均有效；实际重启后再次完整68表读回，源表未被探针/测试污染|
+|真实应用兼容|已完成且独立验证|5类实际HTTP读取200、未认证403，只读应用角色拒绝写源表；隔离probe schema经app.db.get_db提交并重启读回|
+|数据库集成测试|已完成且独立验证|新恢复DB上的83项针对性测试通过，0失败/跳过；仅rollback夹具，不修改恢复资料schema|
+|资料索引与定位|已完成且独立验证|六文件完整重新解析与原索引一致；1915页标、9655教材单元+2741转录单元；不重导文件|
+|题库基础|已完成且独立验证（确定性范围）|45版本、38现行候选的结构/引用/同学科/逐项评分证据定位无异常；38风格年份声明无错配；未进行答案语义/科学审批|
+|真实质量门禁|因外部调用授权限制，尚未科学审核|ready=0、正式发布0；未执行DeepSeek、未伪造人工或自动核验成功|
+|Railway数据库|已准备但尚未执行|独立PG不存在；未创建资源、未传输/恢复；实际容量支撑2GB起步建议，整工作区预算未知|
+|原生产保护|保持不变|本轮无Railway操作、无原生产连接/写入/迁移或部署|
 
-## 本地验证命令
+## 数据缺口及严格边界
 
-```sh
-TEST_DATABASE_URL=postgresql://agent@127.0.0.1:5432/quiz PYTHONPATH=backend .venv/bin/python -m pytest backend/tests -ra -q --tb=short -p no:cacheprovider
-.venv/bin/ruff check --isolated --select F,E9 backend/app backend/tests backend/migrate.py
-```
+79已分类章节+4未分类教材组，教材未分类275单元、另2转录单元；3911个有标记或未分类的单元保留私有定位队列。1921真题主问题候选分生化1197/细胞724，52年结构覆盖不是52份官方完整原卷。细胞2009/2010共20道题型未知；细胞2003有声明数量冲突。77组标准化重复涉及181次出现，其中10组跨学科；可能是真实重复考查或共通概念，不自动删改。原已存25条重复工作项口径不同。
 
-本轮完整 **409 passed，0失败/跳过**，原386保留，新增23项。日志`/tmp/text-final-handoff-release-tests.log`；专项`/tmp/text-recovery-tests.log`30项。真实测试DB为quiz的rollback隔离schema，未往真实教材库写入、迁移或恢复。测试细分包含Mock、真实SDK本地协议、真实PG身份读取及负向非空检查、浏览器视口；没有真实DeepSeek/Railway/iOS验收。
+已核验原卷记录0、source_review_events0、正式knowledge_links0；17128映射建议、11044名称候选、3139细映射均不冒充可信知识。DOCX扫描未出现“参考答案/答案解析/标准答案”字样的单元，但这仅是词面线索，不能推断不存在任何参考解答，更不能造官方答案。训练题答案与rubric引用完整不等于语义正确已获科学确认。
 
-Docker日志`/tmp/text-handoff-docker-build.log`，冒烟`/tmp/text-handoff-image-smoke.log`。镜像名ustc-automation-handoff-local:test；最终image ID为sha256:4ff7869e13cced8148a6f93d70a8df81931e321fc19051ddac29bb928e89b0b5，四个关键源码哈希已与工作区逐一匹配。HTTP冒烟日志/tmp/text-handoff-http-smoke.log验证无DB健康503、首页200、未登录费用401；这不等于云端上线。只有本机Docker，没有Railway Deployment ID。构建期间清理的仅是本机非活动构建缓存及已被替代的本任务旧镜像，不是卷/教材/数据库；原备份保留。
+两科现行草稿各单选4/填空4/名词5/简答4/论述2；各题型ready均0。第一套28题仍差每科3/3/4/3/1的完整科学与答案自动核验；不得用草稿凑卷。旧60题历史兼容保留，正式规格继续28/150/60，差异及未来选项见恢复报告，不混用。
 
-## 交付文件
+## 容量与最小下一步
 
-1. docs/railway-deployment-handoff.md：唯一目标、Patch、来源同步及逐字段操作。
-2. docs/railway-cost-budget.md：整工作区三方案、计算式、未知数据与审批。
-3. docs/database-recovery-plan.md：实际包/导出阻碍、容量、权限、脚本与恢复标准。
-4. docs/deepseek-live-readiness.md：当前执行层、费用/私有授权、未完成真实验收。
-5. docs/mobile-acceptance.md：手机最小实际验收。
-6. docs/next-execution-report.md：本报告。
+恢复后DB425,924,275字节，源表/索引416,301,056；测试后DB448,214,707、集群文件约992,203,732（含WAL520,093,696），不能复用500MB旧卷。没有实测恢复峰值。新增一个独立PG17建议2GB，不开独立Worker。全Workspace仍需Usage及现有测试API实际用量；条件化示例约¥26.03或¥41.43/月均可能，不能证明≤¥35，详见费用页。
 
-可执行辅助：backend/app/deployment_check.py、backend/app/recovery_check.py。无密钥回执：deploy/railway-automation/observed-user-receipt.json。旧阶段报告保留作历史，不能覆盖本轮状态。
+用户报告现API63042da /health200但没有独立PG；恢复前需要只读确认实际身份门禁与DATABASE_URL是否存在及脱敏归属，不能把200当数据就绪，也不据此断言连了生产。这不是重复GitHub部署安全检查。
 
-下一执行方先读取原Patch与触发开关/完整用量，回传无密钥回执；确认安全后同步新HEAD并跑CI，再更新暂存SHA。只有私有交接、独立新库、费用/恢复/HTTPS等授权及目标条件全部满足后，才能实际部署。原production保持未操作，不能为省费直接覆盖500MB旧库或停止旧服务。
+最小后续：先取得整个Workspace账期用量（只读），确认资源预算；再单独批准指定测试项目一个PG17/2GB卷、有限验证窗口、从指定私人备份传输及一次恢复。创建后真实核对数据库服务UUID/端点/集群/空库/权限，再恢复读回。AI调用和教材外发仍单独授权，本轮0调用；原生产切换不在计划内。
 
-## 第一轮外部回执后的续接
+## 证据保留
 
-本轮基于b9423ac继续，未回退成果。新增无密钥回执记录：Patch非破坏性、测试部署数0、Webhook均为空、变量值不可读、原生产短窗口RAM/CPU。证据来源为用户转交的Railway连接方，不是本Codex独立查询。自动部署/PR预览保持null，费用完整性false，AI值null，私有交接false；push预检仍明确拒绝两个未知开关。新增回归测试确保空Webhook和零部署不能放行。
-
-成本文档加入仅供敏感性外推的原系统短窗口计算约¥8.18/月，明确不含出站、其他资源与新增环境，不是完整账期账单，不据此启动服务。备份实际路径与0600权限保留，未重复全量校验、未外发；没有新增官方出站附件工具，手机保存仍未确认。
-
-复用已经构建且业务源码未变化的4ff7869e镜像，无需重复下载依赖重建。实际无网络、只读、非root冒烟通过：三AI开关0，缺库健康503，SDK 0.2.1rc2。初次版本查询误用发行包名deepseek-harness报错，更正为deepseek-harness-sdk后通过，没有修改镜像或降低检查。日志/tmp/text-followup-docker.log。
-
-本轮继续无真实DeepSeek调用、无部署、无恢复、无原生产修改、无push。等待控制台提供实际生效开关及整个工作区Usage；有效证据到齐后才重跑预检、推送最终HEAD并运行新CI，之后才同步暂存Source SHA，不能再固定旧cadf521或较早b9423ac。
-
-续接完整测试：410 passed，0失败/跳过，1条既有Starlette弃用警告，100.80秒；保留原409并新增1条空Webhook负向测试。命令同上，日志/tmp/text-followup-tests.log。Ruff F/E9与git diff --check通过。恢复脚本、真实SDK本地协议（不访问DeepSeek）、固定组卷/计时/预算等在完整回归内通过；不等同真实恢复或付费验收。
+私有日志根/workspace/private-intake/backup-user-handoff，实际恢复目标及数据根/workspace/private-intake/ustc-restore-rehearsal-a84gic2k；详情见恢复报告。日志/风险具体位置/教材正文/题干/答案/连接凭据不提交公共源码仓库。报告机器摘要只包含汇总计数/文件SHA。报告编排出现的Decimal序列化和prepare返回结构错误已修复，实际恢复未重跑，后续独立读回通过，不掩盖错误。
