@@ -51,7 +51,7 @@ GitHub实际HEAD开始时为12317868050a32ce48c06d9d07a42303c3faf237，两条CI�
 
 本版在目录缺价格时使用用户依据官方文档明确确认的**正数价格上界**做保守预算，不能冒充实时官方报价或真实账单。GET /models原字段保留；无可信计价信息时actual_usd为null，显示预留而不是假称实际支出。真实usage/model版本从响应读取，缺失不伪造；SDK Off实际走Messages output_config适配，不把OpenAI reasoning_effort参数直接发到错误接口。
 
-331项最终测试结果/CI以PR正文为准：原294项保留，新增测试均区分Mock结果、真实SDK对本地协议、真实SQL/HTTP/浏览器。38题证据指标是身份/原文一致性38/38，**不是科学准确率100%**。独立可信科学参考标签尚缺，scientific_accuracy=null；原AI答案不能充当ground truth。新模型真实回归与成本/延迟对照未执行，因此自动升级没有获准候选。
+332项最终测试结果/CI以PR正文为准：原294项保留，新增测试均区分Mock结果、真实SDK对本地协议、真实SQL/HTTP/浏览器。38题证据指标是身份/原文一致性38/38，**不是科学准确率100%**。独立可信科学参考标签尚缺，scientific_accuracy=null；原AI答案不能充当ground truth。新模型真实回归与成本/延迟对照未执行，因此自动升级没有获准候选。
 
 ## 尚需授权与接续
 

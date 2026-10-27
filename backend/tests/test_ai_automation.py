@@ -134,6 +134,18 @@ def synthetic_result(job, db, passed=True, quote=None):
         real_api=True,
         response=dict(
             passed=passed,
+            independent_choice=(
+                db.execute(
+                    "SELECT content FROM reviewed_questions WHERE id=%s",
+                    (job["payload"]["question_id"],),
+                ).fetchone()["content"]["answer"]
+                if db.execute(
+                    "SELECT content FROM reviewed_questions WHERE id=%s",
+                    (job["payload"]["question_id"],),
+                ).fetchone()["content"]["question_type"]
+                == "single_choice"
+                else None
+            ),
             checks={a: passed for a in AXES},
             claims=[
                 dict(
@@ -716,3 +728,16 @@ def test_scheduled_backup_is_disabled_without_storage_authorization(monkeypatch)
 
     monkeypatch.delenv("QUIZ_PRIVATE_BACKUP_ENABLED", raising=False)
     assert not tick()
+
+
+def test_independent_choice_conflict_blocks_even_when_model_checks_pass(
+    db, setup_ai, candidate
+):
+    job = quality.schedule_checks(db, setup_ai, candidate)[0]
+    job = synthetic_result(job, db)
+    job["result"]["response"]["independent_choice"] = "B"
+    db.execute(
+        "UPDATE ai_jobs SET result=%s WHERE id=%s", (Jsonb(job["result"]), job["id"])
+    )
+    assert not quality.accept_round(db, job)
+    assert not quality.ready(db, candidate)
