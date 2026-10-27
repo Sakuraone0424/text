@@ -40,3 +40,15 @@ Docker日志`/tmp/text-handoff-docker-build.log`，冒烟`/tmp/text-handoff-imag
 可执行辅助：backend/app/deployment_check.py、backend/app/recovery_check.py。无密钥回执：deploy/railway-automation/observed-user-receipt.json。旧阶段报告保留作历史，不能覆盖本轮状态。
 
 下一执行方先读取原Patch与触发开关/完整用量，回传无密钥回执；确认安全后同步新HEAD并跑CI，再更新暂存SHA。只有私有交接、独立新库、费用/恢复/HTTPS等授权及目标条件全部满足后，才能实际部署。原production保持未操作，不能为省费直接覆盖500MB旧库或停止旧服务。
+
+## 第一轮外部回执后的续接
+
+本轮基于b9423ac继续，未回退成果。新增无密钥回执记录：Patch非破坏性、测试部署数0、Webhook均为空、变量值不可读、原生产短窗口RAM/CPU。证据来源为用户转交的Railway连接方，不是本Codex独立查询。自动部署/PR预览保持null，费用完整性false，AI值null，私有交接false；push预检仍明确拒绝两个未知开关。新增回归测试确保空Webhook和零部署不能放行。
+
+成本文档加入仅供敏感性外推的原系统短窗口计算约¥8.18/月，明确不含出站、其他资源与新增环境，不是完整账期账单，不据此启动服务。备份实际路径与0600权限保留，未重复全量校验、未外发；没有新增官方出站附件工具，手机保存仍未确认。
+
+复用已经构建且业务源码未变化的4ff7869e镜像，无需重复下载依赖重建。实际无网络、只读、非root冒烟通过：三AI开关0，缺库健康503，SDK 0.2.1rc2。初次版本查询误用发行包名deepseek-harness报错，更正为deepseek-harness-sdk后通过，没有修改镜像或降低检查。日志/tmp/text-followup-docker.log。
+
+本轮继续无真实DeepSeek调用、无部署、无恢复、无原生产修改、无push。等待控制台提供实际生效开关及整个工作区Usage；有效证据到齐后才重跑预检、推送最终HEAD并运行新CI，之后才同步暂存Source SHA，不能再固定旧cadf521或较早b9423ac。
+
+续接完整测试：410 passed，0失败/跳过，1条既有Starlette弃用警告，100.80秒；保留原409并新增1条空Webhook负向测试。命令同上，日志/tmp/text-followup-tests.log。Ruff F/E9与git diff --check通过。恢复脚本、真实SDK本地协议（不访问DeepSeek）、固定组卷/计时/预算等在完整回归内通过；不等同真实恢复或付费验收。

@@ -64,3 +64,9 @@ PYTHONPATH=backend .venv/bin/python -m app.deployment_check --receipt /private/f
 deploy预检要求新SHA一致、AI关闭、工作区预计用量≤额度且完整、付费启动/私有传输/恢复授权、空库与备份交接确认。它不创建资源、不apply、不上传、不启动，不是授权替代品。
 
 真正部署只有费用、恢复与授权条件通过后由连接方执行，记录新Patch ID、精确SHA、Deployment ID、日志、域名及用量。失败时停留在未部署状态，保留旧Patch/read-only快照；不得回滚原production、删卷或清库。若新测试服务已启动，停止/回退也仅限用户批准的新服务操作；先记录日志与私有数据持久状态。
+
+## 第一轮连接方回执补充
+
+用户转交的外部只读结果：上述Patch仍STAGED、16项、destructive=false；测试部署数0；源码仍固定cadf521；Dockerfile与/health匹配；9项AI/执行控制变量及RAILWAY_DOCKERFILE_PATH只能读取名称，值隐藏，故ai_flags仍为null。原两服务SUCCESS、无暂存修改、500MB卷。两个项目Webhook列表为空**不能证明GitHub Automatic Deployments或PR预览关闭**。
+
+当前连接工具不提供上述开关或完整账单字段。下一步由用户在控制台查看测试服务实际生效的Automatic Deployments与项目PR预览开关（包含任何暂存覆盖），回传对应UUID、页面截图/观测时间；并取得整个My Projects当前账期Usage及预测。不要提交Patch或启用服务来探测。只确认关闭后，更新无密钥回执再运行push预检；费用与恢复等门禁继续独立阻断。

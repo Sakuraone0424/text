@@ -280,3 +280,18 @@ def test_public_database_transport_requires_verified_tls(db_approval, monkeypatc
     with pytest.raises(PermissionError, match="verified TLS"):
         d.verify_database_url(url)
     d.verify_database_url(url + "?sslmode=verify-full")
+
+
+def test_empty_webhooks_and_zero_deployments_do_not_prove_triggers_disabled():
+    import json
+    from pathlib import Path
+
+    observed = json.loads((Path(__file__).resolve().parents[2] / "deploy/railway-automation/observed-user-receipt.json").read_text())
+    assert observed["deployment_count"] == 0
+    assert set(observed["webhook_counts"].values()) == {0}
+    assert observed["ai_flags"] is None
+    for phase in ("push", "deploy"):
+        result = c.check(observed, "b9423ac92e55486bd026dc6d9ed94476132c5977", phase)
+        assert not result["ready"]
+        assert "autodeploy_enabled_not_confirmed_off" in result["issues"]
+        assert "pr_previews_enabled_not_confirmed_off" in result["issues"]

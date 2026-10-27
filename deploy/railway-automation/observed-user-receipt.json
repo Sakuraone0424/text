@@ -25,5 +25,23 @@
     "DEEPSEEK_API_AUTHORIZED": "0",
     "DEEPSEEK_PRIVATE_DATA_AUTHORIZED": "0"
   },
-  "ai_flags_observation": "User reports disabled variables; exact three staged values must be read back"
+  "ai_flags_observation": "Only variable names independently readable by Railway connection party; staged values hidden. Historical safe settings are not current value readback.",
+  "patch_destructive": false,
+  "deployment_count": 0,
+  "webhook_counts": {
+    "original_project": 0,
+    "test_project": 0
+  },
+  "dockerfile_path": "deploy/railway-automation/Dockerfile",
+  "healthcheck_path": "/health",
+  "reported_ai_execution_variable_count": 9,
+  "reported_dockerfile_variable_count": 1,
+  "short_window_observation": {
+    "source": "user_supplied_external_read_only_query",
+    "hours": 2,
+    "original_api_average_memory_mb": 47,
+    "original_postgres_average_memory_mb": 58,
+    "combined_average_cpu_vcpu": "0.0022",
+    "is_monthly_billing": false
+  }
 }
