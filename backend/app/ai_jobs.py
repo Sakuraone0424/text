@@ -5,7 +5,14 @@ import json
 from decimal import Decimal
 from uuid import uuid4
 from psycopg.types.json import Jsonb
-from app import model_router
+from app import model_router, cny_billing
+
+
+class ProviderFailure(RuntimeError):
+    def __init__(self, status):
+        self.request_confirmed = type(status) is int and 100 <= status <= 599
+        self.status = status if type(status) is int and 100 <= status <= 599 else 502
+        super().__init__("provider_request_failed")
 
 
 def enqueue(conn, user_id, key, kind, payload):
@@ -33,9 +40,12 @@ def enqueue(conn, user_id, key, kind, payload):
 
 def claim(conn):
     # Expired leases are never concurrently finalized: every attempt has a new fence.
-    conn.execute(
-        "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp()"
-    )
+    expired = conn.execute(
+        "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp() RETURNING *"
+    ).fetchall()
+    for lost in expired:
+        if lost["settings_snapshot"].get("billing_currency") == "CNY":
+            cny_billing.settle(conn, lost, None, TimeoutError())
     job = conn.execute(
         "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp() ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id FOR UPDATE SKIP LOCKED LIMIT 1"
     ).fetchone()
@@ -64,19 +74,24 @@ def claim(conn):
     if running >= live["max_concurrency"]:
         return None
     try:
-        amount = model_router.cost_bound(s)
+        # Freeze model/effort, not a stale tariff. Each attempt snapshots the current
+        # admitted CNY version and reserves its own ceiling before any request.
+        price = cny_billing.current_price(conn, s["model_id"])
+        amount = model_router.cost_bound({**s, "price_snapshot": price})
     except ValueError:
+        price = {}
         amount = Decimal(0)
-        reason = "verified_price_required"
-    totals = conn.execute(
-        "SELECT COALESCE(sum(b.usd) FILTER(WHERE b.created_at>=(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS day,COALESCE(sum(b.usd) FILTER(WHERE b.created_at>=(date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS month FROM ai_budget_reservations b JOIN ai_jobs j ON j.id=b.job_id WHERE j.user_id=%s",
-        (uid,),
-    ).fetchone()
+        reason = "verified_cny_price_required"
+    totals = cny_billing.totals(conn, uid)
     if (
-        totals["day"] + amount > live["daily_usd"]
-        or totals["month"] + amount > live["monthly_usd"]
+        totals["day"] + amount > live["daily_cny"]
+        or totals["month"] + amount > live["monthly_cny"]
+        or (live["trial_active"] and totals["trial"] + amount > live["trial_cny"])
+        or job["reserved_cny"] + amount > live["task_cny"]
     ):
         reason = "budget_exceeded"
+    if s.get("billing_currency") != "CNY":
+        reason = "legacy_currency_job_requires_requeue"
     if reason:
         conn.execute(
             "UPDATE ai_jobs SET state='blocked',error_code=%s WHERE id=%s",
@@ -84,12 +99,12 @@ def claim(conn):
         )
         return None
     claimed = conn.execute(
-        "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_usd=reserved_usd+%s,lease_token=%s,lease_until=clock_timestamp()+interval '180 seconds',started_at=clock_timestamp() WHERE id=%s RETURNING *",
+        "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_until=clock_timestamp()+interval '180 seconds',started_at=clock_timestamp() WHERE id=%s RETURNING *",
         (amount, str(uuid4()), job["id"]),
     ).fetchone()
     conn.execute(
-        "INSERT INTO ai_budget_reservations(job_id,attempt,usd) VALUES(%s,%s,%s)",
-        (job["id"], claimed["attempts"], amount),
+        "INSERT INTO ai_cny_reservations(job_id,attempt,amount_cny,price_snapshot) VALUES(%s,%s,%s,%s)",
+        (job["id"], claimed["attempts"], amount, Jsonb(price)),
     )
     return claimed
 
@@ -111,11 +126,22 @@ def finish(conn, job, result=None, error=None):
             else "blocked"
         )
     )
+    if isinstance(error, ProviderFailure) and error.status in (400, 401, 402, 403, 404):
+        state = "blocked"
     # Error messages/prompts/credentials are not logged. Codes are application-owned.
-    code = None if error is None else type(error).__name__
+    code = (
+        None
+        if error is None
+        else (
+            "provider_http_" + str(error.status)
+            if isinstance(error, ProviderFailure)
+            else type(error).__name__
+        )
+    )
     usage = (result or {}).get("usage", {})
+    cny_billing.settle(conn, locked, result, error)
     conn.execute(
-        "INSERT INTO ai_call_events(job_id,model_id,effort,model_version,usage,outcome,error_code) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+        "INSERT INTO ai_call_events(job_id,model_id,effort,model_version,usage,outcome,error_code,provider_request_confirmed) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
         (
             job["id"],
             job["settings_snapshot"]["model_id"],
@@ -124,6 +150,10 @@ def finish(conn, job, result=None, error=None):
             Jsonb(usage),
             state,
             code,
+            True
+            if (result or {}).get("real_api") is True
+            or (isinstance(error, ProviderFailure) and error.request_confirmed)
+            else None,
         ),
     )
     conn.execute(

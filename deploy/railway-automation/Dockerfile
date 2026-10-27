@@ -11,6 +11,7 @@ WORKDIR /app
 COPY --chown=postgres:postgres backend/app ./app
 COPY --chown=postgres:postgres backend/sql ./sql
 COPY --chown=postgres:postgres backend/harness ./harness
+COPY --chown=postgres:postgres backend/config ./config
 COPY --chown=postgres:postgres backend/migrate.py ./migrate.py
 ENV QUIZ_AUTO_ONLY=1 AI_AUTOMATION_ENABLED=0 QUIZ_DAILY_PREP_ENABLED=0 PYTHONDONTWRITEBYTECODE=1 AI_QUEUE_AUTOPLAN=0 AI_FULL_CORPUS_ENABLED=0 QUIZ_PRIVATE_BACKUP_ENABLED=0
 USER postgres

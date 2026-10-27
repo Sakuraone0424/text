@@ -56,4 +56,9 @@ def execute(job):
         raise RuntimeError("harness_task_failed")
     if len(out.encode()) > 131072:
         raise ValueError("oversized_harness_response")
-    return json.loads(out)
+    result = json.loads(out)
+    if result.get("provider_error"):
+        from app.ai_jobs import ProviderFailure
+
+        raise ProviderFailure(result.get("http_status"))
+    return result

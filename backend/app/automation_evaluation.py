@@ -23,7 +23,7 @@ def evaluate(conn):
         except ValueError as exc:
             failures.append(dict(question_id=row["question_id"], issues=[str(exc)]))
     calls = conn.execute(
-        "SELECT input_tokens,output_tokens,actual_usd FROM ai_jobs WHERE attempts>0"
+        "SELECT input_tokens,output_tokens,estimated_cny FROM ai_jobs WHERE attempts>0"
     ).fetchall()
     tokens = (
         0
@@ -38,8 +38,8 @@ def evaluate(conn):
         )
     )
     cost = (
-        sum(r["actual_usd"] for r in calls)
-        if calls and all(r["actual_usd"] is not None for r in calls)
+        sum(r["estimated_cny"] for r in calls)
+        if calls and all(r["estimated_cny"] is not None for r in calls)
         else None
     )
     return dict(
@@ -53,5 +53,7 @@ def evaluate(conn):
         started_model_task_count=len(calls),
         real_api_tokens=tokens,
         real_api_cost=cost,
+        cost_currency="CNY",
+        cost_kind="usage_estimate_not_invoice",
         model_latency=None,
     )

@@ -18,6 +18,12 @@ async function api(path, body) {
 function say(s) {
   $("message").textContent = s;
 }
+function priceLabel(p) {
+  if (!p) return "人民币价格未知或冲突，阻止付费任务";
+  const a = p.rules.off_peak,
+    b = p.rules.peak;
+  return `CNY元/百万Token（空闲/高峰）：缓存命中 ${a.cache_hit}/${b.cache_hit}，未命中 ${a.cache_miss}/${b.cache_miss}，输出 ${a.output}/${b.output}；价格适用版本 ${p.model_version ?? "未知"}`;
+}
 function options() {
   const row = data.catalog.models.find((m) => m.id === $("model").value);
   $("effort").replaceChildren();
@@ -36,13 +42,29 @@ function options() {
   if (row?.efforts.includes(data.settings.effort))
     $("effort").value = data.settings.effort;
   $("capabilities").textContent = row
-    ? `上下文 ${row.context_window ?? "未知"} · 输出上限 ${row.max_output_tokens ?? "未知"} · 工具 ${row.tools ?? "未知"} · 图片 ${row.vision ?? "未知"} · 价格 ${row.prices ? JSON.stringify(row.prices) : "未知，任务将阻止"} · ${row.available ? "官方目录在列" : "已下线"} · ${row.compatible ? "兼容性已实测" : "尚未通过真实兼容性检查"}`
+    ? `上下文 ${row.context_window ?? "未知"} · 输出上限 ${row.max_output_tokens ?? "未知"} · 工具 ${row.tools ?? "未知"} · 图片 ${row.vision ?? "未知"} · 价格 ${priceLabel(row.prices)} · 最近兼容性实测 ${row.compatibility_checked_at ?? "未执行"} · ${row.available ? "官方目录在列" : "已下线"} · ${row.compatible ? "兼容性已实测" : "尚未通过真实兼容性检查"}`
     : "尚无真实模型目录，请先配置服务端凭据并刷新。";
   $("save").disabled =
     !row?.compatible || !row?.available || !row?.efforts.length;
 }
 async function load() {
   data = await api("/v2/model");
+  const bill = await api("/v2/model/billing");
+  $("billing").textContent =
+    `CNY · 今日usage估算 ¥${bill.usage_estimate_cny.day} · 本月usage估算 ¥${bill.usage_estimate_cny.month} · 今日剩余预算 ¥${bill.remaining_daily_cny} · 本月剩余预算 ¥${bill.remaining_monthly_cny} · 累计预留 ¥${bill.reserved_cny.trial} · 未知待对账预留 ¥${bill.unknown_reserved_cny} · 调用尝试 ${bill.call_attempts} · 当前时段 ${bill.period} · Search/Fetch 禁用 · 官方账单 ${bill.invoice_status}`;
+  $("billing-history").textContent = JSON.stringify(
+    {
+      price: bill.price,
+      events: bill.events,
+    by_task: bill.by_task,
+      model_changes: bill.settings_history,
+    },
+    null,
+    2,
+  );
+  $("task-budget").value = data.settings.task_cny;
+  $("trial-budget").value = data.settings.trial_cny;
+  $("trial-active").checked = data.settings.trial_active;
   $("login").hidden = true;
   $("controls").hidden = false;
   $("model").replaceChildren();
@@ -57,8 +79,8 @@ async function load() {
   $("token-limit").value = data.settings.token_limit;
   $("retry-limit").value = data.settings.retry_limit;
   $("max-concurrency").value = data.settings.max_concurrency;
-  $("daily").value = data.settings.daily_usd;
-  $("monthly").value = data.settings.monthly_usd;
+  $("daily").value = data.settings.daily_cny;
+  $("monthly").value = data.settings.monthly_cny;
   $("discover").checked = data.settings.auto_discover;
   $("upgrade").checked = data.settings.auto_upgrade;
   $("stopped").checked = data.settings.stopped;
@@ -86,8 +108,8 @@ $("save").onclick = async () => {
       auto_discover: $("discover").checked,
       auto_upgrade: $("upgrade").checked,
       stopped: $("stopped").checked,
-      daily_usd: Number($("daily").value),
-      monthly_usd: Number($("monthly").value),
+      daily_cny: $("daily").value,
+      monthly_cny: $("monthly").value,
     });
     await load();
   } catch (e) {
@@ -125,11 +147,14 @@ load().catch(() => say("请登录。密钥只能通过服务端Secret配置。")
 $("limits").onclick = async () => {
   try {
     await api("/v2/model/limits", {
+      task_cny: $("task-budget").value,
+      trial_cny: $("trial-budget").value,
+      trial_active: $("trial-active").checked,
       token_limit: Number($("token-limit").value),
       retry_limit: Number($("retry-limit").value),
       max_concurrency: Number($("max-concurrency").value),
-      daily_usd: Number($("daily").value),
-      monthly_usd: Number($("monthly").value),
+      daily_cny: $("daily").value,
+      monthly_cny: $("monthly").value,
       stopped: $("stopped").checked,
     });
     await load();
@@ -139,14 +164,9 @@ $("limits").onclick = async () => {
 };
 $("probe").onclick = async () => {
   try {
-    if (!$("in-price").value || !$("out-price").value)
-      throw Error("请先据官方价格填写明确上界，不得猜测。");
     const job = await api("/v2/model/probe", {
       model_id: $("model").value,
       effort: $("probe-effort").value,
-      input_per_million: Number($("in-price").value),
-      output_per_million: Number($("out-price").value),
-      source: $("price-source").value,
     });
     say("探测任务 " + job.id + "：" + job.state + "；排队不代表调用成功。");
   } catch (e) {
@@ -160,6 +180,15 @@ $("backup").onclick = async () => {
     const b = await api("/v2/model/backup/refresh", {});
     $("backup-info").textContent = b.bytes + "字节 · SHA-256 " + b.sha256;
     say("快照完成，请下载并保存到自己的文件位置；尚未确认实际保存。");
+  } catch (e) {
+    say(e.message);
+  }
+};
+
+$("price-refresh").onclick = async () => {
+  try {
+    await api("/v2/model/prices/refresh", {});
+    await load();
   } catch (e) {
     say(e.message);
   }

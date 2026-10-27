@@ -13,6 +13,7 @@ def relay(model, token_limit):
         "usage": {},
         "model_version": None,
         "returned_model_id": None,
+        "http_status": None,
     }
     lock = threading.Lock()
 
@@ -32,7 +33,19 @@ def relay(model, token_limit):
             if (
                 body.get("model") != model
                 or body.get("max_tokens", 0) > token_limit
-                or body.get("tools")
+                or any(
+                    body.get(k)
+                    for k in (
+                        "tools",
+                        "tool_choice",
+                        "server_tools",
+                        "web_search",
+                        "search",
+                        "fetch",
+                        "enable_search",
+                        "plugins",
+                    )
+                )
                 or any("session_log" in k or k.startswith("dsh_") for k in body)
             ):
                 self.send_error(403)
@@ -63,6 +76,7 @@ def relay(model, token_limit):
                             chunks.append(chunk)
                         raw = b"".join(chunks)
                         status = response.status_code
+                        state["http_status"] = status
                 if status == 200:
                     for line in raw.decode().splitlines():
                         if not line.startswith("data: "):

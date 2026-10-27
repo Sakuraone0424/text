@@ -29,6 +29,24 @@ def test_mobile_model_settings_restore(live_app, browser, width, height):
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
     expect(page.locator("#controls")).to_be_visible()
+    expect(page.locator("#billing")).to_contain_text("CNY")
+    assert (
+        page.request.get(str(client.base_url).rstrip("/") + "/static/app.css").status
+        == 200
+    )
+    assert (
+        page.evaluate("getComputedStyle(document.querySelector('button')).minHeight")
+        == "44px"
+    )
+    page.locator("#daily").fill("10.01")
+    page.locator("#monthly").fill("50")
+    page.locator("#task-budget").fill("1")
+    page.locator("#trial-budget").fill("10")
+    page.locator("#limits").click()
+    expect(page.locator("#billing")).to_contain_text("10.01")
+    page.reload()
+    expect(page.locator("#daily")).to_have_value("10.01")
+    expect(page.locator("#trial-active")).to_be_checked()
     assert page.evaluate("document.documentElement.scrollWidth<=window.innerWidth")
     assert page.locator("#effort option").count() == 2
     page.locator("#effort").select_option("off")

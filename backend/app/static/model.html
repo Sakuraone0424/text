@@ -4,7 +4,37 @@
     name="viewport"
     content="width=device-width,initial-scale=1"
   /><title>模型与思考设置</title
-  ><link rel="stylesheet" href="/static/training.css" />
+  ><link rel="stylesheet" href="/static/app.css" />
+  <style>
+    body {
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+    main {
+      max-width: 960px;
+      margin: auto;
+      padding: 16px 14px 80px;
+    }
+    label {
+      display: block;
+      margin: 12px 0;
+    }
+    select,
+    input:not([type="checkbox"]) {
+      max-width: 100%;
+      width: 100%;
+      min-height: 44px;
+    }
+    button {
+      margin: 6px 4px 6px 0;
+      min-height: 44px;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-width: 100%;
+    }
+  </style>
   <body>
     <main>
       <h1>模型与思考设置</h1>
@@ -21,20 +51,50 @@
       <p id="message" role="status"></p>
       <section id="controls" hidden>
         <p>
-          AI自动核验不保证100%科学正确。设置仅影响新任务，当前试卷与成绩保持不变。
+          AI自动核验不保证100%科学正确。设置仅影响新任务，当前试卷与成绩保持不变。应用侧预算不是平台硬性扣费限额；本地估算不代表官方账单。
         </p>
         <label>模型<select id="model"></select></label
         ><label>思考强度<select id="effort"></select></label>
         <p id="capabilities"></p>
+        <section aria-label="人民币费用">
+          <h2>DeepSeek 人民币账本</h2>
+          <p id="billing" role="status"></p>
+          <details>
+            <summary>费用与模型历史</summary>
+            <pre id="billing-history"></pre>
+          </details>
+        </section>
         <label
-          >每日美元预算<input
+          >单任务（含重试）预算 ¥<input
+            id="task-budget"
+            type="number"
+            min="0"
+            max="1000"
+            step="0.01"
+        /></label>
+        <label
+          ><input
+            id="trial-active"
+            type="checkbox"
+          />启用首次试验累计限额（完成试验后可明确关闭；日/月/单任务限额仍生效）</label
+        >
+        <label
+          >首次试验累计预算 ¥<input
+            id="trial-budget"
+            type="number"
+            min="0"
+            max="10000"
+            step="0.01"
+        /></label>
+        <label
+          >每日人民币预算<input
             id="daily"
             type="number"
             min="0"
             max="1000"
             step="0.01" /></label
         ><label
-          >每月美元预算<input
+          >每月人民币预算<input
             id="monthly"
             type="number"
             min="0"
@@ -75,7 +135,7 @@
         <details>
           <summary>首次兼容性检查（需服务端授权与预算）</summary>
           <p>
-            此探测仅发送合成算术，不发送教材；金额是你据官方价格填写的每百万Token美元上界，不代表目录已返回价格。未知价格时请勿猜填。
+            仅发送合成算术，不发送教材。必须先取得真实API与预算授权；价格只从已核查的官方中文CNY价格版本读取，未知或冲突时阻断。
           </p>
           <label
             >请求档位<select id="probe-effort">
@@ -84,23 +144,6 @@
               <option selected>high</option>
               <option>max</option>
             </select></label
-          ><label
-            >输入单价上界<input
-              id="in-price"
-              type="number"
-              min="0"
-              step="0.01" /></label
-          ><label
-            >输出单价上界<input
-              id="out-price"
-              type="number"
-              min="0"
-              step="0.01" /></label
-          ><label
-            >官方价格依据URL<input
-              id="price-source"
-              type="url"
-              placeholder="https://api-docs.deepseek.com/..." /></label
           ><button id="probe">排队兼容性探测</button>
         </details>
         <details>

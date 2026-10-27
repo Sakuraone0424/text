@@ -13,6 +13,10 @@ from test_candidate_review import packet as packet_fixture
 @pytest.fixture
 def setup_ai(db):
     uid = ensure_user(db, "synthetic-ai-owner")
+    from cny_fixtures import price
+    from app.cny_billing import install_price
+
+    install_price(db, price())
     m.refresh(
         db,
         lambda: dict(
@@ -37,7 +41,15 @@ def setup_ai(db):
     )
     db.execute("UPDATE ai_model_catalog SET compatibility=%s", (Jsonb(cap),))
     m.configure(
-        db, uid, "deepseek-flash", "high", stopped=False, daily_usd=1, monthly_usd=5
+        db,
+        uid,
+        "deepseek-flash",
+        "high",
+        stopped=False,
+        daily_cny=1,
+        monthly_cny=5,
+        task_cny=1,
+        trial_cny=5,
     )
     return uid
 
@@ -93,17 +105,16 @@ def test_off_explicit_disable_and_frozen_task_settings(db, setup_ai):
 def test_budget_stops_and_reservation_survives_uncertain_failure(db, setup_ai):
     jobs.enqueue(db, setup_ai, "bill", "science_review", {})
     claim = jobs.claim(db)
-    assert claim and claim["reserved_usd"] > 0
+    assert claim and claim["reserved_cny"] > 0
     jobs.finish(db, claim, error=RuntimeError("DO NOT RECORD private secret or prompt"))
     row = db.execute("SELECT * FROM ai_call_events").fetchone()
     assert row["error_code"] == "RuntimeError" and "private" not in str(row)
     db.execute("UPDATE ai_jobs SET next_retry=clock_timestamp()-interval '1 minute'")
-    m.configure(db, setup_ai, "deepseek-flash", "high", daily_usd=0, monthly_usd=0)
+    m.configure(db, setup_ai, "deepseek-flash", "high", daily_cny=0, monthly_cny=0)
     assert jobs.claim(db) is None
     assert db.execute("SELECT state FROM ai_jobs").fetchone()["state"] == "blocked"
     assert (
-        db.execute("SELECT count(*) AS n FROM ai_budget_reservations").fetchone()["n"]
-        == 1
+        db.execute("SELECT count(*) AS n FROM ai_cny_reservations").fetchone()["n"] == 1
     )
 
 
@@ -283,7 +294,15 @@ def test_automatic_grading_writes_fsrs_and_preserves_completed_score(
 
     uid, paper = running
     m.configure(
-        db, uid, "deepseek-flash", "high", stopped=False, daily_usd=1, monthly_usd=5
+        db,
+        uid,
+        "deepseek-flash",
+        "high",
+        stopped=False,
+        daily_cny=1,
+        monthly_cny=5,
+        task_cny=1,
+        trial_cny=5,
     )
     quiz.submit(
         db,
@@ -579,16 +598,15 @@ def test_compatibility_probe_does_not_admit_unrun_model(db, setup_ai, monkeypatc
     monkeypatch.setenv("DEEPSEEK_API_AUTHORIZED", "1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "synthetic-never-sent-key")
     m.refresh(db, lambda: dict(data=[dict(id="future-test-model")]))
+    from cny_fixtures import price
+    from app.cny_billing import install_price
+
+    install_price(db, price("future-test-model"))
     j = compatibility.enqueue_probe(
         db,
         setup_ai,
         "future-test-model",
         "high",
-        dict(
-            input_per_million="1",
-            output_per_million="2",
-            source="https://api-docs.deepseek.com/synthetic-price-fixture",
-        ),
     )
     assert (
         j["state"] == "pending"
@@ -617,6 +635,10 @@ def test_automatic_upgrade_requires_quality_reference_and_budget(db, setup_ai):
     db.execute(
         "UPDATE ai_model_catalog SET compatibility=compatibility||'{\"quality_benchmark_passed\":true}' WHERE model_id='new-synthetic'"
     )
+    from cny_fixtures import price
+    from app.cny_billing import install_price
+
+    install_price(db, price("new-synthetic"))
     upgraded = auto_upgrade(db, setup_ai)
     assert upgraded and upgraded["model_id"] == "new-synthetic"
 

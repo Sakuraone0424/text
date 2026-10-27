@@ -1,14 +1,14 @@
 """Small real API admission probes; no private corpus, no inferred capabilities."""
 
+from datetime import datetime, timezone
 from psycopg.types.json import Jsonb
-from urllib.parse import urlsplit
 import re
 from importlib.metadata import version, PackageNotFoundError
 from app import model_router as m
 from app.ai_jobs import content_sha
 
 
-def enqueue_probe(conn, uid, model, effort, price_ceiling):
+def enqueue_probe(conn, uid, model, effort):
     m.authorized()
     if effort not in m.EFFORTS:
         raise ValueError("unsupported_effort")
@@ -17,8 +17,6 @@ def enqueue_probe(conn, uid, model, effort, price_ceiling):
     ).fetchone()
     if not row:
         raise ValueError("model_not_in_actual_catalog")
-    if not price_ceiling.get("source", "").startswith("https://api-docs.deepseek.com/"):
-        raise ValueError("official_price_reference_required")
     requirement = (
         row["metadata"]
         .get("client_requirements", {})
@@ -45,21 +43,19 @@ def enqueue_probe(conn, uid, model, effort, price_ceiling):
             raise ValueError("harness_not_installed")
         if parts(installed) < parts(requirement):
             raise ValueError("harness_upgrade_required")
-    parsed = urlsplit(price_ceiling["source"])
-    if parsed.username or parsed.password or parsed.query or parsed.fragment:
-        raise ValueError("price_reference_must_not_contain_credentials")
+    from app.cny_billing import current_price
+
     s = dict(m.settings(conn, uid))
     s.update(
         model_id=model,
         effort=effort,
-        capabilities=dict(prices=price_ceiling),
+        capabilities={},
+        price_snapshot=current_price(conn, model),
     )
-    for k in ("daily_usd", "monthly_usd"):
+    for k in ("daily_cny", "monthly_cny", "task_cny", "trial_cny"):
         s[k] = str(s[k])
     s.pop("updated_at", None)
     m.cost_bound(s)
-    # A price ceiling is user-supplied budget input, not a claim that /models returned prices.
-    s["capabilities"]["price_mode"] = "user_declared_upper_bound"
     payload = dict(
         instructions='Return exactly JSON {"check":2} for 1+1. No tool calls, explanation or other text.',
         catalog_metadata=row["metadata"],
@@ -74,7 +70,7 @@ def enqueue_probe(conn, uid, model, effort, price_ceiling):
         + ":"
         + content_sha(row["metadata"])
         + ":"
-        + content_sha(price_ceiling)
+        + s["price_snapshot"]["version"]
         + ":"
         + str(s["token_limit"])
     )
@@ -107,8 +103,7 @@ def accept(conn, job):
     cap.update(
         real_api_verified=True,
         efforts=sorted(efforts),
-        prices=s["capabilities"]["prices"],
-        price_mode="user_declared_upper_bound",
+        compatibility_checked_at=datetime.now(timezone.utc).isoformat(),
         probe_job_id=job["id"],
         model_version=job["result"].get("model_version"),
         quality_benchmark_passed=False,
@@ -136,8 +131,22 @@ def auto_upgrade(conn, uid):
         ).fetchone()
         if current and row["first_seen"] <= current["first_seen"]:
             continue
-        bound = m.cost_bound({**dict(s), "capabilities": row["compatibility"]})
-        if bound > min(s["daily_usd"], s["monthly_usd"]):
+        from app.cny_billing import current_price
+
+        try:
+            bound = m.cost_bound(
+                {
+                    **dict(s),
+                    "model_id": row["model_id"],
+                    "price_snapshot": current_price(conn, row["model_id"]),
+                }
+            )
+        except ValueError:
+            continue
+        limits = [s["daily_cny"], s["monthly_cny"], s["task_cny"]] + (
+            [s["trial_cny"]] if s["trial_active"] else []
+        )
+        if bound > min(limits):
             continue
         return m.configure(conn, uid, row["model_id"], s["effort"])
     return None

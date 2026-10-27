@@ -1,8 +1,9 @@
 """Authenticated mobile /model controls; no secrets accepted or returned."""
 
 import os
+from decimal import Decimal
 from urllib.parse import urlsplit
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import Field, StrictBool, StrictInt
 from app.auth import require_auth
 from app.common import ensure_user
@@ -13,10 +14,21 @@ from app import model_router as models
 router = APIRouter(prefix="/v2/model", tags=["models"])
 
 
+def cny_json(value):
+    # FastAPI otherwise encodes raw database Decimal as float, losing money precision.
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: cny_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [cny_json(v) for v in value]
+    return value
+
+
 def operation(name, fn):
     try:
         with get_db() as c:
-            return fn(c, ensure_user(c, name))
+            return cny_json(fn(c, ensure_user(c, name)))
     except (ValueError, LookupError) as exc:
         raise HTTPException(409, str(exc))
 
@@ -41,8 +53,8 @@ class Selection(StrictModel):
     auto_discover: StrictBool = True
     auto_upgrade: StrictBool = False
     stopped: StrictBool = True
-    daily_usd: float = Field(default=0, ge=0, le=1000, allow_inf_nan=False)
-    monthly_usd: float = Field(default=0, ge=0, le=10000, allow_inf_nan=False)
+    daily_cny: Decimal = Field(default=0, ge=0, le=1000, allow_inf_nan=False)
+    monthly_cny: Decimal = Field(default=0, ge=0, le=10000, allow_inf_nan=False)
 
 
 def origin(request):
@@ -117,8 +129,11 @@ class Limits(StrictModel):
     token_limit: StrictInt = Field(default=4096, ge=128, le=32768)
     retry_limit: StrictInt = Field(default=2, ge=0, le=5)
     max_concurrency: StrictInt = Field(default=1, ge=1, le=4)
-    daily_usd: float = Field(ge=0, le=1000, allow_inf_nan=False)
-    monthly_usd: float = Field(ge=0, le=10000, allow_inf_nan=False)
+    daily_cny: Decimal = Field(ge=0, le=1000, allow_inf_nan=False)
+    monthly_cny: Decimal = Field(ge=0, le=10000, allow_inf_nan=False)
+    trial_active: StrictBool = True
+    task_cny: Decimal = Field(default=0, ge=0, le=1000, allow_inf_nan=False)
+    trial_cny: Decimal = Field(default=0, ge=0, le=10000, allow_inf_nan=False)
     stopped: StrictBool = True
 
 
@@ -129,10 +144,13 @@ def limits(data: Limits, request: Request, name=Depends(require_auth)):
     def save(c, u):
         models.settings(c, u)
         c.execute(
-            "UPDATE ai_settings SET daily_usd=%s,monthly_usd=%s,stopped=%s,token_limit=%s,retry_limit=%s,max_concurrency=%s WHERE user_id=%s",
+            "UPDATE ai_settings SET daily_cny=%s,monthly_cny=%s,task_cny=%s,trial_cny=%s,trial_active=%s,stopped=%s,token_limit=%s,retry_limit=%s,max_concurrency=%s WHERE user_id=%s",
             (
-                data.daily_usd,
-                data.monthly_usd,
+                data.daily_cny,
+                data.monthly_cny,
+                data.task_cny,
+                data.trial_cny,
+                data.trial_active,
                 data.stopped,
                 data.token_limit,
                 data.retry_limit,
@@ -148,9 +166,6 @@ def limits(data: Limits, request: Request, name=Depends(require_auth)):
 class Probe(StrictModel):
     model_id: str = Field(min_length=1, max_length=200)
     effort: str = Field(min_length=1, max_length=20)
-    input_per_million: float = Field(gt=0, le=1000, allow_inf_nan=False)
-    output_per_million: float = Field(gt=0, le=1000, allow_inf_nan=False)
-    source: str = Field(max_length=500)
 
 
 @router.post("/probe")
@@ -165,11 +180,6 @@ def probe(data: Probe, request: Request, name=Depends(require_auth)):
             u,
             data.model_id,
             data.effort,
-            dict(
-                input_per_million=str(data.input_per_million),
-                output_per_million=str(data.output_per_million),
-                source=data.source,
-            ),
         ),
     )
 
@@ -179,7 +189,7 @@ def jobs(name=Depends(require_auth)):
     return operation(
         name,
         lambda c, u: c.execute(
-            "SELECT id,kind,state,result->>'returned_model_id' AS returned_model_id,result->>'model_version' AS model_version,settings_snapshot->>'model_id' AS model_id,settings_snapshot->>'effort' AS effort,attempts,reserved_usd,actual_usd,input_tokens,output_tokens,cached_tokens,error_code,started_at,finished_at FROM ai_jobs WHERE user_id=%s ORDER BY id DESC LIMIT 100",
+            "SELECT id,kind,state,result->>'returned_model_id' AS returned_model_id,result->>'model_version' AS model_version,settings_snapshot->>'model_id' AS model_id,settings_snapshot->>'effort' AS effort,attempts,reserved_cny,estimated_cny,billing_status,input_tokens,output_tokens,cached_tokens,error_code,started_at,finished_at FROM ai_jobs WHERE user_id=%s ORDER BY id DESC LIMIT 100",
             (u,),
         ).fetchall(),
     )
@@ -190,12 +200,25 @@ def cancel(job_id: int, request: Request, name=Depends(require_auth)):
     origin(request)
 
     def stop(c, u):
+        old = c.execute(
+            "SELECT * FROM ai_jobs WHERE id=%s AND user_id=%s FOR UPDATE", (job_id, u)
+        ).fetchone()
+        if not old:
+            raise LookupError("job_not_found")
+        if old["state"] not in ("pending", "retrying", "running"):
+            return dict(cancelled_for_commit=False, state=old["state"])
+        if old["state"] == "running":
+            from app.cny_billing import settle
+
+            settle(c, old, None, RuntimeError("cancelled"))
         c.execute(
-            "UPDATE ai_jobs SET state='blocked',error_code='cancelled_by_owner',lease_token=NULL WHERE id=%s AND user_id=%s AND state IN ('pending','retrying','running')",
-            (job_id, u),
+            "UPDATE ai_jobs SET state='cancelled',error_code='cancelled_by_owner',lease_token=NULL,lease_until=NULL,finished_at=clock_timestamp() WHERE id=%s",
+            (job_id,),
         )
         return dict(
-            cancelled_for_commit=True, already_sent_request_cannot_be_recalled=True
+            cancelled_for_commit=True,
+            state="cancelled",
+            already_sent_request_cannot_be_recalled=True,
         )
 
     return operation(name, stop)
@@ -248,5 +271,47 @@ def insights(name=Depends(require_auth)):
         lambda c, u: c.execute(
             "SELECT id,kind,result->'response' AS advice,settings_snapshot->>'model_id' AS model_id,settings_snapshot->>'effort' AS effort FROM ai_jobs WHERE user_id=%s AND kind IN ('explanation','study_plan') AND state='succeeded' AND dispatched_at IS NOT NULL ORDER BY id DESC LIMIT 10",
             (u,),
+        ).fetchall(),
+    )
+
+
+@router.get("/billing")
+def billing(name=Depends(require_auth)):
+    from app.cny_billing import summary
+
+    return operation(name, summary)
+
+
+@router.post("/prices/refresh")
+def refresh_cny_prices(request: Request, name=Depends(require_auth)):
+    origin(request)
+    from app.cny_prices import refresh
+    import httpx
+
+    try:
+        return operation(
+            name,
+            lambda c, u: dict(
+                prices=refresh(c), paid_api_called=False, private_data_sent=False
+            ),
+        )
+    except httpx.HTTPError:
+        raise HTTPException(503, "official_cny_price_page_unavailable")
+
+
+@router.get("/billing/history")
+def billing_history(
+    task_type: str | None = None,
+    before_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=100),
+    name=Depends(require_auth),
+):
+    if task_type is not None and task_type not in models.TASKS:
+        raise HTTPException(422, "unknown_task_type")
+    return operation(
+        name,
+        lambda c, u: c.execute(
+            "SELECT e.*,j.kind AS task_type FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id WHERE j.user_id=%s AND (%s::text IS NULL OR j.kind=%s) AND (%s::bigint IS NULL OR e.id<%s) ORDER BY e.id DESC LIMIT %s",
+            (u, task_type, task_type, before_id, before_id, limit),
         ).fetchall(),
     )

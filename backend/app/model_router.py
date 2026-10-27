@@ -2,7 +2,6 @@
 
 from datetime import datetime, timezone
 import os
-from decimal import Decimal
 import httpx
 from psycopg.types.json import Jsonb
 
@@ -77,6 +76,15 @@ def refresh(conn, fetch=fetch_official):
     return catalog(conn)
 
 
+def _catalog_price(conn, model):
+    from app.cny_billing import current_price
+
+    try:
+        return current_price(conn, model)
+    except ValueError:
+        return None
+
+
 def catalog(conn):
     latest = conn.execute(
         "SELECT * FROM ai_catalog_events ORDER BY id DESC LIMIT 1"
@@ -102,8 +110,10 @@ def catalog(conn):
                 tools=cap.get("tools"),
                 vision=cap.get("vision"),
                 efforts=cap.get("efforts", []),
-                prices=cap.get("prices"),
-                price_mode=cap.get("price_mode"),
+                prices=_catalog_price(conn, row["model_id"]),
+                price_mode="CNY_official_page_observation",
+                compatibility_checked_at=cap.get("compatibility_checked_at"),
+                model_version=cap.get("model_version"),
                 reported_prices=raw.get("pricing", raw.get("prices")),
                 available=row["available"],
                 compatible=cap.get("real_api_verified", False),
@@ -125,9 +135,10 @@ def settings(conn, user_id):
     conn.execute(
         "INSERT INTO ai_settings(user_id) VALUES(%s) ON CONFLICT DO NOTHING", (user_id,)
     )
-    return conn.execute(
+    row = conn.execute(
         "SELECT * FROM ai_settings WHERE user_id=%s", (user_id,)
     ).fetchone()
+    return {k: v for k, v in row.items() if k not in ("daily_usd", "monthly_usd")}
 
 
 def configure(conn, user_id, model, effort, **options):
@@ -145,8 +156,11 @@ def configure(conn, user_id, model, effort, **options):
     allowed = {
         "auto_discover",
         "auto_upgrade",
-        "daily_usd",
-        "monthly_usd",
+        "daily_cny",
+        "monthly_cny",
+        "task_cny",
+        "trial_cny",
+        "trial_active",
         "token_limit",
         "retry_limit",
         "max_concurrency",
@@ -156,6 +170,11 @@ def configure(conn, user_id, model, effort, **options):
         raise ValueError("unknown_setting")
     from psycopg import sql
 
+    from app.cny_billing import money
+
+    for key in ("daily_cny", "monthly_cny", "task_cny", "trial_cny"):
+        if key in options:
+            options[key] = money(options[key])
     values = {"model_id": model, "effort": effort, **options}
     conn.execute(
         sql.SQL(
@@ -191,7 +210,10 @@ def snapshot(conn, user_id):
         raise ValueError("output_limit_exceeds_official_catalog")
     s["capabilities"] = row["compatibility"]
     s["official_metadata"] = row["metadata"]
-    for k in ("daily_usd", "monthly_usd"):
+    from app.cny_billing import current_price
+
+    s["price_snapshot"] = current_price(conn, s["model_id"])
+    for k in ("daily_cny", "monthly_cny", "task_cny", "trial_cny"):
         s[k] = str(s[k])
     s.pop("updated_at", None)
     return s
@@ -207,17 +229,7 @@ def wire_thinking(effort):
 
 
 def cost_bound(s):
-    prices = s["capabilities"].get("prices") or {}
-    if not prices.get("source") or any(
-        k not in prices for k in ("input_per_million", "output_per_million")
-    ):
-        raise ValueError("verified_price_required")
-    rates = [
-        Decimal(str(prices[k])) for k in ("input_per_million", "output_per_million")
-    ]
-    if any(not x.is_finite() or x <= 0 for x in rates):
-        raise ValueError("invalid_price")
-    # Fixed maximum input bytes bounds text tokens; no image requests admitted here.
-    return (Decimal(32000) * rates[0] + Decimal(s["token_limit"]) * rates[1]) / Decimal(
-        1000000
-    )
+    from app.cny_billing import validate_price, reserve_bound
+
+    price = validate_price(s.get("price_snapshot", {}), s["model_id"])
+    return reserve_bound(price, s["token_limit"])

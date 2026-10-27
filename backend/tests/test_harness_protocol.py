@@ -7,7 +7,7 @@ import threading
 import pytest
 
 
-@pytest.mark.parametrize("effort", ["off", "high"])
+@pytest.mark.parametrize("effort", ["off", "low", "high", "max"])
 def test_official_sdk_wire_tools_and_extra_uploads(tmp_path, effort):
     from deepseek_harness import DeepSeekHarness
 
@@ -91,8 +91,8 @@ def test_official_sdk_wire_tools_and_extra_uploads(tmp_path, effort):
         assert "untrusted" in str(body.get("system", "")).lower()
         assert not body.get("tools")
         assert not any("session_log" in k or k.startswith("dsh_") for k in body)
-        if effort == "high":
-            assert body.get("output_config") == {"effort": "high"}
+        if effort != "off":
+            assert body.get("output_config") == {"effort": effort}
     finally:
         server.shutdown()
         server.server_close()

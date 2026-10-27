@@ -1,5 +1,6 @@
 """Short-lived leased automation tick, activated only with explicit API consent."""
 
+import httpx
 import os
 import sys
 from app.db import get_db
@@ -135,6 +136,20 @@ def main():
     with get_db() as conn:
         dispatch_completed(conn)
         users = conn.execute("SELECT * FROM ai_settings").fetchall()
+        # Public-page refresh is not a paid inference, never uploads private material.
+        if (
+            users
+            and not conn.execute(
+                "SELECT 1 FROM ai_cny_prices WHERE verified_at>clock_timestamp()-interval '12 hours' LIMIT 1"
+            ).fetchone()
+        ):
+            try:
+                from app.cny_prices import refresh
+
+                with conn.transaction():
+                    refresh(conn)
+            except (ValueError, httpx.HTTPError):
+                pass  # Missing/expired/conflicting prices block new calls at claim().
         if (
             any(u["auto_discover"] for u in users)
             and model_router.catalog(conn)["stale"]

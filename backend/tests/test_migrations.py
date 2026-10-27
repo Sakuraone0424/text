@@ -93,7 +93,7 @@ def test_unversioned_upgrade_and_repeat_preserve_all_historical_rows(raw_db):
     assert history(raw_db, uid)[0]["score"] == 41
     assert (
         raw_db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"]
-        == 17
+        == 18
     )
     assert (
         raw_db.execute("SELECT COUNT(*) AS n FROM reviewed_questions").fetchone()["n"]
@@ -139,7 +139,7 @@ def test_applied_migration_checksum_enforced(db, tmp_path):
     with pytest.raises(RuntimeError, match="Applied migration changed"):
         apply_migrations(db, tmp_path)
     assert (
-        db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"] == 17
+        db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"] == 18
     )
 
 
