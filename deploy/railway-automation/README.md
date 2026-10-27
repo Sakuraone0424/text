@@ -38,7 +38,7 @@
 
 配置仅指向新库的`SOURCE_STAGING_DATABASE_URL`、`CANDIDATE_REVIEW_SCHEMA`、`CANDIDATE_REVIEW_DATABASE_NAME`、`CANDIDATE_BACKUP_ROOT`、`CANDIDATE_BACKUP_POINTER`、`CANDIDATE_PG_BIN`（17客户端目录）。这些配置在Secret/受控环境，不放进备份。登录后的模型页面可生成最新私有包，认证/Range下载并显示SHA。Safari下载→分享→存储到文件；不能声称用户已经实际保存。
 
-获批准持久备份卷和保留成本后，可设置QUIZ_PRIVATE_BACKUP_ENABLED=1，默认每日北京时间04:00后的首个Worker tick生成一次新私有快照（QUIZ_PRIVATE_BACKUP_HOUR可改）。PG会话锁与快照日期防止并发/重启重复，旧包全部保留，不自动清理历史。后台进程未运行或配置失败时不会产生成功快照。默认关闭，不因创建服务就暗中占用备份存储；本轮未启用。
+获批准持久备份卷和保留成本后，可设置QUIZ_PRIVATE_BACKUP_ENABLED=1，默认每日北京时间04:00后的首个API后台tick生成一次新私有快照（QUIZ_PRIVATE_BACKUP_HOUR可改）。PG会话锁与快照日期防止并发/重启重复，旧包全部保留，不自动清理历史。备份卷只挂载至单实例API服务，并确认postgres用户有写权限；Railway不提供跨服务共享卷，短生命周期模型Worker不会写入或冒充这份持久备份。备份不依赖DeepSeek是否可用。后台进程未运行或配置失败时不会产生成功快照。默认关闭，不因创建服务就暗中占用备份存储；本轮未启用。
 
 备份卷本身不是异地备份。长期策略需用户批准保留周期、Railway原生备份能力及费用，或另行授权私有备份存储。没有授权不得自动上传第三方。Codex本地环境可能被回收，必须在回收前完成实际交接。
 

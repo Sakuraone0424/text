@@ -119,9 +119,9 @@ def plan(conn, uid):
 
 
 def main():
-    from app.scheduled_backup import tick as private_backup_tick
-
-    private_backup_tick()  # Independent of model authorization or availability.
+    os.environ["QUIZ_SERVICE_ROLE"] = (
+        "worker"  # Short jobs never own the API backup volume.
+    )
     if os.environ.get("AI_AUTOMATION_ENABLED") != "1":
         return
     if os.environ.get("RAILWAY_ENVIRONMENT_NAME", "").lower() == "production":

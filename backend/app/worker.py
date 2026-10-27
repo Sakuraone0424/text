@@ -1,6 +1,7 @@
 """Independent deadline and optional integration loops; no AI calls."""
 
 import logging
+import os
 import threading
 from app.db import get_db
 
@@ -15,6 +16,10 @@ def tick():
 
 
 def integrations_tick():
+    if os.environ.get("QUIZ_SERVICE_ROLE", "api") == "api":
+        from app.scheduled_backup import tick as backup_tick
+
+        backup_tick()  # Uses the API service's persistent volume, not ephemeral batch storage.
     from app.archiving import configured_adapter, process_one
     from app.automation import prepare_daily
 
