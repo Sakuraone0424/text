@@ -12,6 +12,10 @@ from psycopg.rows import dict_row
 @contextmanager
 def get_db():
     """Yield a transaction-scoped connection; commit on success, roll back on error."""
+    if os.environ.get("QUIZ_AUTO_ONLY") == "1":
+        from app.deployment_target import verify_isolated_target
+
+        verify_isolated_target()
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         raise RuntimeError("DATABASE_URL is not configured")

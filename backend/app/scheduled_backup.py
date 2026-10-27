@@ -24,8 +24,9 @@ def due(index, now, hour=4):
 def tick():
     if os.environ.get("QUIZ_PRIVATE_BACKUP_ENABLED") != "1":
         return False
-    if os.environ.get("RAILWAY_ENVIRONMENT_NAME", "").lower() == "production":
-        raise PermissionError("Private backup target must be nonproduction")
+    from app.deployment_target import verify_isolated_target
+
+    verify_isolated_target()
     from app import review_app
 
     with get_db() as conn:

@@ -1,3 +1,5 @@
+> 当前目标已更新为 `amiable-vibrancy / production / automation-staging`（环境名production并不等于原生产项目）。整个工作区资源目标约¥35/月，不是每项目额度。旧JSON配置方式已弃用，原三服务报价方案超出目标，不能直接应用；本轮未部署。实际核查、UUID准入与阻塞见[最新Railway报告](../../docs/railway-readiness-20261027.md)。根railway.json保留原样。
+
 # Railway隔离部署准备（未执行）
 
 本方案取代此前Tailnet/VPS建议：只评估已有xiao-ustc-quiz项目内新的非生产环境。普通HTTPS + 应用登录，iPhone/iPad Safari可操作；不依赖Tailscale，不要求关闭Loon。没有真正部署或iOS设备实测，不能把配置包当作上线。

@@ -125,8 +125,9 @@ def main():
     )
     if os.environ.get("AI_AUTOMATION_ENABLED") != "1":
         return
-    if os.environ.get("RAILWAY_ENVIRONMENT_NAME", "").lower() == "production":
-        raise PermissionError("Nonproduction environment required")
+    from app.deployment_target import verify_isolated_target
+
+    verify_isolated_target()
     if not os.environ.get("QUIZ_DB_SCHEMA", "").startswith("source_staging_"):
         raise PermissionError("Explicit isolated source schema required")
     model_router.authorized()
