@@ -62,6 +62,17 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan, title="肖涵 · 中科大考研智能答题", version="2.1.0")
+
+
+@app.middleware("http")
+async def model_privacy(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/v2/model"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -183,6 +194,9 @@ def get_stats(username: str = Depends(require_auth)):
 
 
 app.include_router(reviewed_quiz_router)
+from app.model_api import router as model_router
+
+app.include_router(model_router)
 
 
 @app.get("/training", include_in_schema=False)

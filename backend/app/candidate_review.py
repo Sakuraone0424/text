@@ -52,7 +52,11 @@ def create_packet(conn, payload):
     question = q.model_dump()
     analysis = payload["ai_analysis"]
     if (
-        analysis.get("status") != "AI-assisted / pending human review"
+        analysis.get("status")
+        not in (
+            "AI-assisted / pending human review",
+            "AI自动核验 / pending independent checks",
+        )
         or analysis.get("independent_human_review") is not False
         or set(analysis.get("axes", {})) != set(AXES)
     ):

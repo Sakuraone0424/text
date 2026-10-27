@@ -250,6 +250,20 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
                     in {normalize_answer(a) for a in q["accepted_answers"]}
                     else 0
                 )
+        if (
+            q["question_type"] == "fill_blank"
+            and answered
+            and points < q["max_points"]
+            and conn.execute(
+                "SELECT 1 FROM auto_question_states WHERE question_id=%s", (qid,)
+            ).fetchone()
+        ):
+            feedback = {
+                **(feedback or {}),
+                "deterministic_points": points,
+                "semantic_judgment_pending": True,
+            }
+            points = None
         conn.execute(
             "INSERT INTO answers_v2(attempt_id,question_id,answer,points,feedback) VALUES (%s,%s,%s,%s,%s)",
             (

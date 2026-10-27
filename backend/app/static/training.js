@@ -841,3 +841,43 @@ $("history").onclick = async () => {
     status(e.message);
   }
 };
+
+$("insights").onclick = async () => {
+  try {
+    const reports = await api("/v2/model/insights");
+    const root = $("learning");
+    root.replaceChildren();
+    if (!reports.length)
+      element("p", "尚无已完成的AI学习建议；不会编造成绩或薄弱点。", root);
+    for (const report of reports) {
+      element(
+        "h3",
+        report.kind === "study_plan" ? "复习建议" : "错题解析",
+        root,
+      );
+      element("p", report.advice.summary, root);
+      for (const item of report.advice.items) {
+        element(
+          "p",
+          "题目 " + item.question_id + " · " + item.knowledge_tags.join(" / "),
+          root,
+        );
+        element("p", item.explanation, root);
+        element("blockquote", item.excerpt, root);
+        element("p", item.next_action, root);
+      }
+      element("p", report.advice.limitations.join("；"), root);
+      element(
+        "small",
+        "AI自动核验 · " +
+          report.model_id +
+          " / " +
+          report.effort +
+          "；不改写历史成绩或FSRS时间",
+        root,
+      );
+    }
+  } catch (error) {
+    status(error.message);
+  }
+};

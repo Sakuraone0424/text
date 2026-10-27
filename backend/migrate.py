@@ -5,7 +5,6 @@ import hashlib
 import os
 from pathlib import Path
 
-import psycopg
 
 
 SQL_DIR = Path(__file__).parent / "sql"
@@ -48,7 +47,9 @@ def main():
     url = os.environ.get("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is not configured")
-    with psycopg.connect(url) as conn:
+    from app.db import get_db
+
+    with get_db() as conn:
         apply_migrations(conn)
     print("Additive migrations complete; existing papers, answers and grades preserved")
 

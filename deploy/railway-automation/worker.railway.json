@@ -1,0 +1,1 @@
+{"$schema":"https://railway.com/railway.schema.json","build":{"builder":"DOCKERFILE","dockerfilePath":"deploy/railway-automation/Dockerfile"},"deploy":{"startCommand":"python -m app.auto_worker","cronSchedule":"*/5 * * * *","restartPolicyType":"NEVER"}}

@@ -1,5 +1,7 @@
 # 资料版本与有效性
 
+当前自动化方向与实际验收见[2026-10-27 AI自动核验升级](deepseek-automation-20261027.md)。人工签署不再是新自动题库门禁；历史记录保留。以下旧阶段报告作为历史基线，不能覆盖最新方向。
+
 最新私有备份、手机续审与未开放入口见[2026-10-27验收](mobile-private-access-20261027.md)。016追加草稿/续审位置/可撤销会话；001—015不变，真实人工与正式发布仍0。
 
 首批题稿采用不可变candidate_review_packets、追加candidate_human_decisions和candidate_revision_links（014—015）。AI分析与人工决定分表；新版本不继承批准，旧版本不可发布。38个有效题稿、45份历史版本均不改变教材SHA/索引或既有213342工作项。详见[首批候选](first-candidate-batch.md)。

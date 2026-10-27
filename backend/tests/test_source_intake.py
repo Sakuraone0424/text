@@ -728,7 +728,7 @@ def test_migration_010_preserves_existing_verified_single_source(raw_db, tmp_pat
     apply_migrations(raw_db)
     assert (
         raw_db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"]
-        == 16
+        == 17
     )
 
 

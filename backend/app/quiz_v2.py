@@ -182,10 +182,23 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         except ValueError:
             reasons.append("invalid_question_or_rubric")
         if not reasons:
-            if evidence_issues(conn, content, verify_original=False):
-                reasons.append("textbook_evidence_not_valid")
-            if style_issues(conn, content):
-                reasons.append("exam_style_source_not_valid")
+            automatic = conn.execute(
+                "SELECT status FROM auto_question_states WHERE question_id=%s",
+                (row["id"],),
+            ).fetchone()
+            if automatic:
+                from app.auto_quality import ready
+
+                if not ready(conn, row["id"]):
+                    reasons.append("automatic_quality_not_ready_or_stale")
+            elif os.environ.get("QUIZ_AUTO_ONLY") == "1":
+                reasons.append("automatic_ready_qualification_required")
+            else:
+                # Historical API compatibility; new automatic records never fall back to it.
+                if evidence_issues(conn, content, verify_original=False):
+                    reasons.append("textbook_evidence_not_valid")
+                if style_issues(conn, content):
+                    reasons.append("exam_style_source_not_valid")
         audit.append(
             {
                 "question_id": row["id"],
@@ -400,9 +413,15 @@ def grade(
                 "Handwriting is pending confirmation; do not guess or assign zero"
             )
     if (
-        q["question_type"] in ("single_choice", "fill_blank")
-        or row["points"] is not None
-    ):
+        q["question_type"] == "single_choice"
+        or (
+            q["question_type"] == "fill_blank"
+            and not conn.execute(
+                "SELECT 1 FROM auto_question_states WHERE question_id=%s",
+                (question_id,),
+            ).fetchone()
+        )
+    ) or row["points"] is not None:
         raise ValueError("Only pending subjective answers can be graded")
     if len(criterion_points) != len(q["rubric"]) or any(
         type(p) is not int or p < 0 or p > c["points"]
@@ -412,6 +431,31 @@ def grade(
             "Scores must match the snapshot rubric and stay within each criterion"
         )
     points = sum(criterion_points)
+    if q["question_type"] == "fill_blank":
+        blanks = (details or {}).get("blank_points", [])
+        maxima = (
+            [b["points"] for b in q["blanks"]] if q.get("blanks") else [q["max_points"]]
+        )
+        known = (row.get("feedback") or {}).get("blank_points", [0] * len(maxima))
+        supplied = (
+            submitted.get("blanks", [])
+            if q.get("blanks")
+            else [submitted.get("text", "")]
+        )
+        if (
+            len(blanks) != len(maxima)
+            or any(
+                type(p) is not int
+                or p < known[i]
+                or p > maxima[i]
+                or (p > 0 and (i >= len(supplied) or not supplied[i].strip()))
+                for i, p in enumerate(blanks)
+            )
+            or sum(blanks) != points
+        ):
+            raise ValueError(
+                "Semantic fill scores must match every blank and preserve exact matches"
+            )
     record = {
         "criterion_points": criterion_points,
         "comment": feedback,

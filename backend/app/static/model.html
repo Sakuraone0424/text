@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>模型与思考设置</title
+  ><link rel="stylesheet" href="/static/training.css" />
+  <body>
+    <main>
+      <h1>模型与思考设置</h1>
+      <a href="/">返回训练</a>
+      <form id="login">
+        <label
+          >登录密码<input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            required /></label
+        ><button>登录</button>
+      </form>
+      <p id="message" role="status"></p>
+      <section id="controls" hidden>
+        <p>
+          AI自动核验不保证100%科学正确。设置仅影响新任务，当前试卷与成绩保持不变。
+        </p>
+        <label>模型<select id="model"></select></label
+        ><label>思考强度<select id="effort"></select></label>
+        <p id="capabilities"></p>
+        <label
+          >每日美元预算<input
+            id="daily"
+            type="number"
+            min="0"
+            max="1000"
+            step="0.01" /></label
+        ><label
+          >每月美元预算<input
+            id="monthly"
+            type="number"
+            min="0"
+            max="10000"
+            step="0.01" /></label
+        ><label><input id="discover" type="checkbox" />自动发现</label
+        ><label
+          ><input
+            id="upgrade"
+            type="checkbox"
+          />允许通过兼容性和预算检查后的升级（尚无自动切换执行器）</label
+        ><label><input id="stopped" type="checkbox" />停止AI任务</label>
+        <details>
+          <summary>任务限制</summary>
+          <label
+            >单任务输出Token上限<input
+              id="token-limit"
+              type="number"
+              min="128"
+              max="32768" /></label
+          ><label
+            >重试次数上限<input
+              id="retry-limit"
+              type="number"
+              min="0"
+              max="5" /></label
+          ><label
+            >最大并发<input id="max-concurrency" type="number" min="1" max="4"
+          /></label>
+          <p>
+            推理超时120秒，进程上限150秒。每次尝试只允许一次官方推理请求；费用未知的失败保留预算预留。
+          </p>
+        </details>
+        <button id="limits">保存预算与停止开关</button
+        ><button id="save">保存设置</button
+        ><button id="refresh">刷新官方目录</button
+        ><button id="default">恢复默认（暂停任务）</button>
+        <details>
+          <summary>首次兼容性检查（需服务端授权与预算）</summary>
+          <p>
+            此探测仅发送合成算术，不发送教材；金额是你据官方价格填写的每百万Token美元上界，不代表目录已返回价格。未知价格时请勿猜填。
+          </p>
+          <label
+            >请求档位<select id="probe-effort">
+              <option>off</option>
+              <option>low</option>
+              <option selected>high</option>
+              <option>max</option>
+            </select></label
+          ><label
+            >输入单价上界<input
+              id="in-price"
+              type="number"
+              min="0"
+              step="0.01" /></label
+          ><label
+            >输出单价上界<input
+              id="out-price"
+              type="number"
+              min="0"
+              step="0.01" /></label
+          ><label
+            >官方价格依据URL<input
+              id="price-source"
+              type="url"
+              placeholder="https://api-docs.deepseek.com/..." /></label
+          ><button id="probe">排队兼容性探测</button>
+        </details>
+        <details>
+          <summary>私有备份</summary>
+          <p>
+            仅在已授权非生产环境生成。ZIP包含教材和学习数据，不含登录凭据；下载后使用Safari分享菜单“存储到文件”。不要公开上传。旧包不含后续记录。
+          </p>
+          <button id="backup">生成并准备下载最新备份</button>
+          <p id="backup-info"></p>
+          <a href="/v2/model/backup/download" download>登录后下载私有ZIP</a>
+        </details>
+        <form id="command">
+          <label
+            >模型命令<input
+              id="text"
+              placeholder="/model help"
+              maxlength="100" /></label
+          ><button>执行</button>
+        </form>
+        <pre id="help"></pre>
+      </section>
+    </main>
+    <script src="/static/model.js" defer></script>
+  </body>
+</html>
