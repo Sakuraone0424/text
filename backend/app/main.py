@@ -87,7 +87,10 @@ def index():
 
 @app.get("/health")
 def health():
-    if os.environ.get("DATABASE_URL"):
+    if (
+        os.environ.get("DATABASE_URL")
+        or os.environ.get("QUIZ_REQUIRE_RAILWAY_IDENTITY") == "1"
+    ):
         db_health()
     return {"status": "healthy"}
 

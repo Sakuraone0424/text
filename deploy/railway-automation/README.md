@@ -1,3 +1,5 @@
+最新固定UUID、双重数据库身份、恢复脚本及409项本地回归见[本轮执行报告](../../docs/next-execution-report.md)。旧阶段结果保留，不代表真实部署或已交付备份。
+
 > 当前目标已更新为 `amiable-vibrancy / production / automation-staging`（环境名production并不等于原生产项目）。整个工作区资源目标约¥35/月，不是每项目额度。旧JSON配置方式已弃用，原三服务报价方案超出目标，不能直接应用；本轮未部署。实际核查、UUID准入与阻塞见[最新Railway报告](../../docs/railway-readiness-20261027.md)。根railway.json保留原样。
 
 # Railway隔离部署准备（未执行）

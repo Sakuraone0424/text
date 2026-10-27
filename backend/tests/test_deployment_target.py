@@ -1,7 +1,7 @@
 """No Railway calls or resources: UUID permission boundary regression."""
 
 import pytest
-from app.deployment_target import verify_isolated_target
+from app.deployment_target import verify_isolated_target, TARGET
 
 
 @pytest.fixture
@@ -10,8 +10,7 @@ def target(monkeypatch):
     monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
     monkeypatch.setenv("QUIZ_ISOLATED_TARGET_APPROVED", "1")
     monkeypatch.setenv("QUIZ_DB_SCHEMA", "source_staging_real_20261026")
-    for i, kind in enumerate(("PROJECT", "ENVIRONMENT", "SERVICE"), 1):
-        value = f"00000000-0000-4000-8000-{i:012}"
+    for kind, value in TARGET.items():
         monkeypatch.setenv(f"RAILWAY_{kind}_ID", value)
         monkeypatch.setenv(f"QUIZ_APPROVED_RAILWAY_{kind}_ID", value)
 
@@ -48,3 +47,28 @@ def test_approval_missing_blocks_before_database_connection(target, monkeypatch)
     with pytest.raises(PermissionError):
         with get_db():
             pytest.fail("Database must not be contacted")
+
+
+def test_matching_unknown_uuid_pair_still_denied(target, monkeypatch):
+    value = "00000000-0000-4000-8000-999999999999"
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", value)
+    monkeypatch.setenv("QUIZ_APPROVED_RAILWAY_PROJECT_ID", value)
+    with pytest.raises(PermissionError):
+        verify_isolated_target()
+
+
+def test_original_uuid_denied_even_if_display_renamed(target, monkeypatch):
+    from app.deployment_target import PROTECTED_PROJECT
+
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", PROTECTED_PROJECT)
+    with pytest.raises(PermissionError, match="protected"):
+        verify_isolated_target()
+
+
+def test_missing_platform_metadata_not_treated_as_local(monkeypatch):
+    from app.deployment_target import on_railway
+
+    monkeypatch.setenv("QUIZ_REQUIRE_RAILWAY_IDENTITY", "1")
+    assert on_railway()
+    with pytest.raises(PermissionError):
+        verify_isolated_target()
