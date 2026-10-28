@@ -97,7 +97,7 @@ def body_for(job):
     guard, _ = check_job(job)
     if guard["policy"].get("transport") != "responses_json_schema":
         raise ValueError("responses_scope_required")
-    version = 2 if guard["policy"]["version"] == "review-campaign/6" else 1
+    version = 2 if guard["policy"]["version"] in ("review-campaign/6", "review-campaign/7") else 1
     return dict(model="deepseek-flash", reasoning={"effort": "high"}, max_output_tokens=32768,
                 instructions=PROMPT_PREFIX, input=json.dumps(job["payload"], ensure_ascii=False, sort_keys=True),
                 text={"format": dict(type="json_schema", name="Finding", strict=True, schema=output_schema(job["payload"], version))},
@@ -114,7 +114,9 @@ def normalize_usage(raw):
 def parse_response(data, body):
     if data.get("model") != "deepseek-flash" or data.get("status") != "completed" or data.get("error") or data.get("incomplete_details"):
         raise ValueError("incomplete_or_wrong_model_response")
-    if data.get("reasoning", {}).get("effort") != "high" or data.get("max_output_tokens") != 32768 or data.get("text", {}).get("format") != body["text"]["format"]:
+    expected_format = body["text"]["format"]
+    actual_format = data.get("text", {}).get("format", {})
+    if data.get("reasoning", {}).get("effort") != "high" or data.get("max_output_tokens") != 32768 or any(actual_format.get(k) != v for k, v in expected_format.items()):
         raise ValueError("response_configuration_not_confirmed")
     if data.get("previous_response_id") is not None or data.get("store") is not False:
         raise ValueError("stateless_response_required")
@@ -182,7 +184,9 @@ def accept_probe(conn, job):
     if job["kind"] != "compatibility" or job["state"] != "succeeded" or result.get("real_api") is not True or result.get("transport") != TRANSPORT or result.get("response_status") != "completed" or not complete_usage(result.get("usage")):
         raise ValueError("actual_responses_probe_required")
     finding = Finding.model_validate(result["response"])
-    if not finding.passed or finding.unresolved or set(finding.checks) != set(AXES) or not all(finding.checks.values()) or finding.independent_choice is not None or finding.mapping_evidence != {"synthetic/arithmetic": [1]} or not finding.claims or any(c.unit_id != 1 or c.excerpt not in SYNTHETIC_TEXT for c in finding.claims) or result.get("native_usage", {}).get("output_tokens_details", {}).get("reasoning_tokens", 0) <= 0:
+    # Interface compatibility is not a scientific approval. A synthetic-data
+    # disclaimer in unresolved must never turn this probe into a real question.
+    if set(finding.checks) != set(AXES) or finding.independent_choice is not None or finding.mapping_evidence != {"synthetic/arithmetic": [1]} or not finding.claims or any(c.unit_id != 1 or c.excerpt not in SYNTHETIC_TEXT for c in finding.claims) or result.get("native_usage", {}).get("output_tokens_details", {}).get("reasoning_tokens", 0) <= 0:
         raise ValueError("synthetic_finding_probe_failed")
     if result.get("response_parameters", {}).get("schema_sha256") != content_sha(body_for(job)["text"]["format"]["schema"]):
         raise ValueError("probe_output_schema_changed")
@@ -202,3 +206,73 @@ def compatible(conn, wire_contract=None):
         return False
     probe = conn.execute("SELECT * FROM ai_jobs WHERE id=%s", (cap["job_id"],)).fetchone()
     return bool(probe and probe["kind"] == "compatibility" and probe["state"] == "succeeded" and probe["dispatched_at"] and probe["result"].get("real_api") is True and probe["result"].get("transport") == TRANSPORT)
+
+
+def recovered_usage_accounted(conn, job_id, attempt):
+    """Recognize only an audited complete native receipt; never a paid invoice."""
+    from app import cny_billing
+    row = conn.execute("SELECT * FROM ai_jobs WHERE id=%s", (job_id,)).fetchone()
+    event = conn.execute("SELECT * FROM ai_cny_events WHERE event_key=%s AND kind='usage_estimate'", (f"attempt:{job_id}:{attempt}:verified-response-recovery",)).fetchone()
+    reservation = conn.execute("SELECT * FROM ai_cny_reservations WHERE job_id=%s AND attempt=%s", (job_id, attempt)).fetchone()
+    if not row or not event or not reservation or row["attempts"] != attempt or row["state"] != "succeeded":
+        return False
+    result = row["result"] or {}; detail = event["detail"]
+    if (result.get("transport") != TRANSPORT or result.get("real_api") is not True or result.get("response_status") != "completed"
+        or detail.get("recovery_kind") != "verified_complete_response_not_invoice"
+        or detail.get("recovered_result_sha256") != content_sha(result)
+        or not complete_usage(result.get("usage"))):
+        return False
+    expected = cny_billing.estimate(reservation["price_snapshot"], result["usage"], row["started_at"], row["finished_at"])
+    from decimal import Decimal
+    return expected["status"] == "usage_estimate" and event["amount_cny"] == Decimal(expected["amount_cny"]) and event["amount_cny"] <= reservation["amount_cny"]
+
+
+def recover_complete_probe(conn, job_id, evidence_dir):
+    """Offline parser repair of one confirmed HTTP200; preserve original unknown.
+
+    Original error envelope remains in an immutable accounting audit. No raw
+    bytes, call event, attempts, reservation or supplier settlement is rewritten.
+    """
+    from app import cny_billing
+    from app.review_campaign import check_job
+    from app.model_router import authorized
+    authorized()
+    with conn.transaction():
+        job = conn.execute("SELECT * FROM ai_jobs WHERE id=%s FOR UPDATE", (job_id,)).fetchone()
+        if not job:
+            raise ValueError("unknown_recovery_job")
+        guard, _ = check_job(job)
+        approved = conn.execute("SELECT * FROM ai_review_campaigns WHERE scope_id=%s", (guard["scope_id"],)).fetchone()
+        if not approved or approved["policy"] != guard["policy"] or approved["user_id"] != job["user_id"]:
+            raise ValueError("recovery_authorization_required")
+        if job["kind"] != "compatibility" or job["state"] != "blocked" or job["error_code"] != "provider_http_200" or job["attempts"] != 1 or job["billing_status"] != "unknown":
+            raise ValueError("known_complete_probe_required")
+        directory = Path(evidence_dir).resolve()
+        if directory.is_relative_to(Path(__file__).resolve().parents[2]):
+            raise ValueError("private_recovery_evidence_required")
+        request_raw=(directory/"request.json").read_bytes(); response_raw=(directory/"response.json").read_bytes()
+        original = copy.deepcopy(job["result"]); receipt = original["diagnostic"]["receipt"]
+        if hashlib.sha256(request_raw).hexdigest() != receipt["request_sha256"] or hashlib.sha256(response_raw).hexdigest() != receipt["response_sha256"]:
+            raise ValueError("recovery_receipt_hash_mismatch")
+        body=body_for(job)
+        if json.loads(request_raw) != body:
+            raise ValueError("recovery_request_changed")
+        data=json.loads(response_raw); response=parse_response(data,body); usage=normalize_usage(data["usage"])
+        if usage != original["usage"] or data["id"] != receipt["provider_message_id"]:
+            raise ValueError("recovery_usage_or_request_identity_changed")
+        calls=conn.execute("SELECT * FROM ai_call_events WHERE job_id=%s", (job_id,)).fetchall()
+        if len(calls)!=1 or calls[0]["provider_request_confirmed"] is not True or calls[0]["usage"] != usage:
+            raise ValueError("one_actual_call_required")
+        reservation=conn.execute("SELECT * FROM ai_cny_reservations WHERE job_id=%s AND attempt=1", (job_id,)).fetchone()
+        estimate=cny_billing.estimate(reservation["price_snapshot"],usage,job["started_at"],job["finished_at"])
+        from decimal import Decimal
+        if estimate["status"] != "usage_estimate" or Decimal(estimate["amount_cny"]) > reservation["amount_cny"]:
+            raise ValueError("reliable_usage_estimate_required")
+        result=dict(response=response,usage=usage,native_usage=data["usage"],returned_model_id=data["model"],model_version=data.get("model_version"),transport=TRANSPORT,real_api=True,response_status="completed",
+                    response_parameters=dict(reasoning=data["reasoning"],max_output_tokens=data["max_output_tokens"],schema_sha256=content_sha(body["text"]["format"]["schema"])),diagnostic=original["diagnostic"])
+        audit={**estimate,"recovery_kind":"verified_complete_response_not_invoice","recovered_result_sha256":content_sha(result),"original_result":original,"original_error_code":job["error_code"],"original_billing_status":"unknown","reservation_retained":str(reservation["amount_cny"]),"scope_id":guard["scope_id"],"raw_receipt":receipt}
+        conn.execute("INSERT INTO ai_cny_events(event_key,job_id,attempt,kind,amount_cny,detail) VALUES(%s,%s,1,'usage_estimate',%s,%s)", (f"attempt:{job_id}:1:verified-response-recovery",job_id,estimate["amount_cny"],Jsonb(audit)))
+        conn.execute("UPDATE ai_jobs SET state='succeeded',error_code=NULL,result=%s,estimated_cny=%s WHERE id=%s",(Jsonb(result),estimate["amount_cny"],job_id))
+        restored=conn.execute("SELECT * FROM ai_jobs WHERE id=%s",(job_id,)).fetchone();accept_probe(conn,restored)
+        conn.execute("UPDATE ai_jobs SET dispatched_at=clock_timestamp() WHERE id=%s",(job_id,))
+        return dict(job_id=job_id,protocol_verified=True,usage_estimate_cny=estimate["amount_cny"],original_unknown_retained=True,new_provider_calls=0)

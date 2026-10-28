@@ -151,3 +151,17 @@ def test_boolean_polarity_retry_is_bounded_and_never_accepts_old_result():
     assert not campaign.contract_retry_allowed(rejection, 3)
     rejection = deepcopy(old);rejection['result']['finding']['passed'] = False
     assert not campaign.contract_retry_allowed(rejection, 3)
+
+
+def test_symbolic_trace_retry_requires_new_contract_and_does_not_accept_wrong_arithmetic():
+    from app.question_quality import AXES
+    rejected={'settings_snapshot': {'review_campaign': {'policy': {'contract_version': 6}}}, 'result': {'issues':['deterministic_calculation_failed'],'finding': {'passed':True,'checks':{k:True for k in AXES},'unresolved':[],'calculations':[{'expression':'Km_prime = Km*(1+I/Ki)','expected':'Km_prime > Km','unit':'concentration'}]}}}
+    old=deepcopy(rejected)
+    assert campaign.contract_retry_allowed(rejected,7) and rejected==old
+    assert not campaign.contract_retry_allowed(rejected,6)
+    rejected['result']['finding']['calculations']=[{'expression':'2+2','expected':'5','unit':'one'}]
+    assert not campaign.contract_retry_allowed(rejected,7)
+    rejected = deepcopy(old);rejected['result']['finding']['checks']['scientific_correctness'] = False
+    assert not campaign.contract_retry_allowed(rejected, 7)
+    rejected = deepcopy(old);rejected['result']['finding']['passed'] = False
+    assert not campaign.contract_retry_allowed(rejected, 7)

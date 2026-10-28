@@ -61,12 +61,13 @@ def test_strict_schema_preserves_every_finding_field_and_truthful_failure(reques
     assert body["reasoning"]=={"effort":"high"} and body["max_output_tokens"]==32768
 
 
-@pytest.mark.parametrize("defect", [None,"partial_json","incomplete","wrong_model","missing_usage","bad_cache","wrong_effort","wrong_schema","tool"])
+@pytest.mark.parametrize("defect", [None,"metadata_defaults","partial_json","incomplete","wrong_model","missing_usage","bad_cache","wrong_effort","wrong_schema","tool"])
 def test_one_request_exact_receipts_and_fail_closed(request_job, tmp_path, defect):
     calls=[]
     def handle(req):
         assert str(req.url)==r.URL
         body=json.loads(req.content);calls.append(body);data=response(body)
+        if defect=="metadata_defaults":data["text"]["format"]["description"]=None;data["reasoning"]["summary"]=None
         if defect=="partial_json":data["output"][0]["content"][0]["text"]='{"passed":true'
         if defect=="incomplete":data["status"]="incomplete"
         if defect=="wrong_model":data["model"]="other"
@@ -77,7 +78,7 @@ def test_one_request_exact_receipts_and_fail_closed(request_job, tmp_path, defec
         if defect=="tool":data["output"].append({"type":"function_call"})
         return httpx.Response(200,json=data)
     def client(**kwargs):return httpx.Client(transport=httpx.MockTransport(handle),**kwargs)
-    if defect:
+    if defect and defect!="metadata_defaults":
         with pytest.raises(ProviderFailure):r.execute(request_job,client_factory=client)
     else:
         result=r.execute(request_job,client_factory=client)

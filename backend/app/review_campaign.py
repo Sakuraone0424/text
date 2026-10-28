@@ -16,16 +16,16 @@ from app.limited_trial import COMPAT_INSTRUCTION, wire_guard
 
 def scope(policy):
     fields = {"version", "model_id", "effort", "output_cap", "system_sha256", "question_payloads", "legacy_scope_id", "legacy_attempts", "legacy_reserved_cny", "legacy_unknown_acknowledged"}
-    native = policy.get("version") in ("review-campaign/5", "review-campaign/6")
-    if policy.get("version") in ("review-campaign/2", "review-campaign/3", "review-campaign/4", "review-campaign/5", "review-campaign/6"):
+    native = policy.get("version") in ("review-campaign/5", "review-campaign/6", "review-campaign/7")
+    if policy.get("version") in ("review-campaign/2", "review-campaign/3", "review-campaign/4", "review-campaign/5", "review-campaign/6", "review-campaign/7"):
         fields.add("contract_version")
     if native:
         fields.update({"transport", "probe_payload_sha256", "acknowledged_unknowns"})
-        if policy["version"] == "review-campaign/6":
+        if policy["version"] in ("review-campaign/6", "review-campaign/7"):
             fields.add("wire_contract_sha256")
     if (
         set(policy) != fields
-        or policy["version"] not in ("review-campaign/1", "review-campaign/2", "review-campaign/3", "review-campaign/4", "review-campaign/5", "review-campaign/6")
+        or policy["version"] not in ("review-campaign/1", "review-campaign/2", "review-campaign/3", "review-campaign/4", "review-campaign/5", "review-campaign/6", "review-campaign/7")
         or (policy["version"] != "review-campaign/1" and policy["contract_version"] != int(policy["version"][-1]))
         or policy["model_id"] != "deepseek-flash"
         or policy["effort"] != "high"
@@ -49,7 +49,7 @@ def scope(policy):
                    or not Decimal(a["reserved_cny"]).is_finite() or Decimal(a["reserved_cny"]) <= 0 for a in acks)
             or Decimal(acks[1]["reserved_cny"]) != Decimal("0.326144")):
             raise ValueError("invalid_known_unknown_acknowledgment")
-        if policy["version"] == "review-campaign/6":
+        if policy["version"] in ("review-campaign/6", "review-campaign/7"):
             from app.responses_review import wire_contract_sha256
             if policy["wire_contract_sha256"] != wire_contract_sha256():
                 raise ValueError("responses_wire_contract_changed")
@@ -169,8 +169,11 @@ def claim_reason(conn, job):
         "SELECT e.job_id,e.attempt FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id WHERE j.user_id=%s AND e.kind='unknown' AND NOT EXISTS(SELECT 1 FROM ai_cny_events b WHERE b.job_id=e.job_id AND b.attempt=e.attempt AND b.kind='bill_confirmation' AND b.amount_cny IS NOT NULL AND b.detail->>'verified_statement'='true')",
         (job["user_id"],),
     ).fetchall()
-    if any((u["job_id"], u["attempt"]) not in acknowledged for u in unknowns):
-        return "campaign_unacknowledged_unknown_charge_stop"
+    for u in unknowns:
+        if (u["job_id"], u["attempt"]) not in acknowledged:
+            from app.responses_review import recovered_usage_accounted
+            if not native or not recovered_usage_accounted(conn, u["job_id"], u["attempt"]):
+                return "campaign_unacknowledged_unknown_charge_stop"
     peers = conn.execute("SELECT * FROM ai_jobs WHERE settings_snapshot->'review_campaign'->>'scope_id'=%s ORDER BY id", (sid,)).fetchall()
     if job["attempts"] != 0 or sum(p["attempts"] for p in peers) >= len(guard["policy"]["question_payloads"]) + 1:
         return "campaign_finite_attempt_limit"
@@ -189,8 +192,11 @@ def claim_reason(conn, job):
             return "campaign_operator_review_required"
         if peer["state"] == "succeeded" and peer["dispatched_at"] is None:
             return "trial_waiting_for_validation"
-    if conn.execute("SELECT 1 FROM ai_cny_events WHERE job_id=ANY(%s) AND kind='unknown' LIMIT 1", ([p["id"] for p in peers],)).fetchone():
-        return "campaign_unknown_charge_stop"
+    peer_unknowns = conn.execute("SELECT job_id,attempt FROM ai_cny_events WHERE job_id=ANY(%s) AND kind='unknown'", ([p["id"] for p in peers],)).fetchall()
+    for u in peer_unknowns:
+        from app.responses_review import recovered_usage_accounted
+        if not native or not recovered_usage_accounted(conn, u["job_id"], u["attempt"]):
+            return "campaign_unknown_charge_stop"
     if job["kind"] != "compatibility":
         if native:
             from app.responses_review import compatible
@@ -231,6 +237,10 @@ def contract_retry_allowed(rejection, contract):
     if not (contract > previous and finding.get("passed") is True and not finding.get("unresolved") and set(checks) == set(AXES)):
         return False
     if issues and issues <= {"unresolved_source_risk", "knowledge_mapping_not_evidenced"} and all(checks.values()):
+        return True
+    if (contract == 7 and previous == 6 and issues == {"deterministic_calculation_failed"}
+        and all(checks.values()) and finding.get("calculations")
+        and all(re.search(r"[A-Za-zΑ-Ωα-ω=→∞]", c.get("expression", "")) for c in finding["calculations"])):
         return True
     # An internally contradictory PASS=true / duplication=false can be sent
     # once to a new independent run with explicit polarity, never relabelled.

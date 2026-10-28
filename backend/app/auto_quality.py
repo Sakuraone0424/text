@@ -243,7 +243,7 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
             "transcription style provenance is independently checked in science round. "
             "Do not infer official original-paper or official-answer verification."
         )
-    if contract_version in (2, 3, 4, 5, 6):
+    if contract_version in (2, 3, 4, 5, 6, 7):
         if phase == "answer":
             payload["question"]["accepted_answers"] = q.get("accepted_answers", [])
         payload["instructions"] += (
@@ -280,6 +280,15 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
                 "this input packet. Never echo, translate or reformat the input packet. "
                 "Your top-level object must use the Finding fields from schema.properties, "
                 "not phase, question, evidence, style, instructions or schema."
+            )
+        if contract_version >= 7:
+            payload["instructions"] += (
+                " calculations is ONLY for fully numeric arithmetic expressions with a "
+                "numeric expected result, independently evaluated by the numeric checker. "
+                "Do not put equations, variables, limits, inequalities, chemical reactions "
+                "or qualitative comparisons there. Preserve all such scientific reasoning "
+                "in evidence-backed claims and rationale instead. When no numeric "
+                "calculation is needed, return calculations=[]."
             )
     elif contract_version != 1:
         raise ValueError("unknown_review_output_contract")
