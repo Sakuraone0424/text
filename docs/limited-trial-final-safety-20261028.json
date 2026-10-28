@@ -78,7 +78,7 @@
   },
   "live_api_authorized": false,
   "private_data_authorized": false,
-  "tests_targeted_passed": 98,
+  "tests_targeted_passed": 100,
   "actual_api_requests": 0,
   "database_versions": 59,
   "database_migrations": 20,

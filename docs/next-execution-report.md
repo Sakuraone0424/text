@@ -1,6 +1,6 @@
 # 最新：3题试验限额与出站最终安全验收
 
-见[最终报告](limited-trial-final-safety-20261028.md)及[冻结清单/请求SHA](limited-trial-final-safety-20261028.json)。完成通用预算缺口修复、98项针对性测试、完整SDK请求清洗与4057字节范围核对。真实API仍0，真实科学/答案审核0、ready0、59版本/20迁移不变；付费与隐私授权仍未授予。
+见[最终报告](limited-trial-final-safety-20261028.md)及[冻结清单/请求SHA](limited-trial-final-safety-20261028.json)。完成通用预算缺口修复、100项针对性测试、完整SDK请求清洗与4057字节范围核对。真实API仍0，真实科学/答案审核0、ready0、59版本/20迁移不变；付费与隐私授权仍未授予。
 
 ---
 

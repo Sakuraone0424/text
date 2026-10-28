@@ -51,7 +51,11 @@ def main():
             )
         except Exception:
             json.dump(
-                dict(provider_error=True, http_status=measured.get("http_status")),
+                dict(
+                    provider_error=True,
+                    http_status=measured.get("http_status"),
+                    usage=measured["usage"],
+                ),
                 sys.stdout,
             )
             return

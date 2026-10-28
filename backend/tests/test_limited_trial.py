@@ -428,3 +428,60 @@ def test_relay_rejects_extra_text_before_any_official_client(monkeypatch):
         response.read()
         client.close()
         assert response.status == 403 and state["requests"] == 0
+
+
+@pytest.mark.parametrize("failure", ["sdk_error", "invalid_json"])
+def test_runner_failure_preserves_measured_usage(
+    monkeypatch, tmp_path, capsys, failure
+):
+    import io
+    from contextlib import contextmanager
+    import deepseek_harness
+    from app import harness_runner, deepseek_relay
+    from types import SimpleNamespace
+
+    measured = {
+        "requests": 1,
+        "http_status": 200,
+        "usage": {"input_tokens": 17, "output_tokens": 8, "cache_read_input_tokens": 0},
+        "model_version": None,
+    }
+
+    @contextmanager
+    def fake_relay(*args, **kwargs):
+        yield "http://127.0.0.1:1", measured
+
+    class SDK:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def run(self, *args, **kwargs):
+            if failure == "sdk_error":
+                raise RuntimeError("synthetic SDK parser error")
+            return SimpleNamespace(finish_reason="completed", final_response="{")
+
+    monkeypatch.setattr(deepseek_harness, "DeepSeekHarness", SDK)
+    monkeypatch.setattr(deepseek_relay, "relay", fake_relay)
+    monkeypatch.setattr(t, "execution_guard", lambda request: lambda body: True)
+    monkeypatch.setenv("DSH_HOME", str(tmp_path))
+    request = {
+        "id": 1,
+        "attempts": 1,
+        "settings_snapshot": {
+            "model_id": "deepseek-flash",
+            "effort": "high",
+            "token_limit": 4096,
+        },
+        "payload": {"synthetic_only": True},
+    }
+    monkeypatch.setattr(harness_runner.sys, "stdin", io.StringIO(json.dumps(request)))
+    harness_runner.main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["provider_error"] and result["usage"] == measured["usage"]
+    assert result.get("real_api") is not True
