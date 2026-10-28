@@ -245,6 +245,20 @@ def test_expired_lease_after_crash_never_retries_or_releases(db, trial):
     )
 
 
+def test_trial_recovery_never_mutates_unrelated_expired_jobs(db, trial):
+    other = ai_jobs.enqueue(
+        db, trial[0], "synthetic-outside-scope", "grading", {"synthetic": True}
+    )
+    db.execute(
+        "UPDATE ai_jobs SET state='running',attempts=1,lease_until=clock_timestamp()-interval '1 second' WHERE id=%s",
+        (other["id"],),
+    )
+    assert ai_jobs.claim(db, scope_id=trial[2]) is None
+    assert db.execute(
+        "SELECT state,attempts FROM ai_jobs WHERE id=%s", (other["id"],)
+    ).fetchone() == {"state": "running", "attempts": 1}
+
+
 def test_two_database_connections_only_reserve_one_trial_request(live_app, monkeypatch):  # noqa: F811
     import psycopg
     from psycopg.rows import dict_row

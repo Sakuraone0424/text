@@ -78,7 +78,7 @@
   },
   "live_api_authorized": false,
   "private_data_authorized": false,
-  "tests_targeted_passed": 100,
+  "tests_targeted_passed": 101,
   "actual_api_requests": 0,
   "database_versions": 59,
   "database_migrations": 20,
@@ -138,5 +138,21 @@
   "unique_source_bytes": 4057,
   "repeated_source_bytes_total": 7833,
   "source_bytes_science": 4057,
-  "source_bytes_answer": 3776
+  "source_bytes_answer": 3776,
+  "final_database_receipt": {
+    "jobs": 0,
+    "calls": 0,
+    "ready": 0,
+    "formal_science_answer": 0,
+    "draft_versions": 59,
+    "migrations": 20,
+    "source_units": 12396,
+    "temporary_roles_remaining": 0,
+    "authorization_flags_enabled": {
+      "AI_AUTOMATION_ENABLED": false,
+      "DEEPSEEK_API_AUTHORIZED": false,
+      "DEEPSEEK_PRIVATE_DATA_AUTHORIZED": false
+    },
+    "scope_activated": false
+  }
 }

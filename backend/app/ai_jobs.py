@@ -53,15 +53,18 @@ def enqueue(conn, user_id, key, kind, payload):
 
 def claim(conn, scope_id=None):
     # Expired leases are never concurrently finalized: every attempt has a new fence.
+    scope_filter = (
+        " AND settings_snapshot->'limited_trial'->>'scope_id'=%s" if scope_id else ""
+    )
     expired = conn.execute(
-        "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp() RETURNING *"
+        "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp()"
+        + scope_filter
+        + " RETURNING *",
+        (scope_id,) if scope_id else (),
     ).fetchall()
     for lost in expired:
         if lost["settings_snapshot"].get("billing_currency") == "CNY":
             cny_billing.settle(conn, lost, None, TimeoutError())
-    scope_filter = (
-        " AND settings_snapshot->'limited_trial'->>'scope_id'=%s" if scope_id else ""
-    )
     job = conn.execute(
         "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp()"
         + scope_filter
