@@ -143,6 +143,7 @@ def synthetic_result(job, db, passed=True, quote=None):
     u = job["payload"]["evidence"][0]
     result = dict(
         real_api=True,
+        usage=dict(input_tokens=10, output_tokens=10, cache_read_input_tokens=0),
         response=dict(
             passed=passed,
             independent_choice=(

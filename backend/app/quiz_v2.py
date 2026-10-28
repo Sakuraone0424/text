@@ -242,6 +242,13 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                 content = row["content"]
                 if content["subject"] != subject or content["question_type"] != kind:
                     continue
+                from app.answer_cues import conflict
+
+                if conflict(content, [r["content"] for r in selected + pool]):
+                    next(r for r in audit if r["question_id"] == row["id"])[
+                        "excluded_reasons"
+                    ].append("mutual_answer_cue")
+                    continue
                 if any(
                     duplicate(content["stem"], r["content"]["stem"])
                     for r in selected + pool
@@ -277,6 +284,13 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     if shortages:
         raise BankShortage(shortages)
     validate_items([r["content"] for r in selected])
+    from app.answer_cues import conflict
+
+    if any(
+        conflict(r["content"], [s["content"] for s in selected[:i]])
+        for i, r in enumerate(selected)
+    ):
+        raise ValueError("Mutual answer cue in paper; refuse generation")
     paper_id = conn.execute(
         "INSERT INTO papers_v2(user_id,paper_date,blueprint) VALUES (%s,%s,%s) RETURNING id",
         (user_id, day, Jsonb(spec)),
