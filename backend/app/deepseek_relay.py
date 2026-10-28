@@ -7,7 +7,7 @@ import httpx
 
 
 @contextmanager
-def relay(model, token_limit):
+def relay(model, token_limit, request_guard=None):
     state = {
         "requests": 0,
         "usage": {},
@@ -50,6 +50,12 @@ def relay(model, token_limit):
             ):
                 self.send_error(403)
                 return
+            if request_guard is not None:
+                try:
+                    request_guard(body)
+                except ValueError:
+                    self.send_error(403, "Unapproved request body")
+                    return
             with lock:
                 if state["requests"] >= 1:
                     self.send_error(429)

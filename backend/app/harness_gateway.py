@@ -11,6 +11,9 @@ from app.model_router import authorized
 
 def execute(job):
     authorized(private=job["kind"] != "compatibility")
+    from app.limited_trial import execution_guard
+
+    execution_guard(job)  # Require the approved frozen scope before launching SDK.
     root = Path(
         os.environ.get("AI_PRIVATE_HOME", "/tmp/ustc-harness-private")
     ).resolve()
@@ -26,6 +29,7 @@ def execute(job):
         "SSL_CERT_DIR",
         "REQUESTS_CA_BUNDLE",
         "DEEPSEEK_API_KEY",
+        "DEEPSEEK_TRIAL_SCOPE_ID",
     )
     env = {k: os.environ[k] for k in allowed if k in os.environ}
     env.update(
@@ -60,5 +64,5 @@ def execute(job):
     if result.get("provider_error"):
         from app.ai_jobs import ProviderFailure
 
-        raise ProviderFailure(result.get("http_status"))
+        raise ProviderFailure(result.get("http_status"), usage=result.get("usage"))
     return result

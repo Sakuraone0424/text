@@ -10,9 +10,15 @@ from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
 
-def dispatch_completed(conn):
+def dispatch_completed(conn, scope_id=None):
+    scope_filter = (
+        " AND settings_snapshot->'limited_trial'->>'scope_id'=%s" if scope_id else ""
+    )
     rows = conn.execute(
-        "SELECT * FROM ai_jobs WHERE state='succeeded' AND dispatched_at IS NULL ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED"
+        "SELECT * FROM ai_jobs WHERE state='succeeded' AND dispatched_at IS NULL"
+        + scope_filter
+        + " ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED",
+        (scope_id,) if scope_id else (),
     ).fetchall()
     for job in rows:
         try:

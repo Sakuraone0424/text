@@ -259,12 +259,15 @@ def settle(conn, job, result, error):
     ).fetchone()
     if not reservation:
         raise ValueError("cny_reservation_required")
-    usage = (result or {}).get("usage", {})
+    usage = (result or {}).get("usage", {}) or getattr(error, "usage", {})
     detail = (
         estimate(reservation["price_snapshot"], usage, job["started_at"], utcnow())
         if error is None
         else dict(
-            status="unknown", amount_cny=None, reason="failed_or_uncertain_request"
+            status="unknown",
+            amount_cny=None,
+            reason="failed_or_uncertain_request",
+            usage=usage,
         )
     )
     if (

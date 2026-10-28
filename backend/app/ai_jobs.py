@@ -9,9 +9,22 @@ from app import model_router, cny_billing
 
 
 class ProviderFailure(RuntimeError):
-    def __init__(self, status):
+    def __init__(self, status, usage=None):
         self.request_confirmed = type(status) is int and 100 <= status <= 599
         self.status = status if type(status) is int and 100 <= status <= 599 else 502
+        self.usage = {
+            k: v
+            for k, v in (usage or {}).items()
+            if k
+            in (
+                "input_tokens",
+                "output_tokens",
+                "cache_read_input_tokens",
+                "cache_creation_input_tokens",
+            )
+            and type(v) is int
+            and v >= 0
+        }
         super().__init__("provider_request_failed")
 
 
@@ -38,7 +51,7 @@ def enqueue(conn, user_id, key, kind, payload):
     return inserted if inserted else enqueue(conn, user_id, key, kind, payload)
 
 
-def claim(conn):
+def claim(conn, scope_id=None):
     # Expired leases are never concurrently finalized: every attempt has a new fence.
     expired = conn.execute(
         "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp() RETURNING *"
@@ -46,8 +59,14 @@ def claim(conn):
     for lost in expired:
         if lost["settings_snapshot"].get("billing_currency") == "CNY":
             cny_billing.settle(conn, lost, None, TimeoutError())
+    scope_filter = (
+        " AND settings_snapshot->'limited_trial'->>'scope_id'=%s" if scope_id else ""
+    )
     job = conn.execute(
-        "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp() ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id FOR UPDATE SKIP LOCKED LIMIT 1"
+        "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp()"
+        + scope_filter
+        + " ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id FOR UPDATE SKIP LOCKED LIMIT 1",
+        (scope_id,) if scope_id else (),
     ).fetchone()
     if not job:
         return None
@@ -92,6 +111,12 @@ def claim(conn):
         reason = "budget_exceeded"
     if s.get("billing_currency") != "CNY":
         reason = "legacy_currency_job_requires_requeue"
+    from app.limited_trial import claim_reason
+
+    trial_reason = claim_reason(conn, job, amount)
+    if trial_reason in ("trial_call_in_flight", "trial_waiting_for_validation"):
+        return None
+    reason = reason or trial_reason
     if reason:
         conn.execute(
             "UPDATE ai_jobs SET state='blocked',error_code=%s WHERE id=%s",
@@ -117,6 +142,13 @@ def finish(conn, job, result=None, error=None):
         raise ValueError("stale_lease")
     if result is not None and len(json.dumps(result).encode()) > 131072:
         raise ValueError("oversized_result")
+    if (
+        locked["settings_snapshot"].get("limited_trial")
+        and result
+        and result.get("real_api") is True
+        and result.get("returned_model_id") != locked["settings_snapshot"]["model_id"]
+    ):
+        error = ProviderFailure(200, usage=result.get("usage"))
     state = (
         "succeeded"
         if error is None
@@ -138,7 +170,7 @@ def finish(conn, job, result=None, error=None):
             else type(error).__name__
         )
     )
-    usage = (result or {}).get("usage", {})
+    usage = (result or {}).get("usage", {}) or getattr(error, "usage", {})
     cny_billing.settle(conn, locked, result, error)
     conn.execute(
         "INSERT INTO ai_call_events(job_id,model_id,effort,model_version,usage,outcome,error_code,provider_request_confirmed) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -172,9 +204,9 @@ def finish(conn, job, result=None, error=None):
     return state
 
 
-def run_once(get_db, executor):
+def run_once(get_db, executor, scope_id=None):
     with get_db() as c:
-        job = claim(c)
+        job = claim(c, scope_id=scope_id)
     if not job:
         return False
     try:
