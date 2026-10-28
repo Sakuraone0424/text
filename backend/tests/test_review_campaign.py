@@ -89,6 +89,27 @@ def test_pause_is_audited_and_zero_limits_default_remain_enabled(db, authorized_
     assert db.execute("SELECT count(*) AS n FROM ai_call_events").fetchone()["n"] == 5
 
 
+def test_offline_dispatch_recovery_rejects_unknown_and_input_echo(db, authorized_campaign):
+    from psycopg.types.json import Jsonb
+    from pydantic import ValidationError
+
+    job = enqueue(db, authorized_campaign)
+    claimed = ai_jobs.claim(db, scope_id=authorized_campaign[2], scope_kind="review_campaign")
+    success(db, claimed)  # Synthetic rollback fixture, never a provider request.
+    db.execute("UPDATE ai_jobs SET state='blocked',error_code='invalid_or_uncertain_result' WHERE id=%s", (job["id"],))
+    reason = "Offline regression must never recover an incomplete or echoed review packet."
+    with pytest.raises(ValueError, match="complete_accounted"):
+        campaign.recover_dispatch(db, job["id"], reason)
+    current = db.execute("SELECT result FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()["result"]
+    current["diagnostic"] = {"sdk_finish_reason": "completed", "receipt": {"provider_stop_reason": "end_turn"}}
+    current["response"] = deepcopy(job["payload"])
+    db.execute("UPDATE ai_jobs SET result=%s WHERE id=%s", (Jsonb(current), job["id"]))
+    with pytest.raises(ValidationError):
+        campaign.recover_dispatch(db, job["id"], reason)
+    assert db.execute("SELECT state FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()["state"] == "blocked"
+    assert db.execute("SELECT count(*) AS n FROM auto_quality_events WHERE phase='dispatch_recovery'").fetchone()["n"] == 0
+
+
 def test_contract_upgrade_never_relabels_rejection_or_retries_science_conflict():
     from app.question_quality import AXES
     rejection = {"settings_snapshot": {}, "result": {"issues": ["knowledge_mapping_not_evidenced"], "finding": {"passed": True, "checks": {key: True for key in AXES}, "unresolved": []}}}

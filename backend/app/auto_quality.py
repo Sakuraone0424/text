@@ -243,7 +243,7 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
             "transcription style provenance is independently checked in science round. "
             "Do not infer official original-paper or official-answer verification."
         )
-    if contract_version in (2, 3):
+    if contract_version in (2, 3, 4):
         if phase == "answer":
             payload["question"]["accepted_answers"] = q.get("accepted_answers", [])
         payload["instructions"] += (
@@ -262,7 +262,7 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
             "starting from zero. Return a complete Finding object, all five check keys, "
             "and only JSON without Markdown. Keep uncertainty and independent reasoning."
         )
-        if contract_version == 3:
+        if contract_version >= 3:
             payload["instructions"] += (
                 " Boolean polarity: EVERY checks value is a PASS flag. In particular "
                 "duplication=true means the question PASSES the no-duplication check; "
@@ -272,6 +272,14 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
                 "Set passed=true only when ALL five checks are true and unresolved is "
                 "empty. If any requirement fails or cannot be verified, leave its check "
                 "false, passed=false, and explain the actual issue without guessing."
+            )
+        if contract_version == 4:
+            payload["instructions"] += (
+                " Perform the review and return the Finding described by schema. "
+                "The supplied schema describes your OUTPUT, not a request to rewrite "
+                "this input packet. Never echo, translate or reformat the input packet. "
+                "Your top-level object must use the Finding fields from schema.properties, "
+                "not phase, question, evidence, style, instructions or schema."
             )
     elif contract_version != 1:
         raise ValueError("unknown_review_output_contract")

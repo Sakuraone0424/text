@@ -85,6 +85,22 @@ def test_strict_150_point_specification(db, bank, blueprint):
         assert len(selected) == 14 and sum(r["max_points"] for r in selected) == 75
 
 
+@pytest.mark.parametrize("started", [False, True])
+def test_first_paper_remains_reachable_after_midnight(db, bank, blueprint, monkeypatch, started):
+    from datetime import date
+
+    uid = ensure_user(db, "cross-day-owner")
+    monkeypatch.setattr(q, "today_cn", lambda: date(2026, 10, 28))
+    first = q.create_paper(db, uid, blueprint)
+    if started:
+        sessions.start(db, uid, first["paper_id"])
+    monkeypatch.setattr(q, "today_cn", lambda: date(2026, 10, 29))
+    restored = q.create_paper(db, uid, blueprint)
+    assert restored["paper_id"] == first["paper_id"]
+    assert restored["timing"]["status"] == ("in_progress" if started else "not_started")
+    assert db.execute("SELECT count(*) AS n FROM papers_v2 WHERE user_id=%s", (uid,)).fetchone()["n"] == 1
+
+
 @pytest.mark.parametrize("kind", ["count", "points", "duration"])
 def test_blueprint_cannot_silently_change_specification(blueprint, kind):
     data = blueprint.model_dump()

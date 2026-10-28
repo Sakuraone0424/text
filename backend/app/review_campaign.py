@@ -16,11 +16,11 @@ from app.limited_trial import COMPAT_INSTRUCTION, wire_guard
 
 def scope(policy):
     fields = {"version", "model_id", "effort", "output_cap", "system_sha256", "question_payloads", "legacy_scope_id", "legacy_attempts", "legacy_reserved_cny", "legacy_unknown_acknowledged"}
-    if policy.get("version") in ("review-campaign/2", "review-campaign/3"):
+    if policy.get("version") in ("review-campaign/2", "review-campaign/3", "review-campaign/4"):
         fields.add("contract_version")
     if (
         set(policy) != fields
-        or policy["version"] not in ("review-campaign/1", "review-campaign/2", "review-campaign/3")
+        or policy["version"] not in ("review-campaign/1", "review-campaign/2", "review-campaign/3", "review-campaign/4")
         or (policy["version"] != "review-campaign/1" and policy["contract_version"] != int(policy["version"][-1]))
         or policy["model_id"] != "deepseek-flash"
         or policy["effort"] != "high"
@@ -242,3 +242,58 @@ def run_once(get_db, sid):
         if bad:
             pause(conn, sid)
     return ran
+
+
+def recover_dispatch(conn, job_id, reason):
+    """Explicit offline recovery of a complete response lost to dispatch rollback.
+
+    Never calls a provider or changes response, usage, attempts or money records.
+    Any failed scientific gate rolls the entire recovery transaction back.
+    """
+    from app import auto_quality
+    if not isinstance(reason, str) or not 30 <= len(reason) <= 500:
+        raise ValueError("recovery_reason_required")
+    with conn.transaction():
+        job = conn.execute("SELECT * FROM ai_jobs WHERE id=%s FOR UPDATE", (job_id,)).fetchone()
+        if not job:
+            raise ValueError("unknown_recovery_job")
+        guard, _ = check_job(job)
+        approved = conn.execute("SELECT * FROM ai_review_campaigns WHERE scope_id=%s", (guard["scope_id"],)).fetchone()
+        if not approved or approved["user_id"] != job["user_id"] or approved["policy"] != guard["policy"]:
+            raise ValueError("campaign_authorization_mismatch")
+        result = job.get("result") or {}
+        diagnostic = result.get("diagnostic", {})
+        if (job["state"] != "blocked" or job["error_code"] != "invalid_or_uncertain_result"
+            or job["attempts"] != 1 or job["billing_status"] != "usage_estimate"
+            or result.get("real_api") is not True or result.get("returned_model_id") != "deepseek-flash"
+            or not auto_quality.complete_usage(result.get("usage"))
+            or diagnostic.get("sdk_finish_reason") != "completed"
+            or diagnostic.get("receipt", {}).get("provider_stop_reason") != "end_turn"):
+            raise ValueError("complete_accounted_recovery_response_required")
+        auto_quality.Finding.model_validate(result["response"])
+        if conn.execute("SELECT 1 FROM auto_quality_events WHERE job_id=%s AND phase IN ('science','answer')", (job_id,)).fetchone():
+            raise ValueError("existing_formal_result_cannot_be_relabelled")
+        calls = conn.execute("SELECT * FROM ai_call_events WHERE job_id=%s", (job_id,)).fetchall()
+        if (len(calls) != 1 or calls[0]["provider_request_confirmed"] is not True
+            or calls[0]["usage"] != result["usage"] or calls[0]["model_id"] != "deepseek-flash"
+            or calls[0]["effort"] != "high" or calls[0]["outcome"] != "succeeded"):
+            raise ValueError("single_persisted_provider_call_required")
+        qid = job["payload"]["question_id"]
+        if not auto_quality.preflight(conn, qid)["passed"]:
+            raise ValueError("recovery_identity_failed")
+        before = {k: job[k] for k in ("state", "error_code", "billing_status", "attempts")}
+        before["result_sha256"] = content_sha(result)
+        conn.execute("UPDATE ai_jobs SET state='succeeded',error_code=NULL WHERE id=%s", (job_id,))
+        conn.execute("UPDATE auto_question_states SET status='checking',reason=NULL,updated_at=clock_timestamp() WHERE question_id=%s", (qid,))
+        stored = conn.execute("SELECT * FROM ai_jobs WHERE id=%s", (job_id,)).fetchone()
+        if not auto_quality.accept_round(conn, stored):
+            raise ValueError("recovery_formal_quality_failed")
+        phases = conn.execute("SELECT count(DISTINCT phase) AS n FROM auto_quality_events WHERE question_id=%s AND content_sha256=%s AND passed AND phase IN ('science','answer')", (qid, job["payload"]["content_sha256"])).fetchone()["n"]
+        if phases == 2 and not auto_quality.promote(conn, qid):
+            raise ValueError("recovery_ready_gate_failed")
+        conn.execute(
+            "INSERT INTO auto_quality_events(question_id,content_sha256,policy_version,phase,run_key,job_id,evidence_snapshot,result,passed) VALUES(%s,%s,%s,'dispatch_recovery',%s,%s,'[]',%s,true)",
+            (qid, job["payload"]["content_sha256"], auto_quality.POLICY, f"job:{job_id}:offline-dispatch-recovery", job_id,
+             Jsonb(dict(label="application_state_recovery_not_new_model_call", before=before, reason=reason))),
+        )
+        return dict(job_id=job_id, question_id=qid, ready=auto_quality.ready(conn, qid), new_provider_calls=0)

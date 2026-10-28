@@ -111,8 +111,9 @@ def test_quote_from_unsent_context_is_rejected_even_if_in_source_unit():
     assert result["real_api"] is False and result["formal_approval"] is False
 
 
-def test_cue_rule_survives_question_revision_and_order():
-    a = dict(subject="biochemistry", knowledge_tags=["实验方法/二维电泳"])
+@pytest.mark.parametrize("tag", ["实验方法/二维电泳", "蛋白质成熟/分子伴侣"])
+def test_cue_rule_survives_question_revision_and_order(tag):
+    a = dict(subject="biochemistry", knowledge_tags=[tag])
     b = deepcopy(a)
     assert conflict(a, [b]) and conflict(b, [a])
     assert not conflict(

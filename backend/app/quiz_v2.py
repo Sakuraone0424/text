@@ -131,6 +131,7 @@ def publish_question(conn, question_id: int):
 
 
 def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
+    resume_unfinished = day is None
     day = day or today_cn()
     lock_bank(conn)
     spec = blueprint.model_dump()
@@ -141,6 +142,19 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         if existing["blueprint"] != spec:
             raise ValueError("Today already has a paper with a different blueprint")
         return load_paper(conn, user_id, existing["id"])
+    if resume_unfinished:
+        # Preparing a paper is not exposure or a running exam. A restored first
+        # paper must remain reachable when cloud activation happens another day.
+        previous = conn.execute(
+            "SELECT p.id FROM papers_v2 p LEFT JOIN training_sessions s ON s.paper_id=p.id "
+            "WHERE p.user_id=%s AND p.paper_date<%s AND p.blueprint=%s "
+            "AND NOT EXISTS(SELECT 1 FROM attempts_v2 a WHERE a.paper_id=p.id) "
+            "AND (s.paper_id IS NULL OR (s.submitted_at IS NULL AND s.deadline>clock_timestamp())) "
+            "ORDER BY p.paper_date DESC,p.id DESC LIMIT 1 FOR UPDATE OF p",
+            (user_id, day, Jsonb(spec)),
+        ).fetchone()
+        if previous:
+            return load_paper(conn, user_id, previous["id"])
     if os.environ.get("QUIZ_PREPARATION_ENABLED", "1") == "0":
         raise PreparationPaused(
             "New paper preparation is temporarily paused; existing sessions remain available"
