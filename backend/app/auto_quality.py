@@ -243,7 +243,7 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
             "transcription style provenance is independently checked in science round. "
             "Do not infer official original-paper or official-answer verification."
         )
-    if contract_version in (2, 3, 4):
+    if contract_version in (2, 3, 4, 5, 6):
         if phase == "answer":
             payload["question"]["accepted_answers"] = q.get("accepted_answers", [])
         payload["instructions"] += (
@@ -273,7 +273,7 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
                 "empty. If any requirement fails or cannot be verified, leave its check "
                 "false, passed=false, and explain the actual issue without guessing."
             )
-        if contract_version == 4:
+        if contract_version >= 4:
             payload["instructions"] += (
                 " Perform the review and return the Finding described by schema. "
                 "The supplied schema describes your OUTPUT, not a request to rewrite "

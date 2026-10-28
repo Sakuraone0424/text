@@ -81,6 +81,9 @@ def enqueue_probe(conn, uid, model, effort):
 
 
 def accept(conn, job):
+    if job["settings_snapshot"].get("review_campaign", {}).get("policy", {}).get("transport") == "responses_json_schema":
+        from app.responses_review import accept_probe
+        return accept_probe(conn, job)
     if (
         job["state"] != "succeeded"
         or job["result"].get("real_api") is not True

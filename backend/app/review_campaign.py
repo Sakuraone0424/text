@@ -16,11 +16,16 @@ from app.limited_trial import COMPAT_INSTRUCTION, wire_guard
 
 def scope(policy):
     fields = {"version", "model_id", "effort", "output_cap", "system_sha256", "question_payloads", "legacy_scope_id", "legacy_attempts", "legacy_reserved_cny", "legacy_unknown_acknowledged"}
-    if policy.get("version") in ("review-campaign/2", "review-campaign/3", "review-campaign/4"):
+    native = policy.get("version") in ("review-campaign/5", "review-campaign/6")
+    if policy.get("version") in ("review-campaign/2", "review-campaign/3", "review-campaign/4", "review-campaign/5", "review-campaign/6"):
         fields.add("contract_version")
+    if native:
+        fields.update({"transport", "probe_payload_sha256", "acknowledged_unknowns"})
+        if policy["version"] == "review-campaign/6":
+            fields.add("wire_contract_sha256")
     if (
         set(policy) != fields
-        or policy["version"] not in ("review-campaign/1", "review-campaign/2", "review-campaign/3", "review-campaign/4")
+        or policy["version"] not in ("review-campaign/1", "review-campaign/2", "review-campaign/3", "review-campaign/4", "review-campaign/5", "review-campaign/6")
         or (policy["version"] != "review-campaign/1" and policy["contract_version"] != int(policy["version"][-1]))
         or policy["model_id"] != "deepseek-flash"
         or policy["effort"] != "high"
@@ -32,6 +37,22 @@ def scope(policy):
         or len(policy["question_payloads"]) > 76
     ):
         raise ValueError("invalid_review_campaign_policy")
+    if native:
+        if policy["transport"] != "responses_json_schema" or not re.fullmatch(r"[0-9a-f]{64}", policy["probe_payload_sha256"]):
+            raise ValueError("invalid_campaign_transport")
+        acks = policy["acknowledged_unknowns"]
+        ids = [a.get("job_id") for a in acks] if isinstance(acks, list) else []
+        if (not isinstance(acks, list) or ids[:2] != [5, 88] or ids != sorted(set(ids))
+            or (policy["version"] == "review-campaign/5" and ids != [5, 88])
+            or any(set(a) != {"job_id", "attempt", "result_sha256", "reserved_cny"}
+                   or a["attempt"] != 1 or not re.fullmatch(r"[0-9a-f]{64}", a["result_sha256"])
+                   or not Decimal(a["reserved_cny"]).is_finite() or Decimal(a["reserved_cny"]) <= 0 for a in acks)
+            or Decimal(acks[1]["reserved_cny"]) != Decimal("0.326144")):
+            raise ValueError("invalid_known_unknown_acknowledgment")
+        if policy["version"] == "review-campaign/6":
+            from app.responses_review import wire_contract_sha256
+            if policy["wire_contract_sha256"] != wire_contract_sha256():
+                raise ValueError("responses_wire_contract_changed")
     hashes = [policy["system_sha256"], policy["legacy_scope_id"], *policy["question_payloads"].values()]
     if any(not isinstance(h, str) or not re.fullmatch(r"[0-9a-f]{64}", h) for h in hashes):
         raise ValueError("invalid_review_campaign_hash")
@@ -51,6 +72,10 @@ def check_job(job):
         raise ValueError("review_campaign_parameters_changed")
     p = job["payload"]
     if job["kind"] == "compatibility":
+        if guard["policy"].get("transport") == "responses_json_schema":
+            if content_sha(p) != guard["policy"]["probe_payload_sha256"]:
+                raise ValueError("unapproved_campaign_probe")
+            return guard, "compat:responses:high"
         if set(p) != {"instructions", "catalog_metadata"} or p["instructions"] != COMPAT_INSTRUCTION:
             raise ValueError("unapproved_campaign_probe")
         return guard, "compat:high"
@@ -130,10 +155,21 @@ def claim_reason(conn, job):
     old_reserved = conn.execute("SELECT COALESCE(sum(amount_cny),0) AS n FROM ai_cny_reservations WHERE job_id=ANY(%s)", ([j["id"] for j in legacy],)).fetchone()["n"]
     if old_reserved != Decimal(".483840"):
         return "legacy_trial_reservations_changed"
-    if conn.execute(
-        "SELECT 1 FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id WHERE j.user_id=%s AND e.kind='unknown' AND NOT(e.job_id=5 AND e.attempt=1) AND NOT EXISTS(SELECT 1 FROM ai_cny_events b WHERE b.job_id=e.job_id AND b.attempt=e.attempt AND b.kind='bill_confirmation' AND b.amount_cny IS NOT NULL AND b.detail->>'verified_statement'='true') LIMIT 1",
+    native = guard["policy"].get("transport") == "responses_json_schema"
+    acknowledged = {(5, 1)}
+    if native:
+        acknowledged = set()
+        for a in guard["policy"]["acknowledged_unknowns"]:
+            old = conn.execute("SELECT * FROM ai_jobs WHERE id=%s AND user_id=%s", (a["job_id"], job["user_id"])).fetchone()
+            reservation = conn.execute("SELECT amount_cny FROM ai_cny_reservations WHERE job_id=%s AND attempt=%s", (a["job_id"], a["attempt"])).fetchone()
+            if not old or not reservation or content_sha(old["result"]) != a["result_sha256"] or reservation["amount_cny"] != Decimal(a["reserved_cny"]):
+                return "historical_unknown_evidence_changed"
+            acknowledged.add((a["job_id"], a["attempt"]))
+    unknowns = conn.execute(
+        "SELECT e.job_id,e.attempt FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id WHERE j.user_id=%s AND e.kind='unknown' AND NOT EXISTS(SELECT 1 FROM ai_cny_events b WHERE b.job_id=e.job_id AND b.attempt=e.attempt AND b.kind='bill_confirmation' AND b.amount_cny IS NOT NULL AND b.detail->>'verified_statement'='true')",
         (job["user_id"],),
-    ).fetchone():
+    ).fetchall()
+    if any((u["job_id"], u["attempt"]) not in acknowledged for u in unknowns):
         return "campaign_unacknowledged_unknown_charge_stop"
     peers = conn.execute("SELECT * FROM ai_jobs WHERE settings_snapshot->'review_campaign'->>'scope_id'=%s ORDER BY id", (sid,)).fetchall()
     if job["attempts"] != 0 or sum(p["attempts"] for p in peers) >= len(guard["policy"]["question_payloads"]) + 1:
@@ -156,6 +192,10 @@ def claim_reason(conn, job):
     if conn.execute("SELECT 1 FROM ai_cny_events WHERE job_id=ANY(%s) AND kind='unknown' LIMIT 1", ([p["id"] for p in peers],)).fetchone():
         return "campaign_unknown_charge_stop"
     if job["kind"] != "compatibility":
+        if native:
+            from app.responses_review import compatible
+            if not compatible(conn, guard["policy"].get("wire_contract_sha256")):
+                return "campaign_responses_schema_probe_required"
         cap = conn.execute("SELECT compatibility FROM ai_model_catalog WHERE model_id='deepseek-flash'").fetchone()["compatibility"]
         if not cap.get("real_api_verified") or "high" not in cap.get("efforts", []) or cap.get("max_tested_output_tokens", 0) < 32768:
             return "campaign_high_output_probe_required"
@@ -170,6 +210,9 @@ def execution_guard(job):
     guard, _ = check_job(job)
     if job["state"] != "running" or job["attempts"] != 1:
         raise ValueError("campaign_committed_single_attempt_required")
+    if guard["policy"].get("transport") == "responses_json_schema":
+        from app.responses_review import body_for
+        return lambda body: body == body_for(job)
     return wire_guard(job["payload"], guard["policy"]["system_sha256"], "high", 32768)
 
 
@@ -195,11 +238,13 @@ def contract_retry_allowed(rejection, contract):
             and checks["duplication"] is False and all(v for k,v in checks.items() if k != "duplication"))
 
 
-def enqueue_review(conn, uid, qid, sid):
+def enqueue_review(conn, uid, qid, sid, phases=("science", "answer")):
     from app import ai_jobs, auto_quality
     campaign = conn.execute("SELECT policy FROM ai_review_campaigns WHERE scope_id=%s", (sid,)).fetchone()
     if not campaign:
         raise ValueError("unknown_review_campaign")
+    if tuple(phases) not in (("science", "answer"), ("answer",)) or auto_quality.ready(conn, qid):
+        raise ValueError("unreviewed_campaign_work_required")
     q, refs, style = auto_quality.evidence(conn, qid)
     checksum = content_sha(q)
     contract = campaign["policy"].get("contract_version", 1)
@@ -207,7 +252,11 @@ def enqueue_review(conn, uid, qid, sid):
     for rejection in rejected:
         if not contract_retry_allowed(rejection, contract):
             raise ValueError("revision_required_after_scientific_rejection")
-    payloads = [(phase, auto_quality.review_payload(phase, qid, checksum, q, refs, style, contract)) for phase in ("science", "answer")]
+    if tuple(phases) == ("answer",):
+        prior = conn.execute("SELECT passed FROM auto_quality_events WHERE question_id=%s AND content_sha256=%s AND phase='science' ORDER BY id DESC LIMIT 1", (qid, checksum)).fetchone()
+        if not prior or not prior["passed"]:
+            raise ValueError("campaign_scientific_review_required")
+    payloads = [(phase, auto_quality.review_payload(phase, qid, checksum, q, refs, style, contract)) for phase in phases]
     if any(campaign["policy"]["question_payloads"].get(f"{qid}:{phase}") != content_sha(p) for phase, p in payloads):
         raise ValueError("approved_campaign_evidence_changed")
     if not auto_quality.preflight(conn, qid)["passed"]:
@@ -225,7 +274,12 @@ def run_once(get_db, sid):
     from app import ai_jobs
     from app.harness_gateway import execute
     from app.auto_worker import dispatch_completed
-    ran = ai_jobs.run_once(get_db, execute, scope_id=sid, scope_kind="review_campaign")
+    def executor(job):
+        if job["settings_snapshot"].get("review_campaign", {}).get("policy", {}).get("transport") == "responses_json_schema":
+            from app.responses_review import execute as native_execute
+            return native_execute(job)
+        return execute(job)
+    ran = ai_jobs.run_once(get_db, executor, scope_id=sid, scope_kind="review_campaign")
     if ran:
         with get_db() as conn:
             dispatch_completed(conn, scope_id=sid, scope_kind="review_campaign")
