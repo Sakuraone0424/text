@@ -4,3 +4,11 @@ __pycache__/
 node_modules/
 dist/
 .DS_Store
+
+# Private local transport/session evidence must never be committed.
+*.dump
+*.zip
+*.sse
+**/provider-receipt/
+**/session.v*.jsonl
+ustc-harness-private/

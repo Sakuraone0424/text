@@ -1,12 +1,5 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const counts = {
-  single_choice: 3,
-  fill_blank: 3,
-  term: 4,
-  short_answer: 3,
-  essay: 1,
-};
 const names = {
   single_choice: "单选",
   fill_blank: "填空",
@@ -112,11 +105,12 @@ $("login").onsubmit = async (e) => {
 };
 async function prepare() {
   await identity();
+  const specification = await api("/v2/training-specification");
   paper = await api("/v2/papers", {
     method: "POST",
     body: JSON.stringify({
-      specification: "xiaohan-150-60-v1",
-      quotas: { biochemistry: counts, cell_biology: counts },
+      specification: specification.specification,
+      quotas: specification.quotas,
     }),
   });
   await restore();

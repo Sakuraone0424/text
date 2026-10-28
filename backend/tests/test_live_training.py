@@ -90,6 +90,28 @@ def live_app(tmp_path):
                     time.sleep(0.1)
                 else:
                     raise RuntimeError("Test server readiness timeout")
+
+                def restart_server():
+                    nonlocal process
+                    process.terminate()
+                    process.wait(timeout=15)
+                    process = subprocess.Popen(
+                        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
+                        cwd=Path(__file__).resolve().parents[1],
+                        env=env, stdout=log, stderr=log,
+                    )
+                    for _ in range(100):
+                        try:
+                            if client.get("/health").status_code == 200:
+                                return
+                        except httpx.HTTPError:
+                            pass
+                        if process.poll() is not None:
+                            raise RuntimeError("Test server stopped during restart")
+                        time.sleep(0.1)
+                    raise RuntimeError("Test server restart timeout")
+
+                client.restart_for_test = restart_server
                 yield client, dsn, blueprint
     finally:
         if process:
@@ -107,6 +129,33 @@ def begin(client, blueprint):
     assert response.status_code == 200, response.text
     pid = response.json()["paper_id"]
     return client.post(f"/v2/papers/{pid}/start").json()
+
+
+def test_live_restart_preserves_draft_deadline_submission_and_learning(live_app):
+    client, dsn, blueprint = live_app
+    paper = begin(client, blueprint)
+    pid = paper["paper_id"]
+    question = next(q for q in paper["questions"] if q["question_type"] == "single_choice")
+    saved = client.put(
+        f"/v2/papers/{pid}/drafts/{question['id']}",
+        json={"expected_version": 0, "value": {"text": "A"}},
+    )
+    assert saved.status_code == 200
+    client.restart_for_test()
+    restored = client.get(f"/v2/papers/{pid}").json()
+    assert restored["timing"]["deadline"] == paper["timing"]["deadline"]
+    assert restored["timing"]["drafts"][str(question["id"])]["text"] == "A"
+    submitted = client.post(f"/v2/papers/{pid}/submit", json={"expected_version": 1, "answers": {}})
+    assert submitted.status_code == 200
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        before = conn.execute("SELECT count(*) AS n FROM fsrs_events").fetchone()["n"]
+    client.restart_for_test()
+    repeated = client.post(f"/v2/papers/{pid}/submit", json={"expected_version": 1, "answers": {}})
+    assert repeated.status_code == 200 and repeated.json()["attempt_id"] == submitted.json()["attempt_id"]
+    assert client.get(f"/v2/papers/{pid}/result").status_code == 200
+    with psycopg.connect(dsn, row_factory=dict_row) as conn:
+        assert conn.execute("SELECT count(*) AS n FROM attempts_v2").fetchone()["n"] == 1
+        assert conn.execute("SELECT count(*) AS n FROM fsrs_events").fetchone()["n"] == before
 
 
 def test_live_concurrent_saves_and_duplicate_submit(live_app):
@@ -130,7 +179,8 @@ def test_live_concurrent_saves_and_duplicate_submit(live_app):
 
     with ThreadPoolExecutor(2) as pool:
         responses = list(pool.map(submit, [0, 1]))
-    assert sorted(r.status_code for r in responses) == [200, 409]
+    assert [r.status_code for r in responses] == [200, 200]
+    assert responses[0].json()["attempt_id"] == responses[1].json()["attempt_id"]
     with psycopg.connect(dsn) as conn:
         assert conn.execute("SELECT COUNT(*) FROM attempts_v2").fetchone()[0] == 1
 

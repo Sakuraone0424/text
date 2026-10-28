@@ -6,7 +6,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 from app.training_sessions import server_now
 from app.question_quality import Blueprint
-from app.training_spec import COUNTS, SUBJECTS
+from app.training_spec import default_blueprint
 from app.quiz_v2 import create_paper, BankShortage, PreparationPaused
 
 
@@ -16,9 +16,7 @@ def prepare_daily(conn):
     now = server_now(conn).astimezone(ZoneInfo("Asia/Shanghai"))
     if now.hour < 20:
         return 0
-    blueprint = Blueprint(
-        specification="xiaohan-150-60-v1", quotas={s: COUNTS for s in SUBJECTS}
-    )
+    blueprint = Blueprint.model_validate(default_blueprint())
     done = 0
     for user in conn.execute("SELECT id FROM users ORDER BY id LIMIT 100").fetchall():
         key = f"daily:{user['id']}:{now.date()}"

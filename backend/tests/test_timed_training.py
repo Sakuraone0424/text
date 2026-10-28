@@ -12,6 +12,56 @@ from app.training_spec import POINTS, validate_items
 from test_api_v2 import LEARNER, REVIEWER
 
 
+def test_single_current_product_contract_and_retired_legacy_routes(client):
+    from app.training_spec import default_blueprint
+
+    spec = client.get("/v2/training-specification")
+    assert spec.status_code == 200
+    value = spec.json()
+    assert (value["questions"], value["points"], value["duration_seconds"]) == (28, 150, 3600)
+    assert (value["questions_per_subject"], value["points_per_subject"]) == (14, 75)
+    expected = dict(single_choice=3, fill_blank=3, term=4, short_answer=3, essay=1)
+    assert value["quotas"] == {s: expected for s in ("biochemistry", "cell_biology")}
+    assert value["points_by_type"] == dict(single_choice=2, fill_blank=3, term=4, short_answer=8, essay=20)
+    assert default_blueprint() == {k: value[k] for k in ("specification", "quotas")}
+    for route in ("/", "/training"):
+        page = client.get(route).text
+        assert "唯一训练规格：28题" in page and "各14题75分" in page
+        assert "3道单选" in page and "3道填空" in page and "4道名词解释" in page
+        assert "3道简答" in page and "1道论述" in page
+        assert "60题" not in page and "双模式" not in page
+    assert client.get("/quiz/today", headers=LEARNER).status_code == 410
+    assert client.post("/quiz/submit", headers=LEARNER).status_code == 410
+
+
+def test_daily_sixty_and_mode_switch_requests_are_rejected(client):
+    data = {
+        "specification": "daily-60",
+        "quotas": {s: {"single_choice": 15, "fill_blank": 15} for s in ("biochemistry", "cell_biology")},
+    }
+    assert client.post("/v2/papers", headers=LEARNER, json=data).status_code == 422
+    from app.training_spec import default_blueprint
+
+    data = {**default_blueprint(), "mode": "daily-60"}
+    assert client.post("/v2/papers", headers=LEARNER, json=data).status_code == 422
+
+
+def test_chatgpt_adapter_uses_only_formal_blueprint():
+    from app.chatgpt_adapter import TrainingAdapter
+    from app.training_spec import default_blueprint
+
+    class Transport:
+        def request(self, method, path, *, json):
+            assert method == "POST" and path == "/v2/papers"
+            assert json == default_blueprint()
+            class Response:
+                def raise_for_status(self): pass
+                def json(self): return {"prepared": True}
+            return Response()
+
+    assert TrainingAdapter(Transport()).prepare() == {"prepared": True}
+
+
 def expire(db, pid):
     now = sessions.server_now(db)
     db.execute(
@@ -114,8 +164,10 @@ def test_empty_submission_is_accepted_once(db, running):
     pid = paper["paper_id"]
     result = q.submit(db, uid, pid, {})
     assert result["score"] == 0 and result["pending"] == 0
-    with pytest.raises(ValueError):
-        q.submit(db, uid, pid, {})
+    repeated = q.submit(db, uid, pid, {})
+    assert repeated["attempt_id"] == result["attempt_id"] and repeated["score"] == 0
+    late = q.submit(db, uid, pid, {paper["questions"][0]["id"]: "A"})
+    assert late["attempt_id"] == result["attempt_id"] and late["score"] == 0
     assert db.execute("SELECT COUNT(*) AS n FROM attempts_v2").fetchone()["n"] == 1
     assert db.execute("SELECT COUNT(*) AS n FROM fsrs_events").fetchone()["n"] == 0
 

@@ -101,6 +101,16 @@ def test_material_blinding_and_excerpt_minimization():
     assert "ai_analysis" not in a["question"]
 
 
+def test_quote_from_unsent_context_is_rejected_even_if_in_source_unit():
+    q, u, finding = fixture()
+    finding["claims"][0]["excerpt"] = "Unneeded context"
+    assert finding["claims"][0]["excerpt"] in u["text"]
+    result = validate(json.dumps(finding), q, [u], "science")
+    assert not result["local_checks_passed"]
+    assert result["issues"] == ["quote_tampered"]
+    assert result["real_api"] is False and result["formal_approval"] is False
+
+
 def test_cue_rule_survives_question_revision_and_order():
     a = dict(subject="biochemistry", knowledge_tags=["实验方法/二维电泳"])
     b = deepcopy(a)

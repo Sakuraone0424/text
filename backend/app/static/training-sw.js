@@ -1,5 +1,5 @@
 "use strict";
-const CACHE = "xiaohan-training-shell-v3";
+const CACHE = "xiaohan-training-shell-v4";
 const ASSETS = ["/", "/training", "/static/training.js", "/static/app.css"];
 self.addEventListener("install", (event) => {
   event.waitUntil(

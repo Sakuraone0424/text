@@ -23,9 +23,19 @@ def main():
     from app.limited_trial import execution_guard
 
     guard = execution_guard(request)
+    from app.provider_diagnostics import parse_completed_result, safe_diagnostic
+
+    def failure(measured, stage, result=None):
+        diagnostic = safe_diagnostic(dict(
+            failure_stage=stage,
+            sdk_finish_reason=getattr(result, "finish_reason", None),
+            receipt=measured,
+        ))
+        json.dump(dict(provider_error=True, http_status=measured.get("http_status"),
+                       usage=measured["usage"], diagnostic=diagnostic), sys.stdout)
 
     with (
-        relay(s["model_id"], s["token_limit"], request_guard=guard) as (base, measured),
+        relay(s["model_id"], s["token_limit"], request_guard=guard, evidence_dir=Path(os.environ["DSH_HOME"]) / "provider-receipt") as (base, measured),
         DeepSeekHarness(
             dsh_home=os.environ["DSH_HOME"],
             cwd=os.environ["DSH_HOME"],
@@ -50,32 +60,13 @@ def main():
                 + str(request["attempts"]),
             )
         except Exception:
-            json.dump(
-                dict(
-                    provider_error=True,
-                    http_status=measured.get("http_status"),
-                    usage=measured["usage"],
-                ),
-                sys.stdout,
-            )
+            failure(measured, "sdk_exception")
             return
         if measured["requests"] != 1:
             raise ValueError("exactly_one_actual_request_required")
-        try:
-            if result.finish_reason != "completed":
-                raise ValueError("incomplete_model_response")
-            response = json.loads(result.final_response)
-        except ValueError:
-            # A charged response may be malformed/truncated. Preserve supplier
-            # usage instead of losing it when the subprocess exits with an error.
-            json.dump(
-                dict(
-                    provider_error=True,
-                    http_status=measured.get("http_status"),
-                    usage=measured["usage"],
-                ),
-                sys.stdout,
-            )
+        response, error = parse_completed_result(result)
+        if error:
+            failure(measured, error, result)
             return
         # No inferred token/cost values. Unknown telemetry stays null.
         json.dump(
@@ -86,6 +77,7 @@ def main():
                 returned_model_id=measured.get("returned_model_id"),
                 transport="official-harness-sdk",
                 real_api=True,
+                diagnostic=safe_diagnostic(dict(receipt=measured)),
             ),
             sys.stdout,
         )

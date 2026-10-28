@@ -220,6 +220,22 @@ def test_invented_quote_blocks_despite_model_passing_itself(db, setup_ai, candid
     )
 
 
+def test_unsent_source_context_cannot_support_formal_review(db, setup_ai, candidate, monkeypatch):
+    job = quality.schedule_checks(db, setup_ai, candidate)[0]
+    original = quality.evidence
+    unsent = "Synthetic source context outside the approved transmitted excerpt"
+
+    def with_extra_context(conn, qid):
+        q, refs, style = original(conn, qid)
+        return q, [{**u, "text": u["text"] + unsent} for u in refs], style
+
+    monkeypatch.setattr(quality, "evidence", with_extra_context)
+    assert not quality.accept_round(db, synthetic_result(job, db, quote=unsent))
+    event = db.execute("SELECT passed,result FROM auto_quality_events WHERE phase='science'").fetchone()
+    assert event["passed"] is False and "invented_quote" in event["result"]["issues"]
+    assert quality.ready(db, candidate) is False
+
+
 def test_mock_flag_cannot_become_production_ready(db, setup_ai, candidate):
     j = quality.schedule_checks(db, setup_ai, candidate)[0]
     db.execute(

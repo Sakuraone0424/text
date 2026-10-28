@@ -83,12 +83,12 @@ def test_http_mixed_paper_and_rollback_invalid_submission(
         f"/v2/papers/{pid}/submit", json={"answers": invalid}, headers=LEARNER
     )
     assert response.status_code == 200 and response.json()["score"] is None
-    assert (
-        client.post(
-            f"/v2/papers/{pid}/submit", json={"answers": invalid}, headers=LEARNER
-        ).status_code
-        == 409
+    repeated = client.post(
+        f"/v2/papers/{pid}/submit", json={"answers": invalid}, headers=LEARNER
     )
+    assert repeated.status_code == 200
+    assert repeated.json()["attempt_id"] == response.json()["attempt_id"]
+    assert db.execute("SELECT COUNT(*) AS n FROM attempts_v2").fetchone()["n"] == 1
     assert (
         client.get(f"/v2/papers/{pid}/result", headers=LEARNER).json()["pending"] == 16
     )

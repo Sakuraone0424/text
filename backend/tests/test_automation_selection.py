@@ -55,6 +55,15 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(db, bank, monkeyp
     assert (
         db.execute("SELECT COUNT(*) AS n FROM training_sessions").fetchone()["n"] == 0
     )
+    from app.training_spec import default_blueprint, validate_items
+
+    paper = db.execute("SELECT blueprint FROM papers_v2").fetchone()["blueprint"]
+    expected = default_blueprint()
+    assert paper["specification"] == expected["specification"]
+    assert paper["quotas"] == expected["quotas"]
+    items = [r["snapshot"] for r in db.execute("SELECT snapshot FROM paper_items_v2").fetchall()]
+    validate_items(items)
+    assert len(items) == 28 and sum(q["max_points"] for q in items) == 150
 
 
 def test_ranking_balances_chapters_and_uses_recorded_signals():

@@ -20,15 +20,12 @@ class TrainingAdapter:
         return response.json()
 
     def prepare(self):
-        from app.training_spec import COUNTS, SUBJECTS
+        from app.training_spec import default_blueprint
 
         return self.request(
             "POST",
             "/v2/papers",
-            {
-                "specification": "xiaohan-150-60-v1",
-                "quotas": {s: COUNTS for s in SUBJECTS},
-            },
+            default_blueprint(),
         )
 
     def start(self, paper_id):

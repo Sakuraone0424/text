@@ -9,7 +9,10 @@ from app import model_router, cny_billing
 
 
 class ProviderFailure(RuntimeError):
-    def __init__(self, status, usage=None):
+    def __init__(self, status, usage=None, diagnostic=None):
+        from app.provider_diagnostics import safe_diagnostic
+
+        self.diagnostic = safe_diagnostic(diagnostic)
         self.request_confirmed = type(status) is int and 100 <= status <= 599
         self.status = status if type(status) is int and 100 <= status <= 599 else 502
         self.usage = {
@@ -174,6 +177,9 @@ def finish(conn, job, result=None, error=None):
         )
     )
     usage = (result or {}).get("usage", {}) or getattr(error, "usage", {})
+    if result is None and isinstance(error, ProviderFailure):
+        # A failed response remains a failure; retain safe metadata, not prose.
+        result = dict(provider_error=True, usage=usage, diagnostic=error.diagnostic)
     cny_billing.settle(conn, locked, result, error)
     conn.execute(
         "INSERT INTO ai_call_events(job_id,model_id,effort,model_version,usage,outcome,error_code,provider_request_confirmed) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",

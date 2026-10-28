@@ -114,8 +114,9 @@ def test_mixed_grading_pending_final_and_reviews(db, bank, blueprint):
         and result["pending"] == 16
     )
     assert result["graded_points"] == 30
-    with pytest.raises(ValueError):
-        q.submit(db, uid, paper["paper_id"], answers)
+    repeated = q.submit(db, uid, paper["paper_id"], answers)
+    assert repeated["attempt_id"] == result["attempt_id"]
+    assert repeated["graded_points"] == 30 and repeated["pending"] == 16
     subjective = [
         i
         for i in paper["questions"]

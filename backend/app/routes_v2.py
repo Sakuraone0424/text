@@ -24,6 +24,13 @@ from app import quiz_v2 as service
 router = APIRouter(prefix="/v2", tags=["reviewed-28"])
 
 
+@router.get("/training-specification")
+def training_specification():
+    from app.training_spec import formal_specification
+
+    return formal_specification()
+
+
 def require_reviewer(request: Request):
     configured = os.environ.get("QUIZ_REVIEW_API_KEY", "")
     if not configured:

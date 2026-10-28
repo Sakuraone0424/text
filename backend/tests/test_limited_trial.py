@@ -499,3 +499,26 @@ def test_runner_failure_preserves_measured_usage(
     result = json.loads(capsys.readouterr().out)
     assert result["provider_error"] and result["usage"] == measured["usage"]
     assert result.get("real_api") is not True
+
+
+def test_failed_provider_receipt_is_persisted_without_unlocking_budget(db, trial):
+    first = ai_jobs.claim(db, scope_id=trial[2])
+    diagnostic = {
+        'failure_stage': 'incomplete_model_response',
+        'sdk_finish_reason': 'max-tokens',
+        'receipt': {'returned_model_id': 'deepseek-flash', 'response_sha256': 'c' * 64},
+        'raw_text': 'must not enter task diagnostic',
+    }
+    usage = {'input_tokens': 2435, 'output_tokens': 4096, 'cache_read_input_tokens': 0}
+    ai_jobs.finish(db, first, error=ai_jobs.ProviderFailure(200, usage=usage, diagnostic=diagnostic))
+    stored = db.execute('SELECT * FROM ai_jobs WHERE id=%s', (first['id'],)).fetchone()
+    assert stored['state'] == 'blocked' and stored['billing_status'] == 'unknown'
+    assert stored['result']['provider_error'] and 'real_api' not in stored['result']
+    assert stored['result']['usage'] == usage
+    assert stored['result']['diagnostic']['sdk_finish_reason'] == 'max-tokens'
+    assert 'raw_text' not in stored['result']['diagnostic']
+    assert db.execute('SELECT amount_cny FROM ai_cny_reservations').fetchone()['amount_cny'] > 0
+    assert ai_jobs.claim(db, scope_id=trial[2]) is None
+    with pytest.raises(ValueError, match='stale_lease'):
+        ai_jobs.finish(db, first, error=TimeoutError())
+    assert db.execute('SELECT count(*) AS n FROM ai_call_events').fetchone()['n'] == 1

@@ -293,6 +293,9 @@ def accept_round(conn, job):
         raise ValueError("evidence_version_changed")
     finding = Finding.model_validate(job["result"]["response"])
     bound = {u["unit_id"]: u for u in refs}
+    sent_excerpts = {}
+    for cited in q["evidence"]:
+        sent_excerpts.setdefault(cited["source_unit_id"], []).append(cited["excerpt"])
     issues = []
     if (
         p["phase"] == "science"
@@ -334,7 +337,10 @@ def accept_round(conn, job):
     for claim in finding.claims:
         if (
             claim.unit_id not in bound
-            or claim.excerpt not in bound[claim.unit_id]["text"]
+            or not any(
+                claim.excerpt in excerpt
+                for excerpt in sent_excerpts.get(claim.unit_id, [])
+            )
         ):
             issues.append("invented_quote")
         if any(i < 0 or i >= len(q["rubric"]) for i in claim.criterion_indices):

@@ -169,6 +169,11 @@ def save(conn, user_id, paper_id, question_id, value, expected_version):
 def submit_training(conn, user_id, paper_id, answers, expected_version):
     from app.quiz_v2 import result
 
+    existing = locked_session(conn, user_id, paper_id)
+    if existing is not None and existing["submitted_at"]:
+        # A lost response or process restart must not turn an accepted submit
+        # into an error. Ignore later answer payloads; never regrade/relearn.
+        return result(conn, user_id, paper_id)
     session = assert_writable(conn, user_id, paper_id, expected_version)
     if session is None:
         return result(conn, user_id, paper_id)

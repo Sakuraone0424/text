@@ -15,6 +15,9 @@ def validate(raw, question, refs, phase):
         result["issues"] = ["invalid_json_or_schema"]
         return result
     bound = {u["unit_id"]: u["text"] for u in refs}
+    sent_excerpts = {}
+    for cited in question["evidence"]:
+        sent_excerpts.setdefault(cited["source_unit_id"], []).append(cited["excerpt"])
     if (
         not finding.passed
         or finding.unresolved
@@ -29,7 +32,9 @@ def validate(raw, question, refs, phase):
     ):
         result["issues"].append("independent_answer_conflict")
     if any(
-        c.unit_id not in bound or c.excerpt not in bound[c.unit_id]
+        c.unit_id not in bound or not any(
+            c.excerpt in excerpt for excerpt in sent_excerpts.get(c.unit_id, [])
+        )
         for c in finding.claims
     ):
         result["issues"].append("quote_tampered")

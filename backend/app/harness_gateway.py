@@ -9,17 +9,31 @@ import signal
 from app.model_router import authorized
 
 
+def prepare_private_home(root, job_id):
+    """Never place response/session evidence in the public source checkout."""
+    root = Path(root).resolve()
+    checkout = Path(__file__).resolve().parents[2]
+    if root.is_relative_to(checkout):
+        raise ValueError("private_evidence_outside_checkout_required")
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    root.chmod(0o700)
+    home = root / ("job-" + str(job_id))
+    if home.is_symlink():
+        raise ValueError("private_evidence_symlink_rejected")
+    home.mkdir(mode=0o700, exist_ok=True)
+    home.chmod(0o700)
+    return home
+
+
 def execute(job):
     authorized(private=job["kind"] != "compatibility")
     from app.limited_trial import execution_guard
 
     execution_guard(job)  # Require the approved frozen scope before launching SDK.
-    root = Path(
-        os.environ.get("AI_PRIVATE_HOME", "/tmp/ustc-harness-private")
-    ).resolve()
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    home = root / ("job-" + str(job["id"]))
-    home.mkdir(mode=0o700, exist_ok=True)
+    home = prepare_private_home(
+        os.environ.get("AI_PRIVATE_HOME", "/tmp/ustc-harness-private"),
+        job["id"],
+    )
     allowed = (
         "PATH",
         "HTTP_PROXY",
@@ -64,5 +78,5 @@ def execute(job):
     if result.get("provider_error"):
         from app.ai_jobs import ProviderFailure
 
-        raise ProviderFailure(result.get("http_status"), usage=result.get("usage"))
+        raise ProviderFailure(result.get("http_status"), usage=result.get("usage"), diagnostic=result.get("diagnostic"))
     return result

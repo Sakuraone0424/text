@@ -6,6 +6,27 @@ COUNTS = dict(single_choice=3, fill_blank=3, term=4, short_answer=3, essay=1)
 POINTS = dict(single_choice=2, fill_blank=3, term=4, short_answer=8, essay=20)
 SUBJECTS = ("biochemistry", "cell_biology")
 DURATION_SECONDS = 3600
+SPECIFICATION = "xiaohan-150-60-v1"
+
+
+def default_blueprint():
+    """The only current training product; legacy records are read-only history."""
+    return {
+        "specification": SPECIFICATION,
+        "quotas": {subject: dict(COUNTS) for subject in SUBJECTS},
+    }
+
+
+def formal_specification():
+    return {
+        **default_blueprint(),
+        "questions": sum(COUNTS.values()) * len(SUBJECTS),
+        "points": sum(COUNTS[k] * POINTS[k] for k in COUNTS) * len(SUBJECTS),
+        "questions_per_subject": sum(COUNTS.values()),
+        "points_per_subject": sum(COUNTS[k] * POINTS[k] for k in COUNTS),
+        "duration_seconds": DURATION_SECONDS,
+        "points_by_type": dict(POINTS),
+    }
 
 
 def validate_quotas(quotas):

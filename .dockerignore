@@ -8,3 +8,7 @@
 **/*.zip
 **/*.pem
 node_modules
+**/provider-receipt
+**/session.v*.jsonl
+**/*.sse
+**/ustc-harness-private
