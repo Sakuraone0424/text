@@ -1,0 +1,4 @@
+{
+  "tagOwners": {"tag:private-review": ["owner@example.invalid"]},
+  "grants": [{"src": ["owner@example.invalid"], "dst": ["tag:private-review"], "ip": ["tcp:443"]}]
+}

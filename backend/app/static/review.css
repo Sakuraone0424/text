@@ -1,0 +1,203 @@
+:root {
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  color: #1c2b32;
+  background: #f4f6f5;
+  font-size: 16px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+header,
+main,
+footer {
+  max-width: 1250px;
+  margin: auto;
+  padding: 20px;
+}
+header {
+  background: #173f3c;
+  color: white;
+}
+h1 {
+  font-size: 1.6rem;
+}
+h2 {
+  font-size: 1.2rem;
+}
+p,
+pre {
+  line-height: 1.65;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: inherit;
+}
+button,
+a,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+a {
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 7px;
+  touch-action: manipulation;
+}
+button {
+  border: 1px solid #adc3bd;
+  background: #fff;
+  color: #173f3c;
+  cursor: pointer;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus,
+textarea:focus {
+  outline: 3px solid #dc9b37;
+}
+button[aria-current="true"] {
+  background: #173f3c;
+  color: white;
+}
+button:disabled {
+  opacity: 0.5;
+}
+label {
+  display: block;
+  padding: 8px 0;
+}
+input:not([type="checkbox"]),
+select,
+textarea {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #9eafa9;
+  border-radius: 6px;
+}
+input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+  vertical-align: middle;
+  margin-right: 9px;
+}
+textarea {
+  min-height: 110px;
+}
+nav {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+}
+nav label {
+  min-width: 150px;
+}
+.layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 20px;
+}
+aside,
+article,
+#backup-panel,
+#login {
+  background: white;
+  padding: 18px;
+  border: 1px solid #d4dfda;
+  border-radius: 10px;
+}
+#list {
+  display: grid;
+  gap: 8px;
+  max-height: 75vh;
+  overflow: auto;
+}
+#list button {
+  text-align: left;
+}
+article {
+  min-width: 0;
+}
+details {
+  margin: 12px 0;
+  padding: 12px;
+  background: #f2f7f5;
+  border-radius: 7px;
+}
+summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 8px;
+}
+.warning {
+  padding: 12px;
+  background: #fff4d8;
+  border-left: 4px solid #aa7015;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.checks label {
+  min-height: 44px;
+}
+#message {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+#login {
+  max-width: 500px;
+  margin: auto;
+}
+#backup-panel {
+  margin-top: 20px;
+}
+#backup-info {
+  overflow-wrap: anywhere;
+}
+footer {
+  font-size: 0.9rem;
+  color: #52645c;
+}
+@media (max-width: 700px) {
+  header,
+  main,
+  footer {
+    padding: 14px;
+  }
+  .layout {
+    grid-template-columns: 1fr;
+  }
+  #list {
+    max-height: 200px;
+  }
+  nav > * {
+    flex: 1;
+  }
+  article {
+    padding: 14px;
+  }
+  h1 {
+    font-size: 1.4rem;
+  }
+}
+
+p,
+button,
+summary {
+  overflow-wrap: anywhere;
+}

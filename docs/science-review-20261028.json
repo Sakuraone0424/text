@@ -1,0 +1,134 @@
+{
+  "utc_date": "2026-10-28",
+  "counts": {
+    "source_documents": 6,
+    "source_pages": 1915,
+    "source_units": 12396,
+    "candidate_review_packets": 54,
+    "candidate_revision_links": 16,
+    "candidate_science_assessments": 47,
+    "source_supplements": 30,
+    "formula_search_renderings": 2,
+    "source_text_annotations": 128,
+    "source_review_events": 0,
+    "ai_call_events": 0
+  },
+  "migrations": 20,
+  "original18_checksums_unchanged": true,
+  "original38_content_unchanged": true,
+  "active_candidates": 38,
+  "science_scope_pass": 33,
+  "science_scope_uncertain": 5,
+  "formal_gate_passed": 0,
+  "ready": 0,
+  "quota": [
+    {
+      "subject": "biochemistry",
+      "type": "single_choice",
+      "candidates": 4,
+      "ready": 0,
+      "required": 3,
+      "missing": 3
+    },
+    {
+      "subject": "biochemistry",
+      "type": "fill_blank",
+      "candidates": 4,
+      "ready": 0,
+      "required": 3,
+      "missing": 3
+    },
+    {
+      "subject": "biochemistry",
+      "type": "term",
+      "candidates": 5,
+      "ready": 0,
+      "required": 4,
+      "missing": 4
+    },
+    {
+      "subject": "biochemistry",
+      "type": "short_answer",
+      "candidates": 4,
+      "ready": 0,
+      "required": 3,
+      "missing": 3
+    },
+    {
+      "subject": "biochemistry",
+      "type": "essay",
+      "candidates": 2,
+      "ready": 0,
+      "required": 1,
+      "missing": 1
+    },
+    {
+      "subject": "cell_biology",
+      "type": "single_choice",
+      "candidates": 4,
+      "ready": 0,
+      "required": 3,
+      "missing": 3
+    },
+    {
+      "subject": "cell_biology",
+      "type": "fill_blank",
+      "candidates": 4,
+      "ready": 0,
+      "required": 3,
+      "missing": 3
+    },
+    {
+      "subject": "cell_biology",
+      "type": "term",
+      "candidates": 5,
+      "ready": 0,
+      "required": 4,
+      "missing": 4
+    },
+    {
+      "subject": "cell_biology",
+      "type": "short_answer",
+      "candidates": 4,
+      "ready": 0,
+      "required": 3,
+      "missing": 3
+    },
+    {
+      "subject": "cell_biology",
+      "type": "essay",
+      "candidates": 2,
+      "ready": 0,
+      "required": 1,
+      "missing": 1
+    }
+  ],
+  "formula_locations": [
+    {
+      "position": "body/1371",
+      "parent_unit_id": 11066,
+      "payload_sha256": "2d221e67dfb1715e683ee320fa504a3de686def8b2602aa82962ebd8352bedc6"
+    },
+    {
+      "position": "body/1377",
+      "parent_unit_id": 11071,
+      "payload_sha256": "72e9d00cc042210226646841b37189dcf87d849b8b56cb1c0214bd57a944c545"
+    }
+  ],
+  "original25_image_bindings_verified": true,
+  "private_candidate_report": "candidate38-science-private.json",
+  "note": "33 scoped Codex passes are not completed formal science gates; ready=0",
+  "tests": {
+    "passed": 61,
+    "failed": 0,
+    "skipped": 0
+  },
+  "local_after_review_snapshot": {
+    "file": "database-after-review.dump",
+    "bytes": 65151084,
+    "sha256": "3549ae2319e06bcb5a428fa1fb97a204b3b1d830a37e5765e65dda8dd0ccf1e1",
+    "local_only": true,
+    "new_restore_test_performed": false,
+    "original_backup_unchanged": true
+  }
+}

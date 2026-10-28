@@ -1,0 +1,22 @@
+# TEMPLATE ONLY: install on the explicitly authorized independent host, not Codex.
+[Unit]
+Description=Private candidate review (nonproduction)
+After=network.target postgresql.service
+[Service]
+User=ustc-review
+Group=ustc-review
+WorkingDirectory=/opt/ustc-review/backend
+EnvironmentFile=/etc/ustc-review/review.env
+ExecStart=/opt/ustc-review/.venv/bin/uvicorn app.review_app:app --host 127.0.0.1 --port 8091 --proxy-headers --forwarded-allow-ips=127.0.0.1,::1
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ustc-review
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,3 @@
-import os
-
 from app.auth import create_session_token, password_is_valid, verify_session_token
 
 

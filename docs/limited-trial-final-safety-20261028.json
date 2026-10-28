@@ -1,0 +1,158 @@
+{
+  "scope_id": "3ab381fb60d003c3ad66815a8cc96d7d191bdab75eacf74cc2c30cc8c431ba3e",
+  "requests": [
+    {
+      "question_id": 26,
+      "phase": "answer",
+      "actual_request_sha256": "624cad3cc6f61879294abb08d39c735ef41c93941be2988f6341c1eb3f8f3d0f",
+      "bytes": 6190,
+      "single_context": true,
+      "no_extra_private_content": true
+    },
+    {
+      "question_id": 26,
+      "phase": "science",
+      "actual_request_sha256": "58dfc2534fde20429ea0bd725bfaa2fbc54a970ad7fdb570d2461fa20bad47f2",
+      "bytes": 6512,
+      "single_context": true,
+      "no_extra_private_content": true
+    },
+    {
+      "question_id": 39,
+      "phase": "answer",
+      "actual_request_sha256": "d713caec8e1f81ee4bb69068ec905a31fe45d5b6535cad84a2ead616ae1f10a2",
+      "bytes": 9428,
+      "single_context": true,
+      "no_extra_private_content": true
+    },
+    {
+      "question_id": 39,
+      "phase": "science",
+      "actual_request_sha256": "150e9047516264d412c616c0ff7927456eadba7243e1d7d39a0b94509da13493",
+      "bytes": 9746,
+      "single_context": true,
+      "no_extra_private_content": true
+    },
+    {
+      "question_id": 9,
+      "phase": "science",
+      "actual_request_sha256": "c313fb6dddf994330d25c72f7bda1e907720b13b5cda493c211d3d3520e18aaf",
+      "bytes": 6544,
+      "single_context": true,
+      "no_extra_private_content": true
+    },
+    {
+      "question_id": 9,
+      "phase": "answer",
+      "actual_request_sha256": "0b9df7c8bbbfbffee0070c201766358df0d1e8f18148a01a6016fde1eb04a61c",
+      "bytes": 6657,
+      "single_context": true,
+      "no_extra_private_content": true
+    }
+  ],
+  "approved_unique_segments": 7,
+  "approved_unique_original_bytes": 4057,
+  "textbook_segments": 4,
+  "transcription_segments": 3,
+  "other35_included": false,
+  "credentials_in_json": false,
+  "runtime_context_removed": true,
+  "external_requests": 0,
+  "real_api": false,
+  "frozen_policy": {
+    "scope_id": "3ab381fb60d003c3ad66815a8cc96d7d191bdab75eacf74cc2c30cc8c431ba3e",
+    "policy": {
+      "version": "limited-trial/1",
+      "model_id": "deepseek-flash",
+      "output_cap": 4096,
+      "system_sha256": "f781d95fcd429c48a6c5de98413621814f613fff9a5bc05e474beba6f5715b26",
+      "question_payloads": {
+        "9:science": "d6159d99dd45c1d1c139b6d162680c1b3607d9fccb39b3a4b222ebfb29539340",
+        "9:answer": "b0b6b1bc3fd649b4e2a9ea8a9b908554789f95c1f83c02bdc00040a7e9485d6f",
+        "26:science": "83536e6b9646dd5dfa11c4b8f0183d684158becd717103ab9589e449a8889b4b",
+        "26:answer": "58b25f599f737a8c44d81f1edce1da57d88840dbfcadd80cf45f8bd90222b3f9",
+        "39:science": "e900b409ce54c9df97e056237220f6e1c05e1280cc961b65c9d9ff1880c44b70",
+        "39:answer": "5b08e8cebffed3494d5420df13025013f6df5c81eade7dd800ee65080ddc821b"
+      }
+    }
+  },
+  "live_api_authorized": false,
+  "private_data_authorized": false,
+  "tests_targeted_passed": 101,
+  "actual_api_requests": 0,
+  "database_versions": 59,
+  "database_migrations": 20,
+  "ready": 0,
+  "compatibility_local_wire_checks": [
+    {
+      "effort": "off",
+      "thinking": {
+        "type": "disabled"
+      },
+      "output_config": null,
+      "body_sha256": "8f591e5574c3a4ba595d9f87a43ae6231874f049248bb79a640525b5d1660c6c",
+      "bytes": 1659,
+      "external_requests": 0,
+      "real_api": false
+    },
+    {
+      "effort": "low",
+      "thinking": {
+        "type": "enabled"
+      },
+      "output_config": {
+        "effort": "low"
+      },
+      "body_sha256": "7f30812ef666945bff8e2cf28cabff082df94be1d7ee5d886487174cf9770064",
+      "bytes": 1694,
+      "external_requests": 0,
+      "real_api": false
+    },
+    {
+      "effort": "high",
+      "thinking": {
+        "type": "enabled"
+      },
+      "output_config": {
+        "effort": "high"
+      },
+      "body_sha256": "927b17a0b723c7aebc1688a17b076f6a95dfa760b415076d1d129c0eee7614cd",
+      "bytes": 1695,
+      "external_requests": 0,
+      "real_api": false
+    },
+    {
+      "effort": "max",
+      "thinking": {
+        "type": "enabled"
+      },
+      "output_config": {
+        "effort": "max"
+      },
+      "body_sha256": "215de0b288249d770f9c8871a6396b435b4bd4d9a669ddcf68b9913c668191ce",
+      "bytes": 1694,
+      "external_requests": 0,
+      "real_api": false
+    }
+  ],
+  "unique_source_bytes": 4057,
+  "repeated_source_bytes_total": 7833,
+  "source_bytes_science": 4057,
+  "source_bytes_answer": 3776,
+  "final_database_receipt": {
+    "jobs": 0,
+    "calls": 0,
+    "ready": 0,
+    "formal_science_answer": 0,
+    "draft_versions": 59,
+    "migrations": 20,
+    "source_units": 12396,
+    "temporary_roles_remaining": 0,
+    "authorization_flags_enabled": {
+      "AI_AUTOMATION_ENABLED": false,
+      "DEEPSEEK_API_AUTHORIZED": false,
+      "DEEPSEEK_PRIVATE_DATA_AUTHORIZED": false
+    },
+    "scope_activated": false
+  }
+}

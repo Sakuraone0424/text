@@ -1,0 +1,137 @@
+{
+  "evidence_source": "user_supplied_post_push_Railway_connector_read_only_verification_not_Codex_query",
+  "project_id": "c6028313-e1f4-43cc-a63d-b7ff474a3a24",
+  "environment_id": "ca9c95e7-81b8-495e-a51b-f01607a8eeab",
+  "service_id": "15083462-a2f4-49d0-9a72-0873208e0669",
+  "environment_name": "production",
+  "patch_id": null,
+  "patch_status": null,
+  "reported_staged_change_count": 0,
+  "github_sha": "63042da7e31819237971b4289689c949af0d55b7",
+  "staged_sha": null,
+  "latest_deployment_id": "dbd42628-159d-4c33-a03b-1ee333482277",
+  "autodeploy_enabled": false,
+  "pr_previews_enabled": false,
+  "workspace_usage_complete": false,
+  "workspace_projected_usd": null,
+  "ai_flags": null,
+  "paid_start_authorized": false,
+  "private_transfer_authorized": false,
+  "restore_authorized": false,
+  "target_empty_verified": false,
+  "backup_handoff_confirmed": true,
+  "expected_ai_flags": {
+    "AI_AUTOMATION_ENABLED": "0",
+    "DEEPSEEK_API_AUTHORIZED": "0",
+    "DEEPSEEK_PRIVATE_DATA_AUTHORIZED": "0"
+  },
+  "ai_flags_observation": "Only variable names independently readable by Railway connection party; staged values hidden. Historical safe settings are not current value readback.",
+  "patch_destructive": false,
+  "deployment_count": null,
+  "webhook_counts": {
+    "original_project": 0,
+    "test_project": 0
+  },
+  "dockerfile_path": "deploy/railway-automation/Dockerfile",
+  "healthcheck_path": "/health",
+  "reported_ai_execution_variable_count": 9,
+  "reported_dockerfile_variable_count": 1,
+  "short_window_observation": {
+    "source": "user_supplied_external_read_only_query",
+    "hours": 2,
+    "original_api_average_memory_mb": 47,
+    "original_postgres_average_memory_mb": 58,
+    "combined_average_cpu_vcpu": "0.0022",
+    "is_monthly_billing": false
+  },
+  "push_trigger_evidence": {
+    "source": "user_supplied_console_and_connector_observations_not_independently_queried_by_Codex",
+    "test_auto_deploy": {
+      "project_id": "c6028313-e1f4-43cc-a63d-b7ff474a3a24",
+      "service_id": "15083462-a2f4-49d0-9a72-0873208e0669",
+      "observed": "Disabled"
+    },
+    "pr_environments": [
+      {
+        "project_id": "c8ace6c2-e725-4e19-b064-3c71b44d4fde",
+        "reported_button": "Enable",
+        "screenshot_uuid_binding": "user reports both projects; actual screenshots unavailable in this turn"
+      },
+      {
+        "project_id": "c6028313-e1f4-43cc-a63d-b7ff474a3a24",
+        "reported_button": "Enable",
+        "screenshot_uuid_binding": "user reports both projects; actual screenshots unavailable in this turn"
+      }
+    ],
+    "original_source": {
+      "project_id": "c8ace6c2-e725-4e19-b064-3c71b44d4fde",
+      "environment_id": "54a1a3e3-9a24-4182-8441-5670d1ba9f04",
+      "service_name": "quiz-backend",
+      "repo": "Sakuraone0424/text",
+      "branch": null,
+      "branch_field_absent": true,
+      "branch_loading_error_is_autodeploy_evidence": false
+    },
+    "github_repository_hooks": {
+      "verified": true,
+      "method": "user_reported_repository_administrator_GitHub_Settings_Webhooks_screenshot",
+      "repository": "Sakuraone0424/text",
+      "count": 0,
+      "independently_queried_by_Codex": false,
+      "prior_api_http_status": 403,
+      "recorded_at": "2026-10-27T12:28:03.255563+00:00"
+    }
+  },
+  "active_sha": "63042da7e31819237971b4289689c949af0d55b7",
+  "latest_deployment": {
+    "id": "dbd42628-159d-4c33-a03b-1ee333482277",
+    "status": "SUCCESS",
+    "sha": "63042da7e31819237971b4289689c949af0d55b7",
+    "created_at": null,
+    "trigger": "not_reported_in_current_instruction",
+    "source": "user_supplied_Railway_observation_not_Codex_live_query"
+  },
+  "original_production": {
+    "project_id": "c8ace6c2-e725-4e19-b064-3c71b44d4fde",
+    "environment_id": "54a1a3e3-9a24-4182-8441-5670d1ba9f04",
+    "patch": null,
+    "services": {
+      "quiz-backend": {
+        "deployment_id": "7cf3bb5a-207d-4a32-befc-917401d7738b",
+        "status": "SUCCESS",
+        "unchanged": true,
+        "staged_changes": false
+      },
+      "Postgres": {
+        "deployment_id": "e6d15d87-bd61-4ec6-abaf-2e5c2f85b9e8",
+        "status": "SUCCESS",
+        "unchanged": true,
+        "staged_changes": false
+      }
+    }
+  },
+  "superseded_patch": {
+    "id": "a68e1281-f8a6-4c14-9570-0fabfbb1180c",
+    "reported_changes": 16,
+    "disposition": "previously_submitted_by_user_manual_deployment_not_pending"
+  },
+  "post_push_verification": {
+    "unexpected_new_deployments": false,
+    "verified_by": "external_Railway_connection_party_reported_by_user"
+  },
+  "minimum_known_deployments": 2,
+  "test_postgres_service_exists": false,
+  "test_worker_service_exists": false,
+  "health_http_status_user_reported": 200,
+  "backup_storage": "authorized_private_GitHub_repository_long_term",
+  "cloud_restore_authorized": false,
+  "cloud_database_start_authorized": false,
+  "local_restore": {
+    "completed": true,
+    "postgres_major": 17,
+    "manifest_tables_verified": 68,
+    "source_files_verified": 6,
+    "migrations_verified": 18,
+    "cloud_restore": false
+  }
+}

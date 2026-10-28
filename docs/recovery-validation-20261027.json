@@ -1,0 +1,306 @@
+{
+  "restore_completed": true,
+  "empty_new_database_before_restore": true,
+  "different_new_local_cluster": true,
+  "independent_manifest_readback": {
+    "tables_verified": 68,
+    "migrations_verified": 18,
+    "source_files_verified": 6,
+    "independent_readback": true,
+    "api_write_restart_tested": false,
+    "evidence_log": "restored-data-audit.log: verification completed before parser unpacking error"
+  },
+  "storage": {
+    "database_bytes": 425924275,
+    "table_and_index_bytes": 416301056
+  },
+  "encoding": "UTF8",
+  "server_version": "17.11 (Debian 17.11-0+deb13u1)",
+  "source_files": [
+    {
+      "document_id": 1,
+      "file_id": "1onpEwQsbL3ntkPOU1mFbgQKD2iFQi3n3",
+      "subject": "biochemistry",
+      "kind": "textbook",
+      "format": "txt",
+      "sha256": "89b226f7c9da53179943375751cacdf873b3693efdb426304a41ed1556e3b013",
+      "bytes": 1749006,
+      "indexed_units": 2411,
+      "reparsed_units": 2411,
+      "stored_pages": 654,
+      "reparsed_pages": 654,
+      "expected_pages": 654,
+      "page_sequence_complete": true,
+      "reparsed_index_matches": true,
+      "empty_pages": 0,
+      "txt_encoding": "UTF-8"
+    },
+    {
+      "document_id": 2,
+      "file_id": "1SjN5SQbW1Qe2jVuyD7X0T10fhtY8mGQz",
+      "subject": "biochemistry",
+      "kind": "textbook",
+      "format": "txt",
+      "sha256": "1cdd646caae4fe185fc90623e2706ed9503690fe93a41fb91f381927694c9a5b",
+      "bytes": 1520962,
+      "indexed_units": 2616,
+      "reparsed_units": 2616,
+      "stored_pages": 587,
+      "reparsed_pages": 587,
+      "expected_pages": 587,
+      "page_sequence_complete": true,
+      "reparsed_index_matches": true,
+      "empty_pages": 0,
+      "txt_encoding": "UTF-8"
+    },
+    {
+      "document_id": 3,
+      "file_id": "1vSP2zIbRCYKsYcOajizh21PoXVsbgw-_",
+      "subject": "biochemistry",
+      "kind": "textbook",
+      "format": "txt",
+      "sha256": "dbae27206fed8ad0b1303dcf759c73b55194dbb4fa6308f392826592ec85bd6c",
+      "bytes": 915492,
+      "indexed_units": 2283,
+      "reparsed_units": 2283,
+      "stored_pages": 289,
+      "reparsed_pages": 289,
+      "expected_pages": 289,
+      "page_sequence_complete": true,
+      "reparsed_index_matches": true,
+      "empty_pages": 0,
+      "txt_encoding": "UTF-8"
+    },
+    {
+      "document_id": 4,
+      "file_id": "19dZD44bebkDX9EOAEnhdRsk5rN2zTCZS",
+      "subject": "cell_biology",
+      "kind": "textbook",
+      "format": "txt",
+      "sha256": "de3dd4e75ba10c5a4f49096949a0e4cf44512856070440fd410c373e0745bae1",
+      "bytes": 1387287,
+      "indexed_units": 2345,
+      "reparsed_units": 2345,
+      "stored_pages": 385,
+      "reparsed_pages": 385,
+      "expected_pages": 385,
+      "page_sequence_complete": true,
+      "reparsed_index_matches": true,
+      "empty_pages": 0,
+      "txt_encoding": "UTF-8"
+    },
+    {
+      "document_id": 5,
+      "file_id": "1R4x1ftwGDVMO73DZgC8nOuWCO6ZtzIn4",
+      "subject": "biochemistry",
+      "kind": "exam_transcription",
+      "format": "docx",
+      "sha256": "6add10fad4708453f7f8cff5562ee73bf0853d70e43c8c3d67d06299cf82c001",
+      "bytes": 1697187,
+      "indexed_units": 1751,
+      "reparsed_units": 1751,
+      "stored_pages": 0,
+      "reparsed_pages": 0,
+      "expected_pages": null,
+      "page_sequence_complete": null,
+      "reparsed_index_matches": true,
+      "main_question_candidates": 1197,
+      "year_work_items": 23
+    },
+    {
+      "document_id": 6,
+      "file_id": "1N7ZSz8GDLNrJlHbq-PxzvsRFAIXxCsSl",
+      "subject": "cell_biology",
+      "kind": "exam_transcription",
+      "format": "docx",
+      "sha256": "63b0eea0b1dbb5a7b6323dcd769792bba60a96ce9d93c6b8bd8c79fd4939ef79",
+      "bytes": 272001,
+      "indexed_units": 990,
+      "reparsed_units": 990,
+      "stored_pages": 0,
+      "reparsed_pages": 0,
+      "expected_pages": null,
+      "page_sequence_complete": null,
+      "reparsed_index_matches": true,
+      "main_question_candidates": 724,
+      "year_work_items": 29
+    }
+  ],
+  "textbook_pages": 1915,
+  "source_units": 12396,
+  "chapter_groups": 83,
+  "classified_chapter_groups": 79,
+  "unclassified_groups": 4,
+  "year_items": 52,
+  "main_question_candidates": 1921,
+  "transcript_candidate_rows": 2741,
+  "exact_duplicate_groups": 77,
+  "candidate_versions": 45,
+  "active_candidates": 38,
+  "candidate_quotas": {
+    "biochemistry/essay": 2,
+    "biochemistry/fill_blank": 4,
+    "biochemistry/short_answer": 4,
+    "biochemistry/single_choice": 4,
+    "biochemistry/term": 5,
+    "cell_biology/essay": 2,
+    "cell_biology/fill_blank": 4,
+    "cell_biology/short_answer": 4,
+    "cell_biology/single_choice": 4,
+    "cell_biology/term": 5
+  },
+  "reviewed_question_status": [
+    {
+      "status": "draft",
+      "n": 45
+    }
+  ],
+  "auto_states": [
+    {
+      "status": "candidate",
+      "n": 38
+    }
+  ],
+  "auto_quality_phases": [
+    {
+      "phase": "identity",
+      "passed": true,
+      "n": 38
+    }
+  ],
+  "source_reviews": [],
+  "knowledge_links": 0,
+  "mapping_proposals": 17128,
+  "current_work": [
+    {
+      "kind": "chapter_alignment",
+      "n": 83
+    },
+    {
+      "kind": "concept_mapping",
+      "n": 11044
+    },
+    {
+      "kind": "exam_question",
+      "n": 1921
+    },
+    {
+      "kind": "exam_year",
+      "n": 52
+    },
+    {
+      "kind": "relationship",
+      "n": 4504
+    },
+    {
+      "kind": "transcription_repeat",
+      "n": 25
+    },
+    {
+      "kind": "unit_review",
+      "n": 12396
+    }
+  ],
+  "source_quality_flags": {
+    "scientific_notation_requires_source_review": 2865,
+    "chemical_structure": 454,
+    "image_dependent": 1327,
+    "transcription_gap_reported": 3,
+    "complex_table": 286,
+    "docx_table_requires_review": 102,
+    "untranscribed_image": 25,
+    "ocr_uncertain": 1
+  },
+  "foreign_keys_checked": 80,
+  "foreign_key_orphans": 0,
+  "invalid_indexes": 0,
+  "constraints": [
+    {
+      "contype": "f",
+      "n": 80,
+      "not_validated": 0
+    },
+    {
+      "contype": "c",
+      "n": 87,
+      "not_validated": 0
+    },
+    {
+      "contype": "u",
+      "n": 33,
+      "not_validated": 0
+    },
+    {
+      "contype": "p",
+      "n": 68,
+      "not_validated": 0
+    }
+  ],
+  "official_exam_records": 0,
+  "all_exam_records": 0,
+  "science_ready_questions": 0,
+  "source_pending_unlocated": 277,
+  "current_backend_migration_count": 18,
+  "candidate_deterministic_issue_count": 0,
+  "post_restart": {
+    "local_cluster_restarted": true,
+    "independent_post_restart_table_verification": {
+      "tables_verified": 68,
+      "migrations_verified": 18,
+      "source_files_verified": 6,
+      "independent_readback": true,
+      "api_write_restart_tested": false
+    },
+    "source_manifest_unchanged": true,
+    "backend_get_db_commit_readback_probe": true,
+    "probe_in_separate_schema_not_training_history": true,
+    "counts_after_restart": {
+      "source_documents": 6,
+      "source_units": 12396,
+      "source_pages": 1915,
+      "candidate_review_packets": 45,
+      "reviewed_questions": 45,
+      "users": 0,
+      "attempts": 0,
+      "attempts_v2": 0,
+      "fsrs_cards": 0
+    },
+    "sizing_after_test": {
+      "database_bytes": 448214707,
+      "shared_buffers_bytes": 33554432
+    },
+    "local_idle_pg_pss_kib": 51488,
+    "local_idle_pg_rss_kib_sum_shared_doublecounted": 76952,
+    "pss_processes_observed": 7,
+    "local_measurement_not_Railway_usage": true
+  },
+  "sequences_checked": 39,
+  "unsafe_sequences": 0,
+  "foreign_keys_orphans": 0,
+  "archive_sha256": "4e84fde3fdaaabded29005d9c05eeb4543b714d90673c55b3958dac84cbf081a",
+  "archive_bytes": 63472028,
+  "backup_private_repository": "Sakuraone0424/ustc-private-backup-transfer",
+  "backup_commit": "12793ae231a4bce77f9ed0bfcaaf8885660e167a",
+  "source_backup_is_not_Railway_production_backup": true,
+  "private_raw_text_in_this_report": false,
+  "cloud_restore_executed": false,
+  "deepseek_calls": 0,
+  "textbook_source_units": 9655,
+  "transcription_source_units": 2741,
+  "textbook_unclassified_units": 275,
+  "transcription_unclassified_units": 2,
+  "style_year_citations_checked": 38,
+  "style_year_mismatches": 0,
+  "candidate_lexical_duplicate_pairs": 0,
+  "targeted_tests": {
+    "passed": 83,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 21.53
+  },
+  "risk_or_unclassified_units": 3911,
+  "normalized_transcript_duplicate_groups": 77,
+  "normalized_transcript_duplicate_occurrences": 181,
+  "cross_subject_transcript_duplicate_groups": 10,
+  "cloud_resource_cost_proven_within_budget": false
+}

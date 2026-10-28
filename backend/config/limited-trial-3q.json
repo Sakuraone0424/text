@@ -1,0 +1,17 @@
+{
+  "scope_id": "3ab381fb60d003c3ad66815a8cc96d7d191bdab75eacf74cc2c30cc8c431ba3e",
+  "policy": {
+    "version": "limited-trial/1",
+    "model_id": "deepseek-flash",
+    "output_cap": 4096,
+    "system_sha256": "f781d95fcd429c48a6c5de98413621814f613fff9a5bc05e474beba6f5715b26",
+    "question_payloads": {
+      "9:science": "d6159d99dd45c1d1c139b6d162680c1b3607d9fccb39b3a4b222ebfb29539340",
+      "9:answer": "b0b6b1bc3fd649b4e2a9ea8a9b908554789f95c1f83c02bdc00040a7e9485d6f",
+      "26:science": "83536e6b9646dd5dfa11c4b8f0183d684158becd717103ab9589e449a8889b4b",
+      "26:answer": "58b25f599f737a8c44d81f1edce1da57d88840dbfcadd80cf45f8bd90222b3f9",
+      "39:science": "e900b409ce54c9df97e056237220f6e1c05e1280cc961b65c9d9ff1880c44b70",
+      "39:answer": "5b08e8cebffed3494d5420df13025013f6df5c81eade7dd800ee65080ddc821b"
+    }
+  }
+}

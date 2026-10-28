@@ -1,0 +1,472 @@
+{
+  "summary": {
+    "date": "2026-10-28",
+    "official_tokenizer_sha256": "89085f12ef79460ac5f66d1119325ddfc694b4ab209d80bbd81d35f081dc9614",
+    "tokenizer_zip_sha256": "e7310d1dafe0a86d8a5629fe78a7c763760f651db9b8682718a1781dcd6fe495",
+    "tokenizer_library": "tokenizers 0.22.2",
+    "token_usage_is_estimate": true,
+    "actual_api_requests": 0,
+    "candidates": 38,
+    "materials": 76,
+    "phases": {
+      "science": {
+        "tasks": 38,
+        "bytes": 248251,
+        "tokens": 74388,
+        "textbook_bytes": 66351,
+        "textbook_tokens": 15524,
+        "transcription_bytes": 2010,
+        "transcription_tokens": 464
+      },
+      "answer": {
+        "tasks": 38,
+        "bytes": 254710,
+        "tokens": 72792,
+        "textbook_bytes": 66351,
+        "textbook_tokens": 15524,
+        "transcription_bytes": 0,
+        "transcription_tokens": 0
+      }
+    },
+    "max_payload_bytes": 13196,
+    "unique_excerpt_segments": 93,
+    "unique_excerpt_bytes": 55152,
+    "unique_excerpt_tokens": 12775,
+    "textbook_file_count": 4,
+    "transcription_file_count": 2,
+    "sample_question_ids": [
+      39,
+      26,
+      9
+    ],
+    "sample_task_estimates": [
+      {
+        "question_id": 9,
+        "estimates": [
+          {
+            "phase": "science",
+            "bytes": 4585,
+            "tokens": 1456
+          },
+          {
+            "phase": "answer",
+            "bytes": 4716,
+            "tokens": 1403
+          }
+        ]
+      },
+      {
+        "question_id": 26,
+        "estimates": [
+          {
+            "phase": "science",
+            "bytes": 4562,
+            "tokens": 1407
+          },
+          {
+            "phase": "answer",
+            "bytes": 4268,
+            "tokens": 1250
+          }
+        ]
+      },
+      {
+        "question_id": 39,
+        "estimates": [
+          {
+            "phase": "science",
+            "bytes": 7726,
+            "tokens": 2178
+          },
+          {
+            "phase": "answer",
+            "bytes": 7436,
+            "tokens": 2027
+          }
+        ]
+      }
+    ],
+    "costs": {
+      "three": {
+        "normal": {
+          "base_tasks": 6,
+          "request_attempts": 6,
+          "input_tokens_budget": 12793,
+          "output_tokens_budget": 7200,
+          "cny": "0.083186",
+          "input_rate": "2",
+          "output_rate": "8",
+          "cache_hit_assumption": 0,
+          "output_cap": 1200
+        },
+        "conservative": {
+          "base_tasks": 6,
+          "request_attempts": 6,
+          "input_tokens_budget": 192000,
+          "output_tokens_budget": 24576,
+          "cny": "0.580608",
+          "input_rate": "2",
+          "output_rate": "8",
+          "cache_hit_assumption": 0,
+          "output_cap": 4096
+        },
+        "high": {
+          "base_tasks": 6,
+          "request_attempts": 48,
+          "input_tokens_budget": 1536000,
+          "output_tokens_budget": 393216,
+          "cny": "6.217728",
+          "input_rate": "2",
+          "output_rate": "8",
+          "cache_hit_assumption": 0,
+          "output_cap": 8192
+        }
+      },
+      "all": {
+        "normal": {
+          "base_tasks": 76,
+          "request_attempts": 76,
+          "input_tokens_budget": 186092,
+          "output_tokens_budget": 91200,
+          "cny": "1.101784",
+          "input_rate": "2",
+          "output_rate": "8",
+          "cache_hit_assumption": 0,
+          "output_cap": 1200
+        },
+        "conservative": {
+          "base_tasks": 76,
+          "request_attempts": 76,
+          "input_tokens_budget": 2432000,
+          "output_tokens_budget": 311296,
+          "cny": "7.354368",
+          "input_rate": "2",
+          "output_rate": "8",
+          "cache_hit_assumption": 0,
+          "output_cap": 4096
+        },
+        "high": {
+          "base_tasks": 76,
+          "request_attempts": 608,
+          "input_tokens_budget": 19456000,
+          "output_tokens_budget": 4980736,
+          "cny": "78.757888",
+          "input_rate": "2",
+          "output_rate": "8",
+          "cache_hit_assumption": 0,
+          "output_cap": 8192
+        }
+      }
+    },
+    "database_before": {
+      "ai_jobs": 0,
+      "ai_call_events": 0,
+      "auto_quality_events": 38,
+      "candidate_review_packets": 59,
+      "schema_migrations": 20
+    },
+    "database_after": {
+      "ai_jobs": 0,
+      "ai_call_events": 0,
+      "auto_quality_events": 38,
+      "candidate_review_packets": 59,
+      "schema_migrations": 20
+    },
+    "ready": 0,
+    "states": [
+      {
+        "status": "candidate",
+        "n": 38
+      },
+      {
+        "status": "retired",
+        "n": 14
+      }
+    ],
+    "blind_science_materials": 38,
+    "answer_without_history": 38,
+    "exclusion_pair": [
+      55,
+      59
+    ],
+    "risk": "Official V4 tokenizer is locally executed; exact V4.1 server framing/tokenizer equivalence and reasoning usage not API-tested"
+  },
+  "trial": {
+    "enabled": false,
+    "model_id": "deepseek-flash",
+    "model_version_documented": "DeepSeek-V4.1-Flash-1017",
+    "effort": "high",
+    "max_output_tokens": 4096,
+    "max_concurrency": 1,
+    "retry_limit": 0,
+    "automatic_repairs": 0,
+    "max_formal_jobs": 6,
+    "max_formal_http_attempts": 6,
+    "max_synthetic_compatibility_attempts": 4,
+    "max_total_paid_attempts": 10,
+    "compatibility_efforts": [
+      "off",
+      "low",
+      "high",
+      "max"
+    ],
+    "task_budget_cny": "0.10",
+    "trial_budget_cny": "1.00",
+    "daily_budget_cny": "1.00",
+    "monthly_budget_cny": "10.00",
+    "budgets_approved": false,
+    "private_data_authorized": false,
+    "live_api_authorized": false,
+    "privacy_sample_unique_segments": 7,
+    "privacy_sample_unique_bytes": 4057,
+    "privacy_sample_unique_tokens": 912,
+    "review_cost_upper_cny": "0.580608",
+    "compatibility_cost_upper_cny": "0.387072",
+    "combined_reservation_upper_cny": "0.967680",
+    "unknown_usage": "Keep reservation and stop; do not automatically retry",
+    "stop_on_compatibility_failure": true,
+    "remaining35_not_authorized": true,
+    "samples": [
+      {
+        "question_id": 39,
+        "subject": "biochemistry",
+        "question_type": "single_choice",
+        "content_sha256": "b8d803249da080b5859c724f31f410691068bf257e42ad38216b1a5212ffc8c5",
+        "phases": [
+          {
+            "phase": "science",
+            "task": "science_review",
+            "sha256": "c7b112c1a1f40cf4f2a119c129bf81910b1f032de50f79bb31c6ad8caedfbd3e",
+            "bytes": 7726,
+            "offline_tokens": 2178
+          },
+          {
+            "phase": "answer",
+            "task": "answer_review",
+            "sha256": "ac45567b7656bc461373cf9260442c330d128d83186b34563959719221a38610",
+            "bytes": 7436,
+            "offline_tokens": 2027
+          }
+        ]
+      },
+      {
+        "question_id": 26,
+        "subject": "cell_biology",
+        "question_type": "fill_blank",
+        "content_sha256": "533c2470c759cc2445a8191b5ed709c55d05a143a79d5b9bd14095d938d5c761",
+        "phases": [
+          {
+            "phase": "science",
+            "task": "science_review",
+            "sha256": "c9383d576663a6ce382174a498ab6e4cfa0827a3b20762c2ad4c52e6de59a553",
+            "bytes": 4562,
+            "offline_tokens": 1407
+          },
+          {
+            "phase": "answer",
+            "task": "answer_review",
+            "sha256": "3e547cd6285738713dae433fa86e719c3b028dd8001f9c6b861f60084544e302",
+            "bytes": 4268,
+            "offline_tokens": 1250
+          }
+        ]
+      },
+      {
+        "question_id": 9,
+        "subject": "biochemistry",
+        "question_type": "term",
+        "content_sha256": "930ab6e95ecec1fc5e7718efd2b3cee53637c24b1aa25d5274b7917822f8391b",
+        "phases": [
+          {
+            "phase": "science",
+            "task": "science_review",
+            "sha256": "d7f653a4da03f80d2e94901c27e0edede19e391f43bf44fd6bfb94c66e5fb905",
+            "bytes": 4585,
+            "offline_tokens": 1456
+          },
+          {
+            "phase": "answer",
+            "task": "answer_review",
+            "sha256": "33e073e0d8956bf425fa101b390bf91f3a0be3fd9340c09a4f6383729684182c",
+            "bytes": 4716,
+            "offline_tokens": 1403
+          }
+        ]
+      }
+    ]
+  },
+  "official_documents": [
+    {
+      "key": "pricing",
+      "url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+      "final_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+      "status": 200,
+      "sha256": "556097caba8adfeeed6455714bffd731c7f60db520fcee06a922eba5840663a3",
+      "fetched_at": "2026-10-28T01:40:03.769208+00:00"
+    },
+    {
+      "key": "thinking",
+      "url": "https://api-docs.deepseek.com/guides/thinking_mode",
+      "final_url": "https://api-docs.deepseek.com/guides/thinking_mode/",
+      "status": 200,
+      "sha256": "7d9762238e92a7391173ba1726778e46ec11c7bc599e3e395265488f196618b7",
+      "fetched_at": "2026-10-28T01:40:04.578476+00:00"
+    },
+    {
+      "key": "json",
+      "url": "https://api-docs.deepseek.com/guides/json_mode",
+      "final_url": "https://api-docs.deepseek.com/guides/json_mode/",
+      "status": 200,
+      "sha256": "994044aeaa03eed19a93623931e1cce8a9dc22396063d1832ad21a412554385d",
+      "fetched_at": "2026-10-28T01:40:04.608550+00:00"
+    },
+    {
+      "key": "anthropic",
+      "url": "https://api-docs.deepseek.com/guides/anthropic_api",
+      "final_url": "https://api-docs.deepseek.com/guides/anthropic_api/",
+      "status": 200,
+      "sha256": "19b5e723f1c65f609c010999cdf3cc1929327c4369c54b0151e8ea82dc3dd033",
+      "fetched_at": "2026-10-28T01:40:04.416813+00:00"
+    },
+    {
+      "key": "tokens",
+      "url": "https://api-docs.deepseek.com/quick_start/token_usage",
+      "final_url": "https://api-docs.deepseek.com/quick_start/token_usage/",
+      "status": 200,
+      "sha256": "f714e2bc8d423cc25ba123a914c2d837c893571086ff75f48c775928aab97897",
+      "fetched_at": "2026-10-28T01:40:04.455072+00:00"
+    },
+    {
+      "key": "privacy",
+      "url": "https://cdn.deepseek.com/policies/zh-CN/deepseek-privacy-policy.html",
+      "final_url": "https://cdn.deepseek.com/policies/zh-CN/deepseek-privacy-policy.html",
+      "status": 200,
+      "sha256": "d9569d0c1b9e2d8e08b52db54bdc315f801d59501b8c054655c409239d58d2ab",
+      "fetched_at": "2026-10-28T01:40:04.846996+00:00"
+    },
+    {
+      "key": "harness",
+      "url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/main/README.md",
+      "final_url": "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/main/README.md",
+      "status": 404,
+      "sha256": "d5558cd419c8d46bdc958064cb97f963d1ea793866414c025906ec15033512ed",
+      "fetched_at": "2026-10-28T01:40:03.712185+00:00"
+    }
+  ],
+  "sdk_local_requests": [
+    {
+      "question_id": 9,
+      "phase": "science",
+      "sdk_request_bytes": 6738,
+      "body_sha256": "2cadb7a313fcbcb800a74dfe88c99be66e38f76279b1bc053da66e8d47a8b584",
+      "single_user_message": true,
+      "tools_empty": true,
+      "real_api": false
+    },
+    {
+      "question_id": 9,
+      "phase": "answer",
+      "sdk_request_bytes": 6850,
+      "body_sha256": "aea482c0872cbf499f2904d1d9a79079851537715195b70eb481ea620c95af2b",
+      "single_user_message": true,
+      "tools_empty": true,
+      "real_api": false
+    },
+    {
+      "question_id": 26,
+      "phase": "science",
+      "sdk_request_bytes": 6707,
+      "body_sha256": "35927e8344cf6206c2e5b16938ec3e3a9b289527b4430b30664e092b55fc4f0b",
+      "single_user_message": true,
+      "tools_empty": true,
+      "real_api": false
+    },
+    {
+      "question_id": 26,
+      "phase": "answer",
+      "sdk_request_bytes": 6384,
+      "body_sha256": "1cb945de624c8dfc88faf4b1d8eaff366de6eae73dd53cb91837e4d9776019c0",
+      "single_user_message": true,
+      "tools_empty": true,
+      "real_api": false
+    },
+    {
+      "question_id": 39,
+      "phase": "science",
+      "sdk_request_bytes": 9941,
+      "body_sha256": "9c595fd4ed779a64029788b1ebfed98c607e5af2d119be6224e6cf83f5fc4b48",
+      "single_user_message": true,
+      "tools_empty": true,
+      "real_api": false
+    },
+    {
+      "question_id": 39,
+      "phase": "answer",
+      "sdk_request_bytes": 9622,
+      "body_sha256": "a761c29983b2e7dfed7ad9880ddea0de7874f330a8d0bceb77e4efc843349959",
+      "single_user_message": true,
+      "tools_empty": true,
+      "real_api": false
+    }
+  ],
+  "authorization_flags_enabled": false,
+  "api_catalog_authenticated": false,
+  "tests": {
+    "targeted_passed": 72,
+    "real_api_tests": 0,
+    "new_ci": false
+  },
+  "price_records": [
+    {
+      "model_id": "deepseek-flash",
+      "model_version": "DeepSeek-V4.1-Flash-1017",
+      "currency": "CNY",
+      "version": "official-observation-20261028T014003Z-deepseek-flash",
+      "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+      "source_sha256": "556097caba8adfeeed6455714bffd731c7f60db520fcee06a922eba5840663a3",
+      "verified_at": "2026-10-28T01:40:03.769208+00:00",
+      "valid_from": "2026-10-28T01:40:03.769208+00:00",
+      "valid_until": "2026-10-29T01:40:03.769208+00:00",
+      "official_effective_at": null,
+      "rules": {
+        "off_peak": {
+          "cache_hit": "0.02",
+          "cache_miss": "1",
+          "output": "4"
+        },
+        "peak": {
+          "cache_hit": "0.04",
+          "cache_miss": "2",
+          "output": "8"
+        }
+      },
+      "note": "24h is local observation validity, not official tariff expiry"
+    },
+    {
+      "model_id": "deepseek-v4-pro",
+      "model_version": "DeepSeek-V4-Pro-0813",
+      "currency": "CNY",
+      "version": "official-observation-20261028T014003Z-deepseek-v4-pro",
+      "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+      "source_sha256": "556097caba8adfeeed6455714bffd731c7f60db520fcee06a922eba5840663a3",
+      "verified_at": "2026-10-28T01:40:03.769208+00:00",
+      "valid_from": "2026-10-28T01:40:03.769208+00:00",
+      "valid_until": "2026-10-29T01:40:03.769208+00:00",
+      "official_effective_at": null,
+      "rules": {
+        "off_peak": {
+          "cache_hit": "0.15",
+          "cache_miss": "4.5",
+          "output": "13.5"
+        },
+        "peak": {
+          "cache_hit": "0.30",
+          "cache_miss": "9",
+          "output": "27"
+        }
+      },
+      "note": "24h is local observation validity, not official tariff expiry"
+    }
+  ],
+  "external_private_data_sent": false
+}

@@ -1,0 +1,66 @@
+{
+  "version": "ocr-corrected-2026-10-26-v1",
+  "folder_id": "1RDVTRbLGnfc6GwPzGCCjGADf1ocLFMt6",
+  "files": [
+    {
+      "key": "biochemistry_upper",
+      "file_id": "1onpEwQsbL3ntkPOU1mFbgQKD2iFQi3n3",
+      "filename": "生物化学_上册_校订版.txt",
+      "subject": "biochemistry",
+      "kind": "textbook",
+      "expected_pages": 654,
+      "page_label": "上册",
+      "relative_path": "生物化学/书本/生物化学_上册_校订版.txt"
+    },
+    {
+      "key": "biochemistry_lower",
+      "file_id": "1SjN5SQbW1Qe2jVuyD7X0T10fhtY8mGQz",
+      "filename": "生物化学_下册_校订版.txt",
+      "subject": "biochemistry",
+      "kind": "textbook",
+      "expected_pages": 587,
+      "page_label": "下册",
+      "relative_path": "生物化学/书本/生物化学_下册_校订版.txt"
+    },
+    {
+      "key": "biochemistry_notes",
+      "file_id": "1vSP2zIbRCYKsYcOajizh21PoXVsbgw-_",
+      "filename": "生化高分笔记_校订版.txt",
+      "subject": "biochemistry",
+      "kind": "textbook",
+      "expected_pages": 289,
+      "page_label": null,
+      "relative_path": "生物化学/书本/生化高分笔记_校订版.txt"
+    },
+    {
+      "key": "cell_biology",
+      "file_id": "19dZD44bebkDX9EOAEnhdRsk5rN2zTCZS",
+      "filename": "细胞生物学_第五版_校订版.txt",
+      "subject": "cell_biology",
+      "kind": "textbook",
+      "expected_pages": 385,
+      "page_label": null,
+      "relative_path": "细胞生物学/书本/细胞生物学_第五版_校订版.txt"
+    },
+    {
+      "key": "biochemistry_exams",
+      "file_id": "1R4x1ftwGDVMO73DZgC8nOuWCO6ZtzIn4",
+      "filename": "2004~2026年中国科学技术大学生物化学与分子生物学真题.docx",
+      "subject": "biochemistry",
+      "kind": "exam_transcription",
+      "year_start": 2004,
+      "year_end": 2026,
+      "relative_path": "生物化学/真题/2004~2026年中国科学技术大学生物化学与分子生物学真题.docx"
+    },
+    {
+      "key": "cell_biology_exams",
+      "file_id": "1N7ZSz8GDLNrJlHbq-PxzvsRFAIXxCsSl",
+      "filename": "1998-2026年中国科学技术大学细胞生物学真题.docx",
+      "subject": "cell_biology",
+      "kind": "exam_transcription",
+      "year_start": 1998,
+      "year_end": 2026,
+      "relative_path": "细胞生物学/真题/1998-2026年中国科学技术大学细胞生物学真题.docx"
+    }
+  ]
+}

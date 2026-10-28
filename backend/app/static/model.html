@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>模型与思考设置</title
+  ><link rel="stylesheet" href="/static/app.css" />
+  <style>
+    body {
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+    main {
+      max-width: 960px;
+      margin: auto;
+      padding: 16px 14px 80px;
+    }
+    label {
+      display: block;
+      margin: 12px 0;
+    }
+    select,
+    input:not([type="checkbox"]) {
+      max-width: 100%;
+      width: 100%;
+      min-height: 44px;
+    }
+    button {
+      margin: 6px 4px 6px 0;
+      min-height: 44px;
+    }
+    pre {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      max-width: 100%;
+    }
+  </style>
+  <body>
+    <main>
+      <h1>模型与思考设置</h1>
+      <a href="/">返回训练</a>
+      <form id="login">
+        <label
+          >登录密码<input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            required /></label
+        ><button>登录</button>
+      </form>
+      <p id="message" role="status"></p>
+      <section id="controls" hidden>
+        <p>
+          AI自动核验不保证100%科学正确。设置仅影响新任务，当前试卷与成绩保持不变。应用侧预算不是平台硬性扣费限额；本地估算不代表官方账单。
+        </p>
+        <label>模型<select id="model"></select></label
+        ><label>思考强度<select id="effort"></select></label>
+        <p id="capabilities"></p>
+        <section aria-label="人民币费用">
+          <h2>DeepSeek 人民币账本</h2>
+          <p id="billing" role="status"></p>
+          <details>
+            <summary>费用与模型历史</summary>
+            <pre id="billing-history"></pre>
+          </details>
+        </section>
+        <label
+          ><input id="task-limit-enabled" type="checkbox" />启用单任务费用额度</label>
+        <label
+          >单任务（含重试）预算 ¥<input
+            id="task-budget"
+            type="number"
+            min="0"
+            max="1000"
+            step="0.01"
+        /></label>
+        <label
+          ><input
+            id="trial-active"
+            type="checkbox"
+          />启用自定义累计试验限额（关闭不删除历史预留）</label
+        >
+        <label
+          >首次试验累计预算 ¥<input
+            id="trial-budget"
+            type="number"
+            min="0"
+            max="10000"
+            step="0.01"
+        /></label>
+        <label
+          ><input id="daily-limit-enabled" type="checkbox" />启用每日费用额度</label>
+        <label
+          >每日人民币预算<input
+            id="daily"
+            type="number"
+            min="0"
+            max="1000"
+            step="0.01" /></label
+        ><label><input id="monthly-limit-enabled" type="checkbox" />启用每月费用额度</label><label
+          >每月人民币预算<input
+            id="monthly"
+            type="number"
+            min="0"
+            max="10000"
+            step="0.01" /></label
+        ><label><input id="discover" type="checkbox" />自动发现</label
+        ><label
+          ><input
+            id="upgrade"
+            type="checkbox"
+          />允许通过兼容性和预算检查后的升级（尚无自动切换执行器）</label
+        ><label><input id="stopped" type="checkbox" />停止AI任务</label>
+        <details>
+          <summary>任务限制</summary>
+          <label
+            >单任务输出Token上限<input
+              id="token-limit"
+              type="number"
+              min="128"
+              max="32768" /></label
+          ><label
+            >重试次数上限<input
+              id="retry-limit"
+              type="number"
+              min="0"
+              max="5" /></label
+          ><label
+            >最大并发<input id="max-concurrency" type="number" min="1" max="4"
+          /></label>
+          <p>
+            关闭自定义费用额度仍受已授权任务清单、并发、超时和异常停止保护。限定正式审核请求超时360秒、进程上限420秒；每次尝试只允许一次官方请求，未知费用保留预留并暂停。
+          </p>
+        </details>
+        <button id="limits">保存预算与停止开关</button
+        ><button id="save">保存设置</button
+        ><button id="refresh">刷新官方目录</button
+        ><button id="default">恢复默认（暂停任务）</button>
+        <details>
+          <summary>首次兼容性检查（需服务端授权与预算）</summary>
+          <p>
+            仅发送合成算术，不发送教材。必须先取得真实API与预算授权；价格只从已核查的官方中文CNY价格版本读取，未知或冲突时阻断。
+          </p>
+          <label
+            >请求档位<select id="probe-effort">
+              <option>off</option>
+              <option>low</option>
+              <option selected>high</option>
+              <option>max</option>
+            </select></label
+          ><button id="probe">排队兼容性探测</button>
+        </details>
+        <details>
+          <summary>私有备份</summary>
+          <p>
+            仅在已授权非生产环境生成。ZIP包含教材和学习数据，不含登录凭据；下载后使用Safari分享菜单“存储到文件”。不要公开上传。旧包不含后续记录。
+          </p>
+          <button id="backup">生成并准备下载最新备份</button>
+          <p id="backup-info"></p>
+          <a href="/v2/model/backup/download" download>登录后下载私有ZIP</a>
+        </details>
+        <form id="command">
+          <label
+            >模型命令<input
+              id="text"
+              placeholder="/model help"
+              maxlength="100" /></label
+          ><button>执行</button>
+        </form>
+        <pre id="help"></pre>
+      </section>
+    </main>
+    <script src="/static/model.js" defer></script>
+  </body>
+</html>
