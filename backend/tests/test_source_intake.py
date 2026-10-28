@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from pypdf import PdfWriter
+from migrate import SQL_DIR
 
 from app import sources, source_files as files, source_intake as intake, exams, quiz_v2
 
@@ -728,7 +729,7 @@ def test_migration_010_preserves_existing_verified_single_source(raw_db, tmp_pat
     apply_migrations(raw_db)
     assert (
         raw_db.execute("SELECT COUNT(*) AS n FROM schema_migrations").fetchone()["n"]
-        == 20
+        == len(list(SQL_DIR.glob("*.sql")))
     )
 
 

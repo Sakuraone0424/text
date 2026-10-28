@@ -54,10 +54,12 @@ def enqueue(conn, user_id, key, kind, payload):
     return inserted if inserted else enqueue(conn, user_id, key, kind, payload)
 
 
-def claim(conn, scope_id=None):
+def claim(conn, scope_id=None, scope_kind="limited_trial"):
+    if scope_kind not in ("limited_trial", "review_campaign"):
+        raise ValueError("unknown_execution_scope")
     # Expired leases are never concurrently finalized: every attempt has a new fence.
     scope_filter = (
-        " AND settings_snapshot->'limited_trial'->>'scope_id'=%s" if scope_id else ""
+        " AND settings_snapshot->'" + scope_kind + "'->>'scope_id'=%s" if scope_id else ""
     )
     expired = conn.execute(
         "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp()"
@@ -109,10 +111,10 @@ def claim(conn, scope_id=None):
         reason = "verified_cny_price_required"
     totals = cny_billing.totals(conn, uid)
     if (
-        totals["day"] + amount > live["daily_cny"]
-        or totals["month"] + amount > live["monthly_cny"]
+        (live.get("daily_limit_enabled", True) and totals["day"] + amount > live["daily_cny"])
+        or (live.get("monthly_limit_enabled", True) and totals["month"] + amount > live["monthly_cny"])
         or (live["trial_active"] and totals["trial"] + amount > live["trial_cny"])
-        or job["reserved_cny"] + amount > live["task_cny"]
+        or (live.get("task_limit_enabled", True) and job["reserved_cny"] + amount > live["task_cny"])
     ):
         reason = "budget_exceeded"
     if s.get("billing_currency") != "CNY":
@@ -120,6 +122,9 @@ def claim(conn, scope_id=None):
     from app.limited_trial import claim_reason
 
     trial_reason = claim_reason(conn, job, amount)
+    if "review_campaign" in s:
+        from app.review_campaign import claim_reason as campaign_reason
+        trial_reason = campaign_reason(conn, job)
     if trial_reason in ("trial_call_in_flight", "trial_waiting_for_validation"):
         return None
     reason = reason or trial_reason
@@ -130,8 +135,8 @@ def claim(conn, scope_id=None):
         )
         return None
     claimed = conn.execute(
-        "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_until=clock_timestamp()+interval '180 seconds',started_at=clock_timestamp() WHERE id=%s RETURNING *",
-        (amount, str(uuid4()), job["id"]),
+        "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_until=clock_timestamp()+%s*interval '1 second',started_at=clock_timestamp() WHERE id=%s RETURNING *",
+        (amount, str(uuid4()), 600 if "review_campaign" in s else 180, job["id"]),
     ).fetchone()
     conn.execute(
         "INSERT INTO ai_cny_reservations(job_id,attempt,amount_cny,price_snapshot) VALUES(%s,%s,%s,%s)",
@@ -146,10 +151,12 @@ def finish(conn, job, result=None, error=None):
     ).fetchone()
     if locked["state"] != "running" or locked["lease_token"] != job["lease_token"]:
         raise ValueError("stale_lease")
-    if result is not None and len(json.dumps(result).encode()) > 131072:
+    if result is not None and len(json.dumps(result).encode()) > (
+        1048576 if "review_campaign" in locked["settings_snapshot"] else 131072
+    ):
         raise ValueError("oversized_result")
     if (
-        locked["settings_snapshot"].get("limited_trial")
+        (locked["settings_snapshot"].get("limited_trial") or locked["settings_snapshot"].get("review_campaign"))
         and result
         and result.get("real_api") is True
         and result.get("returned_model_id") != locked["settings_snapshot"]["model_id"]
@@ -213,9 +220,9 @@ def finish(conn, job, result=None, error=None):
     return state
 
 
-def run_once(get_db, executor, scope_id=None):
+def run_once(get_db, executor, scope_id=None, scope_kind="limited_trial"):
     with get_db() as c:
-        job = claim(c, scope_id=scope_id)
+        job = claim(c, scope_id=scope_id, scope_kind=scope_kind)
     if not job:
         return False
     try:

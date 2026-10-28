@@ -168,6 +168,9 @@ def claim_reason(conn, job, amount):
 
 
 def execution_guard(job):
+    if "review_campaign" in job["settings_snapshot"]:
+        from app.review_campaign import execution_guard as campaign_guard
+        return campaign_guard(job)
     guard, _ = check_job(job)
     if job["state"] != "running" or job["attempts"] != 1:
         raise ValueError("trial_committed_single_attempt_required")
@@ -178,7 +181,7 @@ def execution_guard(job):
     )
 
 
-def wire_guard(payload, system_sha, effort="high"):
+def wire_guard(payload, system_sha, effort="high", token_limit=4096):
     """Validate the actual SDK body before the sole official HTTP request."""
     from app.harness_runner import build_prompt
 
@@ -198,7 +201,7 @@ def wire_guard(payload, system_sha, effort="high"):
         if (
             set(body) - allowed
             or body.get("model") != "deepseek-flash"
-            or body.get("max_tokens") != 4096
+            or body.get("max_tokens") != token_limit
             or body.get("stream") is not True
         ):
             raise ValueError("unapproved_wire_parameters")

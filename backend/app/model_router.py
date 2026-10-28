@@ -165,6 +165,9 @@ def configure(conn, user_id, model, effort, **options):
         "retry_limit",
         "max_concurrency",
         "stopped",
+        "task_limit_enabled",
+        "daily_limit_enabled",
+        "monthly_limit_enabled",
     }
     if set(options) - allowed:
         raise ValueError("unknown_setting")

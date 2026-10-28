@@ -10,7 +10,7 @@ import httpx
 
 
 @contextmanager
-def relay(model, token_limit, request_guard=None, evidence_dir=None):
+def relay(model, token_limit, request_guard=None, evidence_dir=None, request_timeout=120):
     state = {
         "requests": 0,
         "usage": {},
@@ -74,7 +74,7 @@ def relay(model, token_limit, request_guard=None, evidence_dir=None):
                     private_write(directory / "request.json", wire)
                     fd = os.open(directory / "response.sse", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                     response_file = os.fdopen(fd, "wb")
-                with httpx.Client(timeout=120, follow_redirects=False) as client:
+                with httpx.Client(timeout=request_timeout, follow_redirects=False) as client:
                     with client.stream(
                         "POST",
                         "https://api.deepseek.com/anthropic/v1/messages",
@@ -89,7 +89,7 @@ def relay(model, token_limit, request_guard=None, evidence_dir=None):
                         total = 0
                         for chunk in response.iter_bytes():
                             total += len(chunk)
-                            if total > 2 * 1024**2:
+                            if total > (8 if token_limit > 4096 else 2) * 1024**2:
                                 raise ValueError("response_too_large")
                             chunks.append(chunk)
                             if response_file is not None:

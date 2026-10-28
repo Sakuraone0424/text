@@ -10,9 +10,11 @@ from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
 
-def dispatch_completed(conn, scope_id=None):
+def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
+    if scope_kind not in ("limited_trial", "review_campaign"):
+        raise ValueError("unknown_execution_scope")
     scope_filter = (
-        " AND settings_snapshot->'limited_trial'->>'scope_id'=%s" if scope_id else ""
+        " AND settings_snapshot->'" + scope_kind + "'->>'scope_id'=%s" if scope_id else ""
     )
     rows = conn.execute(
         "SELECT * FROM ai_jobs WHERE state='succeeded' AND dispatched_at IS NULL"

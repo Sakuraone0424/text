@@ -8,7 +8,8 @@ import pytest
 
 
 @pytest.mark.parametrize("effort", ["off", "low", "high", "max"])
-def test_official_sdk_wire_tools_and_extra_uploads(tmp_path, effort):
+@pytest.mark.parametrize("max_tokens", [128, 32768])
+def test_official_sdk_wire_tools_and_extra_uploads(tmp_path, effort, max_tokens):
     from deepseek_harness import DeepSeekHarness
 
     bodies = []
@@ -71,7 +72,7 @@ def test_official_sdk_wire_tools_and_extra_uploads(tmp_path, effort):
             provider="deepseek-official",
             model="deepseek-flash",
             reasoning_effort=effort,
-            max_tokens=128,
+            max_tokens=max_tokens,
             api_key="synthetic-local-only-key",
             base_url=f"http://127.0.0.1:{server.server_port}",
             request_timeout_seconds=15,
@@ -85,6 +86,7 @@ def test_official_sdk_wire_tools_and_extra_uploads(tmp_path, effort):
             assert result.finish_reason == "completed"
         assert len(bodies) == 1
         body = bodies[0]
+        assert body["max_tokens"] == max_tokens
         assert body["thinking"] == {
             "type": "disabled" if effort == "off" else "enabled"
         }

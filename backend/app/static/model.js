@@ -51,7 +51,7 @@ async function load() {
   data = await api("/v2/model");
   const bill = await api("/v2/model/billing");
   $("billing").textContent =
-    `CNY · 今日usage估算 ¥${bill.usage_estimate_cny.day} · 本月usage估算 ¥${bill.usage_estimate_cny.month} · 今日剩余预算 ¥${bill.remaining_daily_cny} · 本月剩余预算 ¥${bill.remaining_monthly_cny} · 累计预留 ¥${bill.reserved_cny.trial} · 未知待对账预留 ¥${bill.unknown_reserved_cny} · 调用尝试 ${bill.call_attempts} · 当前时段 ${bill.period} · Search/Fetch 禁用 · 官方账单 ${bill.invoice_status}`;
+    `CNY · 今日usage估算 ¥${bill.usage_estimate_cny.day} · 本月usage估算 ¥${bill.usage_estimate_cny.month} · 今日剩余预算 ¥${bill.remaining_daily_cny ?? "未设上限"} · 本月剩余预算 ¥${bill.remaining_monthly_cny ?? "未设上限"} · 累计预留 ¥${bill.reserved_cny.trial} · 未知待对账预留 ¥${bill.unknown_reserved_cny} · 调用尝试 ${bill.call_attempts} · 当前时段 ${bill.period} · Search/Fetch 禁用 · 官方账单 ${bill.invoice_status}`;
   $("billing-history").textContent = JSON.stringify(
     {
       price: bill.price,
@@ -65,6 +65,7 @@ async function load() {
   $("task-budget").value = data.settings.task_cny;
   $("trial-budget").value = data.settings.trial_cny;
   $("trial-active").checked = data.settings.trial_active;
+  for (const k of ["task", "daily", "monthly"]) $(k + "-limit-enabled").checked = data.settings[k + "_limit_enabled"] !== false;
   $("login").hidden = true;
   $("controls").hidden = false;
   $("model").replaceChildren();
@@ -108,6 +109,9 @@ $("save").onclick = async () => {
       auto_discover: $("discover").checked,
       auto_upgrade: $("upgrade").checked,
       stopped: $("stopped").checked,
+      task_limit_enabled: $("task-limit-enabled").checked,
+      daily_limit_enabled: $("daily-limit-enabled").checked,
+      monthly_limit_enabled: $("monthly-limit-enabled").checked,
       daily_cny: $("daily").value,
       monthly_cny: $("monthly").value,
     });
@@ -153,6 +157,9 @@ $("limits").onclick = async () => {
       token_limit: Number($("token-limit").value),
       retry_limit: Number($("retry-limit").value),
       max_concurrency: Number($("max-concurrency").value),
+      task_limit_enabled: $("task-limit-enabled").checked,
+      daily_limit_enabled: $("daily-limit-enabled").checked,
+      monthly_limit_enabled: $("monthly-limit-enabled").checked,
       daily_cny: $("daily").value,
       monthly_cny: $("monthly").value,
       stopped: $("stopped").checked,

@@ -208,7 +208,7 @@ def source_views(q, refs, style):
     return evidence_view, style_view
 
 
-def review_payload(phase, qid, checksum, q, refs, style):
+def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
     """Pure material preparation, identical for offline inspection and new tasks."""
     if phase not in ("science", "answer"):
         raise ValueError("Unknown quality phase")
@@ -243,7 +243,44 @@ def review_payload(phase, qid, checksum, q, refs, style):
             "transcription style provenance is independently checked in science round. "
             "Do not infer official original-paper or official-answer verification."
         )
+    if contract_version in (2, 3):
+        if phase == "answer":
+            payload["question"]["accepted_answers"] = q.get("accepted_answers", [])
+        payload["instructions"] += (
+            " Output contract: mapping_evidence must have EXACTLY the strings in "
+            "question.knowledge_tags as its keys, never option letters, rubric labels or "
+            "new topic names. Each value must be a nonempty list of supplied textbook "
+            "evidence unit_id integers supporting that knowledge tag. risk_resolutions "
+            "must contain a separate key '<unit_id>:<quality_flag>' for EVERY quality_flags "
+            "entry in supplied evidence and style. Each resolution needs at least 30 "
+            "characters of evidence-specific explanation; if a risk cannot actually be "
+            "resolved, set passed=false and list it in unresolved instead of inventing "
+            "a resolution. Claims may cite only exact substrings of the supplied textbook "
+            "evidence text, not style text or unavailable source context. In science "
+            "round leave criterion_indices empty; in answer round evidence-backed "
+            "criterion_indices must collectively cover every supplied rubric index "
+            "starting from zero. Return a complete Finding object, all five check keys, "
+            "and only JSON without Markdown. Keep uncertainty and independent reasoning."
+        )
+        if contract_version == 3:
+            payload["instructions"] += (
+                " Boolean polarity: EVERY checks value is a PASS flag. In particular "
+                "duplication=true means the question PASSES the no-duplication check; "
+                "it does NOT mean that duplication exists. scientific_correctness=true "
+                "means scientifically correct, uniqueness=true means unambiguous, "
+                "exam_style=true and type_fit=true mean those requirements pass. "
+                "Set passed=true only when ALL five checks are true and unresolved is "
+                "empty. If any requirement fails or cannot be verified, leave its check "
+                "false, passed=false, and explain the actual issue without guessing."
+            )
+    elif contract_version != 1:
+        raise ValueError("unknown_review_output_contract")
     return payload
+
+
+def job_contract_version(job):
+    policy = job["settings_snapshot"].get("review_campaign", {}).get("policy", {})
+    return policy.get("contract_version", 1)
 
 
 def schedule_checks(conn, uid, qid):
@@ -289,7 +326,7 @@ def accept_round(conn, job):
     q, refs, style = evidence(conn, qid)
     if content_sha(q) != p["content_sha256"]:
         raise ValueError("question_version_changed")
-    if p != review_payload(p["phase"], qid, content_sha(q), q, refs, style):
+    if p != review_payload(p["phase"], qid, content_sha(q), q, refs, style, job_contract_version(job)):
         raise ValueError("evidence_version_changed")
     finding = Finding.model_validate(job["result"]["response"])
     bound = {u["unit_id"]: u for u in refs}
@@ -415,7 +452,7 @@ def ready(conn, qid):
             or job["payload"].get("content_sha256") != row["content_sha256"]
             or job["payload"]
             != review_payload(
-                event["phase"], qid, row["content_sha256"], q, refs, style
+                event["phase"], qid, row["content_sha256"], q, refs, style, job_contract_version(job)
             )
         ):
             return False

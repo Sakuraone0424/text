@@ -65,6 +65,8 @@
           </details>
         </section>
         <label
+          ><input id="task-limit-enabled" type="checkbox" />启用单任务费用额度</label>
+        <label
           >单任务（含重试）预算 ¥<input
             id="task-budget"
             type="number"
@@ -76,7 +78,7 @@
           ><input
             id="trial-active"
             type="checkbox"
-          />启用首次试验累计限额（完成试验后可明确关闭；日/月/单任务限额仍生效）</label
+          />启用自定义累计试验限额（关闭不删除历史预留）</label
         >
         <label
           >首次试验累计预算 ¥<input
@@ -87,13 +89,15 @@
             step="0.01"
         /></label>
         <label
+          ><input id="daily-limit-enabled" type="checkbox" />启用每日费用额度</label>
+        <label
           >每日人民币预算<input
             id="daily"
             type="number"
             min="0"
             max="1000"
             step="0.01" /></label
-        ><label
+        ><label><input id="monthly-limit-enabled" type="checkbox" />启用每月费用额度</label><label
           >每月人民币预算<input
             id="monthly"
             type="number"
@@ -125,7 +129,7 @@
             >最大并发<input id="max-concurrency" type="number" min="1" max="4"
           /></label>
           <p>
-            推理超时120秒，进程上限150秒。每次尝试只允许一次官方推理请求；费用未知的失败保留预算预留。
+            关闭自定义费用额度仍受已授权任务清单、并发、超时和异常停止保护。限定正式审核请求超时360秒、进程上限420秒；每次尝试只允许一次官方请求，未知费用保留预留并暂停。
           </p>
         </details>
         <button id="limits">保存预算与停止开关</button

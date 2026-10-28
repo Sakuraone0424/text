@@ -55,6 +55,9 @@ class Selection(StrictModel):
     stopped: StrictBool = True
     daily_cny: Decimal = Field(default=0, ge=0, le=1000, allow_inf_nan=False)
     monthly_cny: Decimal = Field(default=0, ge=0, le=10000, allow_inf_nan=False)
+    task_limit_enabled: StrictBool = True
+    daily_limit_enabled: StrictBool = True
+    monthly_limit_enabled: StrictBool = True
 
 
 def origin(request):
@@ -135,6 +138,9 @@ class Limits(StrictModel):
     task_cny: Decimal = Field(default=0, ge=0, le=1000, allow_inf_nan=False)
     trial_cny: Decimal = Field(default=0, ge=0, le=10000, allow_inf_nan=False)
     stopped: StrictBool = True
+    task_limit_enabled: StrictBool = True
+    daily_limit_enabled: StrictBool = True
+    monthly_limit_enabled: StrictBool = True
 
 
 @router.post("/limits")
@@ -144,7 +150,7 @@ def limits(data: Limits, request: Request, name=Depends(require_auth)):
     def save(c, u):
         models.settings(c, u)
         c.execute(
-            "UPDATE ai_settings SET daily_cny=%s,monthly_cny=%s,task_cny=%s,trial_cny=%s,trial_active=%s,stopped=%s,token_limit=%s,retry_limit=%s,max_concurrency=%s WHERE user_id=%s",
+            "UPDATE ai_settings SET daily_cny=%s,monthly_cny=%s,task_cny=%s,trial_cny=%s,trial_active=%s,stopped=%s,token_limit=%s,retry_limit=%s,max_concurrency=%s,task_limit_enabled=%s,daily_limit_enabled=%s,monthly_limit_enabled=%s WHERE user_id=%s",
             (
                 data.daily_cny,
                 data.monthly_cny,
@@ -155,6 +161,9 @@ def limits(data: Limits, request: Request, name=Depends(require_auth)):
                 data.token_limit,
                 data.retry_limit,
                 data.max_concurrency,
+                data.task_limit_enabled,
+                data.daily_limit_enabled,
+                data.monthly_limit_enabled,
                 u,
             ),
         )
