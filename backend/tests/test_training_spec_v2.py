@@ -98,3 +98,15 @@ def test_v1_is_unmodified_and_v2_never_regrades_it():
     assert v1["points_by_type"]["short_answer"] == 8
     with pytest.raises(ValueError):
         v2.validate_items([{"subject": "biochemistry"}] * 28)
+
+
+def test_forward_only_position_migration_allows_60_slots(db):
+    row = db.execute(
+        "SELECT pg_get_constraintdef(oid) AS definition "
+        "FROM pg_constraint WHERE conrelid='paper_items_v2'::regclass "
+        "AND conname='paper_items_v2_position_check'"
+    ).fetchone()
+    assert row and '60' in row['definition']
+    assert '1' in row['definition']
+    # A schema expansion is not permission to change old question snapshots.
+    assert legacy.formal_specification()['questions'] == 28
