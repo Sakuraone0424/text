@@ -588,6 +588,13 @@ def result(conn, user_id, paper_id):
                 "question_type": r["snapshot"]["question_type"],
                 "max_points": r["snapshot"]["max_points"],
                 "solution": r["snapshot"]["answer"],
+                "options": r["snapshot"].get("options", {}),
+                "solution_display": (
+                    f'{r["snapshot"]["answer"]}. {r["snapshot"]["options"][r["snapshot"]["answer"]]}'
+                    if r["snapshot"]["question_type"] == "single_choice"
+                    and r["snapshot"]["answer"] in r["snapshot"].get("options", {})
+                    else r["snapshot"]["answer"]
+                ),
                 "evidence": r["snapshot"]["evidence"],
                 "rubric": r["snapshot"]["rubric"],
             }
