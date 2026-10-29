@@ -37,7 +37,7 @@ def try_queue(conn, user_id, paper_id):
             jobs = auto_grading.schedule(conn, user_id, paper_id)
     except (LookupError, ValueError, KeyError) as exc:
         return {"queued": False, "reason": type(exc).__name__}
-    return {"queued": True, "jobs": len(jobs)}
+    return {"queued": bool(jobs), "jobs": len(jobs), "reason": None if jobs else "no_eligible_text_answers"}
 
 
 def progress(conn, user_id, paper_id):
@@ -71,13 +71,24 @@ def progress(conn, user_id, paper_id):
         job = recent.get(str(row["question_id"]))
         if row["points"] is None:
             pending += 1
+        # Images remain pending until a VERIFIED vision pipeline has transcribed
+        # and independently checked them. Never fabricate recognition or score.
+        import json
+        try:
+            answer_data = json.loads(row["answer"])
+        except (ValueError, TypeError):
+            answer_data = {}
+        photo_pending = bool(
+            row["points"] is None and isinstance(answer_data, dict)
+            and answer_data.get("image_ids") and job is None
+        )
         # No answer text, handwritten image bytes, private prompt or raw logs.
         questions.append({
             "position": row["position"],
             "question_id": row["question_id"],
             "question_type": row["question_type"],
             "state": "graded" if row["points"] is not None else (
-                (job["state"] if job else "pending_manual_or_queue")
+                (job["state"] if job else "vision_pipeline_unavailable" if photo_pending else "pending_automatic_queue")
             ),
             "points": row["points"],
             "reviewer_kind": (
@@ -85,7 +96,9 @@ def progress(conn, user_id, paper_id):
                 else "manual_or_rule" if row["graded_by"] else None
             ),
             "attempts": job["attempts"] if job else 0,
-            "error_code": job["error_code"] if job else None,
+            "error_code": job["error_code"] if job else (
+                "verified_handwriting_recognition_required" if photo_pending else None
+            ),
         })
     return {
         "paper_id": paper_id,
