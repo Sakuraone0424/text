@@ -1,4 +1,8 @@
-"""Versioned transcription parsing; candidate counts are never original-exam verification."""
+"""Parse the user-designated genuine past-exam files into candidate questions.
+
+Preserve supplied wording, year and type; parser uncertainty concerns boundaries,
+OCR/images and answer support, not whether the supplied exams are real.
+"""
 
 import re
 
@@ -150,7 +154,6 @@ def candidates(units, item):
         if role == "question_start":
             parent = uid
         concerns = [
-            "transcription_not_original_exam_verified",
             *unit.get("quality_flags", []),
         ]
         if year is None:
@@ -158,13 +161,13 @@ def candidates(units, item):
         if qtype is None:
             concerns.append("question_type_unknown")
         elif qtype not in FORMAL_TYPES:
-            concerns.append("type_requires_manual_adaptation")
+            concerns.append("type_requires_automatic_mapping")
         if role == "unassigned":
             concerns.append("question_boundary_unconfirmed")
         if role == "continuation":
             concerns.append("continuation_not_separate_question")
         if role == "answer":
-            concerns.append("answer_source_and_correctness_unverified")
+            concerns.append("answer_requires_independent_textbook_check")
         yield {
             "unit_id": uid,
             "year": year,
