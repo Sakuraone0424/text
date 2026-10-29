@@ -53,13 +53,29 @@ def plan(conn, uid):
                     "SELECT 1 FROM ai_jobs WHERE job_key=%s", (key,)
                 ).fetchone():
                     continue
+                # Bootstrap directly from the user's genuine past-exam
+                # transcript, rather than requiring an earlier hand-created
+                # candidate packet. Question boundaries must be recognized and
+                # text/image risks resolved before using an item as style.
                 style = conn.execute(
-                    "SELECT (s.value->>'unit_id')::bigint AS id FROM candidate_review_packets p CROSS JOIN LATERAL jsonb_array_elements(p.style_snapshot) s WHERE p.question_snapshot->>'subject'=%s AND p.question_snapshot->>'question_type'=%s ORDER BY p.question_id LIMIT 1",
+                    "SELECT t.unit_id AS id,t.year FROM exam_transcript_candidates t "
+                    "JOIN source_documents d ON d.id=t.document_id "
+                    "JOIN source_units su ON su.id=t.unit_id "
+                    "WHERE " + current_source_sql("d", kind="exam_transcription") +
+                    " AND d.subject=%s AND t.question_type=%s "
+                    "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
+                    "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent']) "
+                    "ORDER BY t.year DESC,t.id LIMIT 1",
                     (subject, kind),
                 ).fetchone()
                 if not style:
                     continue
                 s = snapshot_unit(conn, style["id"])
+                if (s["source_kind"] != "exam_transcription" or
+                    set(s["quality_flags"]) & {
+                        "corrupt_ocr", "untranscribed_image", "image_dependent"
+                    }):
+                    continue
                 enqueue(
                     conn,
                     uid,
@@ -71,6 +87,7 @@ def plan(conn, uid):
                         max_points=POINTS[kind],
                         evidence=[u],
                         style=[s],
+                        style_year=style["year"],
                         source_bibliography=dict(
                             file_id=u["file_id"],
                             textbook=FILES[u["file_id"]]["filename"],
@@ -118,8 +135,8 @@ def accept(conn, job):
         style_sources=[
             dict(
                 unit_id=u["unit_id"],
-                year=None,
-                relationship="Transcription style candidate requires independent AI scope/type review",
+                year=p["style_year"],
+                relationship="Exact user-provided genuine past-exam style anchor; independent scientific and answer review required",
             )
             for u in p["style"]
         ],
