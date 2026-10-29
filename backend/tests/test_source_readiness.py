@@ -77,5 +77,8 @@ def test_docx_embedded_image_is_counted_but_not_approved_as_transcribed(db, tmp_
     sources.import_source(db, path, metadata)
     row = next(x for x in audit(db)["files"] if x["key"] == "biochemistry_exams")
     assert row["embedded_media_objects"] >= 1
+    assert row["embedded_media_referenced_objects"] >= 1
+    assert row["embedded_media_unanchored_objects"] == []
+    assert row["embedded_media_formats"]["png"] >= 1
     assert row["embedded_media_review_status"] == "embedded_media_not_independently_transcribed"
     assert row["past_exam_source_status"] == "user_designated_genuine_past_exam"
