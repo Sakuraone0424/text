@@ -48,7 +48,8 @@ def preflight(directory, *, lock_path=LOCK):
             from app.source_bibliography import from_locked_cover
 
             book = from_locked_cover(
-                ident, digest, data[:16000].decode("utf-8", errors="ignore")
+                ident, digest, data[:16000].decode("utf-8", errors="ignore"),
+                expected_sha256=locked_item["sha256"],
             )
             metadata["authors"] = book["authors"]
             metadata["edition"] = book["edition"]
