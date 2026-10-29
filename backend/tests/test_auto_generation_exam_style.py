@@ -28,6 +28,7 @@ def test_explicit_docx_fidelity_does_not_invent_missing_exam_question_types(db, 
         "2025年中国科学技术大学细胞生物学真题",
         "名词解释",
         "1. Synthetic cell-biology definition",
+        "2026年中国科学技术大学细胞生物学真题",
     ])
     sources.import_source(db, path, metadata)
     result = select_exam_style(db, "cell_biology", "term")
@@ -43,6 +44,7 @@ def test_style_example_prefers_same_actual_topic_without_inferring_scientific_an
         "2024年中国科学技术大学生物化学真题",
         "单项选择题",
         "1. Synthetic SRP-associated targeting example",
+        "2025年中国科学技术大学生物化学真题",
     ])
     sources.import_source(db, path, metadata)
     latest = select_exam_style(db, "biochemistry", "single_choice")
@@ -65,6 +67,7 @@ def test_separate_untranscribed_figure_is_excluded_from_generation_style(db, tmp
         "单项选择题",
         "1. Examine the synthetic diagram below",
         "2. Complete self-contained synthetic text question",
+        "2026年中国科学技术大学生物化学真题",
     ])
     image = tmp_path / "synthetic-exam-figure.png"
     Image.new("RGB", (10, 10), "white").save(image)
@@ -98,6 +101,7 @@ def test_critical_following_docx_table_blocks_parent_style_question(db, tmp_path
         "单项选择题",
         "1. Interpret the synthetic results in the following table",
         "2. Self-contained synthetic choice question",
+        "2026年中国科学技术大学生物化学真题",
     ])
     doc = Document(path)
     table = doc.add_table(rows=1, cols=1)
