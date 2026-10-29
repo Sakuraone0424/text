@@ -41,6 +41,9 @@ def test_synthetic_textbook_source_report_has_real_hash_and_page_checks(db, tmp_
     assert book["mapped_chapter_ocr_pages"] == 385
     assert book["chapter_unmapped_ocr_pages"] == []
     assert book["chapter_unmapped_ocr_page_count"] == 0
+    assert book["chapter_first_mapped_ocr_page"] == 1
+    assert book["chapter_unmapped_before_body"] == []
+    assert book["chapter_unmapped_at_or_after_body"] == []
     assert book["chapter_mapping_scientifically_verified"] is False
     assert book["printed_original_verified"] is False
     assert report["complete_for_generation"] is False
