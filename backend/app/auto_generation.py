@@ -149,6 +149,19 @@ def accept(conn, job):
     if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
         raise ValueError("actual_generation_call_required")
     p = job["payload"]
+    # Revalidate the *source bytes* when a queued model result returns, not
+    # only when the job was scheduled. Old pending work must not resurrect
+    # an unpinned textbook or genuine-exam style revision.
+    if (
+        not p.get("evidence")
+        or not p.get("style")
+        or any(
+            not pinned_source_bytes(unit.get("file_id"), unit.get("source_sha256"))
+            for group in ("evidence", "style")
+            for unit in p[group]
+        )
+    ):
+        raise ValueError("generation_source_not_in_locked_six_file_collection")
     q = Question.model_validate(job["result"]["response"]["question"])
     if (q.subject, q.question_type, q.max_points) != (
         p["subject"],
