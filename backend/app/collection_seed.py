@@ -115,12 +115,22 @@ def safe_report(items):
     }
 
 
-def import_isolated(items, schema, target, report_path):
+def import_isolated(items, schema, target, report_path, *, initialize_schema=False):
     if os.environ.get("RAILWAY_ENVIRONMENT_NAME", "").lower() == "production":
         raise ValueError("Cannot import sources from a production Railway runtime")
     # This function never calls init() or migrations and never invents tables.
     # All six sources and the private report must commit in one transaction.
-    with isolated_db(schema, target) as conn:
+    with isolated_db(
+        schema, target, **({"create": True} if initialize_schema else {})
+    ) as conn:
+        if initialize_schema:
+            # Fresh physical QA PostgreSQL only: schema creation, all additive
+            # migrations and six-document import must commit atomically.
+            # CREATE SCHEMA without IF NOT EXISTS fails if this schema already
+            # exists; never overwrite a previous QA or production bank.
+            from migrate import apply_migrations
+
+            apply_migrations(conn)
         results = []
         for item in items:
             document_id = sources.import_source(
@@ -151,7 +161,9 @@ def import_isolated(items, schema, target, report_path):
             raise ValueError("The six-file database audit failed; transaction rolled back")
         final = {
             **safe_report(items), "status": "committed_to_isolated_schema",
-            "schema": schema, "target": target, "imported": results,
+            "schema": schema, "target": target,
+            "schema_initialized_in_same_transaction": initialize_schema,
+            "imported": results,
             "database_integrity": {
                 "imported_files": db_report["imported_files"],
                 "integrity_passed_files": db_report["integrity_passed_files"],
@@ -190,14 +202,20 @@ def main(argv=None):
     parser.add_argument("--directory", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--write-isolated", action="store_true")
+    parser.add_argument("--initialize-schema", action="store_true")
     parser.add_argument("--schema")
     parser.add_argument("--target", choices=("development", "staging"), default="staging")
     args = parser.parse_args(argv)
     if args.write_isolated and not args.schema:
         parser.error("--schema source_staging_* is required when writing")
+    if args.initialize_schema and (not args.write_isolated or args.target != "staging"):
+        parser.error("--initialize-schema requires --write-isolated --target staging")
     items = preflight(args.directory)
     if args.write_isolated:
-        result = import_isolated(items, args.schema, args.target, args.report)
+        result = import_isolated(
+            items, args.schema, args.target, args.report,
+            initialize_schema=args.initialize_schema
+        )
     else:
         result = {**safe_report(items), "status": "preflight_passed_no_database_write"}
         private_json(args.report, result)
