@@ -1,5 +1,5 @@
 "use strict";
-const CACHE = "xiaohan-training-shell-v8-offline-recovery-upgrade";
+const CACHE = "xiaohan-training-shell-v9-sixty-question-upgrade";
 const ASSETS = [
   "/",
   "/training",
