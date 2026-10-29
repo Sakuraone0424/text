@@ -22,6 +22,14 @@ from app.source_intake import private_json
 REFUSE = STYLE_SOURCE_BLOCKERS | BOUNDARY_ISSUES
 GENERIC = {"生物化学", "细胞生物学", "蛋白质", "核酸", "细胞", "生物", "基础",
            "第一章", "引言", "概论", "复习题", "习题", "研究方法", "概述"}
+# Very frequent molecules by themselves are weak chapter/topic discriminators.
+# For example, a DNA question must not automatically map to *every* chapter
+# whose title contains DNA. Their detailed mechanism can still be checked
+# against textbook paragraphs in the later evidence review.
+WEAK_ACRONYMS = frozenset({
+    "DNA", "RNA", "ATP", "ADP", "AMP", "GTP", "GDP", "NAD", "NADH",
+    "MRNA", "TRNA", "RRNA",
+})
 
 
 def normalized(value):
@@ -51,7 +59,7 @@ def science_terms(heading):
             terms.append(part)
         # Exact scientific acronyms, not broad English keywords.
         for acronym in re.findall(r"(?<![A-Za-z])[A-Z][A-Z0-9-]{2,15}(?![A-Za-z])", part):
-            if acronym not in {"TEST", "ONLY"}:
+            if acronym not in WEAK_ACRONYMS | {"TEST", "ONLY"}:
                 terms.append(acronym)
     return sorted(set(terms))
 
