@@ -35,7 +35,7 @@ def test_offline_private_index_uses_all_six_and_verifies_after_commit(tmp_path):
             "SELECT count(*) FROM units WHERE scientifically_approved != 0"
         ).fetchone()[0] == 0
         assert conn.execute(
-            "SELECT count(*) FROM fulltext WHERE fulltext MATCH 'synthetic'"
+            "SELECT count(*) FROM fulltext WHERE fulltext MATCH '生物化学'"
         ).fetchone()[0] > 0
     metadata = json.dumps(report, ensure_ascii=False)
     assert "Synthetic evidence paragraph" not in metadata
@@ -70,7 +70,7 @@ def test_original_source_book_flags_remain_pending_not_scientifically_approved(
     item = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_notes")
     target = root / item["relative_path"]
     target.write_text(target.read_text(encoding="utf-8").replace(
-        "Synthetic evidence paragraph 1", "过氧化物酶体定位需参考原图 ATP"
+        "===== page-001 =====", "===== page-001 =====\\n过氧化物酶体定位需参考原图 ATP", 1
     ), encoding="utf-8")
     manifest = json.loads(lock.read_text(encoding="utf-8"))
     raw = target.read_bytes()
@@ -85,6 +85,8 @@ def test_original_source_book_flags_remain_pending_not_scientifically_approved(
     assert results[0]["source_key"] == "biochemistry_notes"
     assert results[0]["ocr_page"] == 1
     assert "image_dependent" in json.loads(results[0]["risk_flags_json"])
-    with sqlite3.connect(f"file:{index}?mode=ro", uri=True) as conn:
+    with sqlite3.connect(index) as conn:
         with pytest.raises(sqlite3.IntegrityError):
-            conn.execute("UPDATE units SET scientifically_approved=1 LIMIT 1")
+            conn.execute(
+                "UPDATE units SET scientifically_approved=1 WHERE id=(SELECT id FROM units LIMIT 1)"
+            )
