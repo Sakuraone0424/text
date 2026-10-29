@@ -22,7 +22,7 @@ def test_offline_private_index_uses_all_six_and_verifies_after_commit(tmp_path):
     assert report["independent_ai_rounds_completed"] is False
     assert report["unit_count"] > 1915
     assert index.exists()
-    rows = search(index, "Synthetic evidence", limit=3)
+    rows = search(index, "生物化学", limit=3)
     assert len(rows) == 3
     assert all(x["ocr_page"] is not None and x["source_key"] for x in rows)
     with sqlite3.connect(f"file:{index}?mode=ro", uri=True) as conn:
