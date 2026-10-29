@@ -122,7 +122,7 @@ async def no_cache_headers(request, call_next):
 
 @app.get("/health")
 async def health():
-    return {"status": "online", "scope": "qa_only", "source_imported": False}
+    return {"status": "online", "scope": "qa_only", "source_import_state": "not_checked"}
 
 
 @app.get("/", response_class=HTMLResponse)
