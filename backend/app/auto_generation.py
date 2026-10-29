@@ -8,6 +8,8 @@ from app.exam_authoring import instructions as exam_instructions, issues as exam
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
 
+STARTUP_RESERVE_DAYS = 2  # 60 questions/day, 120 verified candidates per user
+
 
 def select_exam_style(conn, subject, kind):
     """Select a real supplied past-exam question without manual packet seeding.
@@ -51,7 +53,7 @@ def plan(conn, uid):
                 (subject, kind, str(POINTS[kind]), uid, uid),
             ).fetchall()
             count = sum(bool(ready(conn, row["id"])) for row in eligible)
-            if count >= required:
+            if count >= required * STARTUP_RESERVE_DAYS:
                 continue
             # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
             concepts = conn.execute(
