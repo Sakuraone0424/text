@@ -159,6 +159,14 @@ def question_verification(paper_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: report(c, u, paper_id), username)
 
 
+@router.get("/quality/six-source-readiness")
+def six_source_readiness(username: str = Depends(require_auth)):
+    """Read-only metadata of the six active sources; not a science attestation."""
+    from app.source_readiness import audit
+
+    return operation(lambda c, u: audit(c), username)
+
+
 @router.get("/quality/60q-bank-readiness")
 def sixty_question_bank_readiness(username: str = Depends(require_auth)):
     """Authenticated learner can inspect exact verified-inventory shortages.
