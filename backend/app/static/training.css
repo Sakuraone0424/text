@@ -1484,3 +1484,33 @@
 .training-app .question-card label {
   scroll-margin-bottom: calc(160px + env(safe-area-inset-bottom));
 }
+
+/* FSRS choices must remain legible and selectable before revealing the answer. */
+.training-app #learning article .review-choice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  margin: .55rem 0;
+  padding: .85rem 1rem;
+  border: 1px solid #d8dce5;
+  border-radius: .75rem;
+  background: #fff;
+  color: #1f2937;
+}
+.training-app #learning article .review-choice[aria-pressed="true"] {
+  border-color: #2563eb;
+  background: #eaf2ff;
+}
+.training-app #learning article .review-choice:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.training-app #learning article details { margin: .75rem 0; }
+.training-app #learning article blockquote {
+  margin: .5rem 0;
+  padding: .65rem .75rem;
+  border-left: 3px solid #b9c6d8;
+  white-space: pre-wrap;
+}
