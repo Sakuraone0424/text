@@ -19,7 +19,7 @@ def test_grading_activity_requires_submitted_owner(client, db, running, monkeypa
     assert progress["pending"] == 1
     assert progress["complete"] is False
     pending = next(r for r in progress["questions"] if r["question_id"] == term["id"])
-    assert pending["state"] == "pending_manual_or_queue"
+    assert pending["state"] == "pending_automatic_queue"
     assert pending["points"] is None
     assert progress["auto_queue_available"] is False
     assert "answer" not in pending and "payload" not in pending
