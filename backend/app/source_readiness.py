@@ -8,8 +8,6 @@ cover extracted text, figures, page markers and byte integrity.
 
 from collections import Counter
 from hashlib import sha256
-from io import BytesIO
-from zipfile import ZipFile, BadZipFile
 
 from app.source_policy import COLLECTION, FILES, current_source_sql
 from app.source_files import source_index_sha
@@ -99,6 +97,9 @@ def audit(conn):
             "exam_candidate_count": 0,
             "exam_candidate_years": [],
             "embedded_media_objects": None,
+            "embedded_media_referenced_objects": None,
+            "embedded_media_unanchored_objects": [],
+            "embedded_media_formats": {},
             "embedded_media_review_status": "not_applicable",
             "printed_original_verified": False,
             "past_exam_source_status": (
@@ -132,22 +133,27 @@ def audit(conn):
         )
         candidates = []
         media_count = None
+        media_referenced = None
+        media_unanchored = []
+        media_formats = {}
         media_state = "not_applicable"
         if item["kind"] == "exam_transcription" and version:
             candidates = conn.execute(
                 "SELECT year FROM exam_transcript_candidates WHERE document_id=%s",
                 (document["id"],),
             ).fetchall()
+            from app.exam_media_audit import audit_bytes
+
             try:
-                with ZipFile(BytesIO(bytes(version["source_content"]))) as z:
-                    media_count = sum(
-                        name.startswith("word/media/") and not name.endswith("/")
-                        for name in z.namelist()
-                    )
-            except (ValueError, BadZipFile):
-                issues.append("invalid_stored_docx_archive")
+                media_audit = audit_bytes(bytes(version["source_content"]))
+            except ValueError:
+                issues.append("invalid_stored_docx_archive_or_media_links")
                 media_state = "docx_invalid"
             else:
+                media_count = media_audit["media_objects"]
+                media_referenced = media_audit["referenced_media_objects"]
+                media_unanchored = media_audit["unreferenced_media_objects"]
+                media_formats = media_audit["media_formats"]
                 media_state = (
                     "embedded_media_not_independently_transcribed"
                     if media_count else "no_embedded_media"
@@ -165,6 +171,9 @@ def audit(conn):
             "exam_candidate_count": len(candidates),
             "exam_candidate_years": sorted({r["year"] for r in candidates if r["year"] is not None}),
             "embedded_media_objects": media_count,
+            "embedded_media_referenced_objects": media_referenced,
+            "embedded_media_unanchored_objects": media_unanchored,
+            "embedded_media_formats": media_formats,
             "embedded_media_review_status": media_state,
             "status": "integrity_passed_with_ocr_risks" if not issues and flagged else
                       "integrity_passed" if not issues else "integrity_failed",
