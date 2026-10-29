@@ -74,3 +74,48 @@ def test_missing_embedded_image_blob_is_rejected(tmp_path):
 def test_non_docx_is_rejected_without_guessing():
     with pytest.raises(ValueError, match="invalid_exam_docx_media_archive"):
         audit_bytes(b"not a Word archive")
+
+
+def test_word_hdphoto_extension_relationship_is_counted_as_embedded_image(tmp_path):
+    from xml.etree import ElementTree as ET
+
+    raw = synthetic_docx(tmp_path)
+    package_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+    word_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    rel_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    with ZipFile(BytesIO(raw)) as src:
+        rels = ET.fromstring(src.read("word/_rels/document.xml.rels"))
+        ET.SubElement(rels, f"{{{package_ns}}}Relationship", {
+            "Id": "rId999",
+            "Type": "http://schemas.microsoft.com/office/2007/relationships/hdphoto",
+            "Target": "media/hdphoto1.wdp",
+        })
+        body = ET.fromstring(src.read("word/document.xml"))
+        picture = next(
+            p for p in body.iter(f"{{{word_ns}}}p")
+            if any(x.tag.endswith("}drawing") for x in p.iter())
+        )
+        drawing = next(x for x in picture.iter() if x.tag.endswith("}drawing"))
+        ET.SubElement(
+            drawing,
+            "{http://schemas.microsoft.com/office/drawing/2010/main}imgLayer",
+            {f"{{{rel_ns}}}embed": "rId999"},
+        )
+    edits = {
+        "word/document.xml": ET.tostring(body),
+        "word/_rels/document.xml.rels": ET.tostring(rels),
+    }
+    output = BytesIO()
+    with ZipFile(BytesIO(raw)) as src, ZipFile(output, "w", ZIP_DEFLATED) as dst:
+        for member in src.infolist():
+            dst.writestr(
+                member, edits.get(member.filename, src.read(member.filename))
+            )
+        dst.writestr("word/media/hdphoto1.wdp", b"synthetic-hdphoto")
+    result = audit_bytes(output.getvalue())
+    assert result["media_objects"] == 2
+    assert result["referenced_media_objects"] == 2
+    assert result["unreferenced_media_objects"] == []
+    assert next(
+        image for image in result["media"] if image["format"] == "wdp"
+    )["paragraph_ordinals"]
