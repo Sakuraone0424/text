@@ -70,10 +70,9 @@ def test_separate_untranscribed_figure_is_excluded_from_generation_style(db, tmp
     Image.new("RGB", (10, 10), "white").save(image)
     document = Document(path)
     # Insert the image immediately after Q1, not within its own question stem.
-    paragraph = document.paragraphs[2].insert_paragraph_before("")
-    # Place paragraph after Q1 by moving the appended drawing element to this
-    # position. The original question text does not itself carry the image flag.
-    picture = document.add_picture(str(image))
+    # Move the newly appended drawing paragraph immediately after Q1.
+    # The original question text does not itself carry the image flag.
+    document.add_picture(str(image))
     image_paragraph = document.paragraphs[-1]
     document.paragraphs[2]._p.addnext(image_paragraph._p)
     document.save(path)
