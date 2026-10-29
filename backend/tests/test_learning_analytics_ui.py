@@ -1,6 +1,7 @@
 """Isolated PostgreSQL + actual HTTP/browser UI regressions. No production or model calls."""
 # ruff: noqa: F811
 import json
+import re
 import pytest
 from playwright.sync_api import expect
 from test_live_training import live_app, browser, login, open_question, confirm_submission  # noqa: F401
@@ -63,6 +64,7 @@ def test_chinese_composition_focus_and_multi_device_conflict(live_app, browser):
     client, _, blueprint = live_app
     page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
     login(page, str(client.base_url).rstrip("/")); page.locator("#start").click()
+    expect(page.locator("#questions article:visible")).to_have_count(1)
     pid = client.post("/v2/papers", json={"specification": "xiaohan-150-60-v1", "quotas": blueprint.quotas}).json()["paper_id"]
     paper = client.get(f"/v2/papers/{pid}").json()
     term = next(q for q in paper["questions"] if q["question_type"] == "term")
@@ -70,6 +72,11 @@ def test_chinese_composition_focus_and_multi_device_conflict(live_app, browser):
     field = page.locator(f'#questions article[data-id="{term["id"]}"] textarea')
     requests = []
     page.on("request", lambda request: requests.append(request.url) if request.method == "PUT" and "/drafts/" in request.url else None)
+    # A VisualViewport resize models keyboard occlusion; it is not a real iPhone keyboard.
+    page.evaluate("Object.defineProperty(visualViewport, 'height', {get: () => innerHeight-320, configurable:true}); visualViewport.dispatchEvent(new Event('resize'))")
+    expect(page.locator("body")).to_have_class(re.compile("keyboard-open"))
+    assert page.locator("#focus-actions").evaluate("node=>getComputedStyle(node).position") == "static"
+    field.scroll_into_view_if_needed()
     field.focus(); field.dispatch_event("compositionstart", {"data": ""}); field.fill("酶催化的必要条件")
     page.evaluate("refresh()")
     assert not requests
@@ -97,6 +104,7 @@ def test_pending_grade_custom_confirmation_and_truthful_chart(live_app, browser)
     client, _, blueprint = live_app
     page = browser.new_page(viewport={"width": 430, "height": 932}, is_mobile=True, has_touch=True)
     login(page, str(client.base_url).rstrip("/")); page.locator("#start").click()
+    expect(page.locator("#questions article:visible")).to_have_count(1)
     pid = client.post("/v2/papers", json={"specification": "xiaohan-150-60-v1", "quotas": blueprint.quotas}).json()["paper_id"]
     paper = client.get(f"/v2/papers/{pid}").json()
     term = next(q for q in paper["questions"] if q["question_type"] == "term")
@@ -154,4 +162,96 @@ def test_failed_statistics_remain_unknown_and_reduced_motion(live_app, browser):
     expect(page.locator("#overview-note")).to_contain_text("未将未知数据当作0")
     expect(page.locator("#metric-submitted")).to_have_text("—")
     assert page.evaluate("getComputedStyle(document.querySelector('#prepare')).transitionDuration") == "0s"
+    page.close()
+
+
+def test_prestart_cache_and_injected_questions_cannot_be_used(live_app, browser):
+    """Even stale/custom responses and local queued photos cannot become timed answers."""
+    client, _, blueprint = live_app
+    page = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+    login(page, str(client.base_url).rstrip("/"))
+    expect(page.locator("#start")).to_be_visible()
+    pid = page.evaluate("paper.paper_id")
+    # Simulate pre-fix local data for this NOT STARTED paper, including a photo job.
+    page.evaluate("""async () => {
+      const fake = {id: 999, position: 1, subject: 'biochemistry', question_type: 'term', stem: '不得预览的缓存题干', max_points: 4};
+      paper.questions = [fake];
+      const stored = {paper, pending: {999: {text: '计时前预答'}}, localDrafts: {999: {text: '计时前预答'}}, version: 0};
+      localStorage.setItem(key(), JSON.stringify(stored));
+      await photoStore('put', {key: key()+':999:prestart', user: username, paper: paper.paper_id, id: 999, file: new Blob(['test'])});
+      await restore();
+      // Explicitly exercise the presentation layer with a corrupt unstarted response.
+      window.TrainingUI.state({paper: {...paper, questions: [fake]}, drafts: {999: {text: '预答'}}, pendingCount: 1});
+      change(999, {text: '不应暂存'});
+    }""")
+    assert page.locator("#questions article").count() == 0
+    expect(page.locator("#questions")).to_be_hidden()
+    expect(page.locator("#focus-toolbar")).to_be_hidden()
+    expect(page.locator("#focus-actions")).to_be_hidden()
+    assert page.locator("#questions input, #questions textarea, #questions input[type=file]").count() == 0
+    assert page.evaluate("Object.keys(pending).length + Object.keys(localDrafts).length") == 0
+    stored = page.evaluate("JSON.parse(localStorage.getItem(key()))")
+    assert stored["paper"]["questions"] == [] and stored["pending"] == {} and stored["localDrafts"] == {}
+    assert page.evaluate("photoStore('getAll')") == []
+    # A rejected start cannot optimistically unlock the paper.
+    page.route("**/start", lambda route: route.fulfill(status=503, json={"detail": "start unavailable"}))
+    page.locator("#start").click()
+    expect(page.locator("#status")).to_contain_text("start unavailable")
+    assert client.get(f"/v2/papers/{pid}").json()["timing"]["status"] == "not_started"
+    expect(page.locator("#questions")).to_be_hidden()
+    page.unroute("**/start")
+    page.reload(); page.locator("#prepare").click()
+    expect(page.locator("#start")).to_be_visible()
+    assert page.locator("#questions article").count() == 0
+    page.locator("#start").click()
+    expect(page.locator("#questions article:visible")).to_have_count(1)
+    assert page.evaluate("Object.keys(localDrafts).length") == 0
+    assert client.get(f"/v2/papers/{pid}").json()["timing"]["drafts"] == {}
+    page.close()
+
+
+def test_offline_unstarted_cache_is_cleared_without_unlocking(live_app, browser):
+    client, _, _ = live_app
+    context = browser.new_context(viewport={"width": 390, "height": 844}, service_workers="block")
+    page = context.new_page()
+    login(page, str(client.base_url).rstrip("/"))
+    expect(page.locator("#start")).to_be_visible()
+    # Force offline identity failure while serving the same static shell as the SW.
+    page.evaluate("""() => {
+      const stored = JSON.parse(localStorage.getItem(key()));
+      stored.paper.questions = [{id: 999, position: 1, stem: '离线预览不应出现', question_type: 'term'}];
+      stored.localDrafts = {999: {text: '预答'}}; stored.pending = stored.localDrafts;
+      localStorage.setItem(key(), JSON.stringify(stored));
+    }""")
+    page.route("**/auth/me", lambda route: route.abort("internetdisconnected"))
+    page.evaluate("Object.defineProperty(navigator, 'onLine', {get: () => false})")
+    # A full reload injects the offline flag before the shell's scripts initialize.
+    page.add_init_script("Object.defineProperty(navigator, 'onLine', {get: () => false})")
+    page.reload()
+    expect(page.locator("#exam-intro")).to_be_visible()
+    expect(page.locator("#start")).to_be_visible()
+    expect(page.locator("#questions")).to_be_hidden()
+    assert page.locator("#questions article").count() == 0
+    assert page.evaluate("Object.keys(localDrafts).length") == 0
+    assert page.evaluate("JSON.parse(localStorage.getItem(key())).paper.questions") == []
+    context.close()
+
+
+def test_remote_start_does_not_replay_unstarted_local_answers(live_app, browser):
+    client, _, _ = live_app
+    page = browser.new_page(viewport={"width": 390, "height": 844})
+    login(page, str(client.base_url).rstrip("/"))
+    expect(page.locator("#start")).to_be_visible()
+    pid = page.evaluate("paper.paper_id")
+    started = client.post(f"/v2/papers/{pid}/start").json()
+    qid = started["questions"][0]["id"]
+    page.evaluate("""qid => {
+      const stored = JSON.parse(localStorage.getItem(key()));
+      stored.pending = {[qid]: {text:'B'}}; stored.localDrafts = stored.pending;
+      localStorage.setItem(key(), JSON.stringify(stored));
+    }""", qid)
+    page.reload(); page.locator("#prepare").click()
+    expect(page.locator("#questions article:visible")).to_have_count(1)
+    assert page.evaluate("Object.keys(localDrafts).length") == 0
+    assert client.get(f"/v2/papers/{pid}").json()["timing"]["drafts"] == {}
     page.close()

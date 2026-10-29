@@ -129,13 +129,46 @@ async function prepare() {
   });
   await restore();
 }
+// A prepared paper is metadata only. Never merge pre-start local answers or photos.
+async function clearUnstartedCache() {
+  if (paper?.timing.status !== "not_started") return;
+  paper.questions = [];
+  paper.timing.drafts = {};
+  localDrafts = {};
+  pending = {};
+  conflicted = false;
+  $("conflict").hidden = true;
+  $("questions").replaceChildren();
+  $("result").replaceChildren();
+  try {
+    localStorage.removeItem(key());
+    sessionStorage.removeItem(`quiz-ui-question:${username}:${paper.paper_id}`);
+  } catch {
+    // Rendering and write guards still fail closed when storage is unavailable.
+  }
+  persist();
+  await discardPaperPhotos();
+}
+async function discardPaperPhotos() {
+  for (const job of await photoStore("getAll")) {
+    if (job.user === username && job.paper === paper.paper_id)
+      await photoStore("delete", job.key);
+  }
+}
 async function restore() {
+  await clearUnstartedCache();
   version = paper.timing.version;
   localDrafts = { ...paper.timing.drafts };
   pending = {};
   try {
     const stored = JSON.parse(localStorage.getItem(key()) || "null");
-    if (stored) {
+    if (stored?.paper?.timing.status === "not_started")
+      await discardPaperPhotos();
+    if (
+      stored?.paper?.timing.status === "in_progress" &&
+      stored.paper.timing.started_at === paper.timing.started_at &&
+      paper.timing.status === "in_progress"
+    ) {
       pending = stored.pending || {};
       localDrafts = { ...localDrafts, ...stored.localDrafts };
       if (Object.keys(pending).length && stored.version !== version)
@@ -158,14 +191,24 @@ async function restore() {
 $("prepare").onclick = () => prepare().catch((e) => status(e.message));
 $("start").onclick = async () => {
   try {
-    paper = await api(`/v2/papers/${paper.paper_id}/start`, { method: "POST" });
+    $("start").disabled = true;
+    await clearUnstartedCache();
+    const started = await api(`/v2/papers/${paper.paper_id}/start`, {
+      method: "POST",
+    });
+    if (!["in_progress", "submitted"].includes(started.timing?.status))
+      throw new Error("服务端尚未确认开始，请联网后重试。");
+    paper = started;
     await restore();
     status("计时已开始。答题自动保存；上传图片也计入60分钟。");
   } catch (e) {
     status(e.message);
+  } finally {
+    $("start").disabled = false;
   }
 };
 function change(id, update) {
+  if (paper?.timing.status !== "in_progress") return;
   localDrafts[id] = {
     text: "",
     blanks: [],
@@ -271,13 +314,17 @@ async function refresh() {
     }
   }
   if (fresh.timing.version < version) return;
-  const changed = fresh.timing.version !== version;
+  const changed =
+    fresh.timing.version !== version ||
+    fresh.timing.status !== paper.timing.status;
   paper = fresh;
+  await clearUnstartedCache();
   if (changed && !Object.keys(pending).length) {
     localDrafts = { ...fresh.timing.drafts };
     render();
   }
   timing(fresh.timing);
+  emitUI();
 }
 window.addEventListener("pageshow", () => refresh().catch(() => {}));
 function element(tag, text, parent) {
@@ -296,6 +343,10 @@ function renderProgress() {
 }
 function render() {
   $("questions").replaceChildren();
+  if (paper?.timing.status !== "in_progress") {
+    renderProgress();
+    return;
+  }
   for (const q of paper.questions) {
     const article = element("article", undefined, $("questions"));
     article.dataset.id = q.id;
@@ -400,6 +451,8 @@ function render() {
   });
 }
 async function sendImage(id, file, article, jobKey) {
+  if (paper?.timing.status !== "in_progress")
+    throw new Error("请先确认开始考试。");
   if (!file) return;
   if (file.size > 8 * 1024 * 1024) throw new Error("图片不能超过8MiB");
   if (!navigator.onLine)
@@ -572,7 +625,7 @@ async function showResult() {
 }
 identity()
   .then(() => status("已登录，可准备今日试卷。"))
-  .catch(() => {
+  .catch(async () => {
     if (!navigator.onLine) {
       try {
         const stored = JSON.parse(
@@ -583,8 +636,11 @@ identity()
           username = sessionStorage.getItem("quiz-v2-user");
           window.TrainingUI?.cachedIdentity(username);
           paper = stored.paper;
-          pending = stored.pending;
-          localDrafts = stored.localDrafts;
+          await clearUnstartedCache();
+          pending =
+            paper.timing.status === "in_progress" ? stored.pending || {} : {};
+          localDrafts =
+            paper.timing.status === "in_progress" ? stored.localDrafts || {} : {};
           version = stored.version;
           serverAnchor = Date.now() + stored.offset;
           anchor = performance.now();
@@ -592,9 +648,12 @@ identity()
           render();
           window.TrainingUI?.showView("exam");
           $("login").hidden = true;
-          $("submit").hidden = false;
+          $("start").hidden = paper.timing.status !== "not_started";
+          $("submit").hidden = paper.timing.status !== "in_progress";
           status(
-            "离线恢复：本机暂存已保留，截止前联网才能计入答卷。显示的剩余时间为估算。",
+            paper.timing.status === "not_started"
+              ? "尚未开始：计时前暂存已清理，请联网后确认开始。"
+              : "离线恢复：本机暂存已保留，截止前联网才能计入答卷。显示的剩余时间为估算。",
           );
           return;
         }
@@ -644,6 +703,8 @@ function photoStore(operation, value) {
   });
 }
 async function upload(id, file, article) {
+  if (paper?.timing.status !== "in_progress")
+    throw new Error("请先确认开始考试。");
   if (!file) return;
   if (file.size > 8 * 1024 * 1024) throw new Error("图片不能超过8MiB");
   const jobKey = key() + ":" + id + ":" + crypto.randomUUID();
@@ -662,7 +723,7 @@ async function upload(id, file, article) {
   }
 }
 async function retryPhotos() {
-  if (!paper || !navigator.onLine) return;
+  if (paper?.timing.status !== "in_progress" || !navigator.onLine) return;
   for (const job of await photoStore("getAll")) {
     if (job.user !== username || job.paper !== paper.paper_id) continue;
     const article = document.querySelector(`article[data-id="${job.id}"]`);

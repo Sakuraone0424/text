@@ -287,6 +287,16 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
         {"name": "handwriting.png", "mimeType": "image/png", "buffer": image_bytes()}
     )
     article.locator("img").wait_for()
+    # Camera and album use the same upload pipeline; exercise both input endpoints.
+    with page.expect_response(
+        lambda response: response.request.method == "POST"
+        and f"/images/{term['id']}?" in response.url
+    ) as camera_response:
+        article.locator("input[type=file][capture=environment]").set_input_files(
+            {"name": "camera.png", "mimeType": "image/png", "buffer": image_bytes()}
+        )
+    assert camera_response.value.status == 200
+    page.wait_for_function("document.querySelector('#status').textContent.includes('图片已保存')")
     page.reload()
     page.locator("#prepare").click()
     page.locator("#questions article:not([hidden])").wait_for()

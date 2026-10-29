@@ -1241,7 +1241,7 @@
     color: #b9421e;
   }
   .training-app .site-header {
-    height: 76px;
+    height: 64px;
     padding: calc(12px + env(safe-area-inset-top)) 20px 12px;
     border: 0;
     background: var(--bg);
@@ -1272,10 +1272,10 @@
     font-size: 12px;
   }
   .training-app .shell {
-    padding: 16px 20px calc(100px + env(safe-area-inset-bottom));
+    padding: 8px 20px calc(100px + env(safe-area-inset-bottom));
   }
   .training-app .page-heading {
-    margin: 4px 0 24px;
+    margin: 0 0 16px;
   }
   .training-app .page-heading .quiet-badge {
     display: none;
@@ -1283,8 +1283,16 @@
   .training-app h1 {
     font-size: 27px;
   }
+  .training-app .page-heading h1 {
+    font-size: 22px;
+    line-height: 1.4;
+    margin: 4px 0;
+  }
+  .training-app .page-heading .eyebrow {
+    margin: 0;
+  }
   .training-app .mobile-only {
-    display: block;
+    display: none;
   }
   .training-app .page-heading .muted {
     font-size: 13px;

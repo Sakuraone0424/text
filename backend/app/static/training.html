@@ -218,7 +218,7 @@
               正式开始后，切换页面或离线均不会暂停计时。
             </p>
           </div>
-          <div class="focus-toolbar toolbar" id="focus-toolbar">
+          <div class="focus-toolbar toolbar" id="focus-toolbar" hidden>
             <div class="focus-topline">
               <button
                 id="leave-focus"
@@ -254,7 +254,7 @@
               aria-label="已作答题目进度"
             ></progress>
           </div>
-          <section id="questions" aria-label="试卷题目"></section>
+          <section id="questions" aria-label="试卷题目" hidden inert></section>
           <section id="result" aria-label="考试成绩与解析"></section>
           <div id="focus-actions" class="focus-actions" hidden>
             <button id="previous-question" class="secondary">← 上一题</button

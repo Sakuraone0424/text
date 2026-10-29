@@ -47,8 +47,8 @@
     if (roots[view]) byId("learning").hidden = false;
   }
   function navigate(index, focus = true) {
-    const questions = latest.paper?.questions || [];
-    if (!questions.length) return;
+    const questions = active() ? latest.paper.questions || [] : [];
+    if (!active() || !questions.length) return;
     position = Number.isFinite(index)
       ? Math.max(0, Math.min(Math.trunc(index), questions.length - 1))
       : 0;
@@ -81,7 +81,7 @@
     }
   }
   function updateMap() {
-    const questions = latest.paper?.questions || [];
+    const questions = active() ? latest.paper.questions || [] : [];
     const grid = byId("question-grid");
     if (
       grid.children.length !== questions.length ||
@@ -153,7 +153,13 @@
         : "请先准备试卷，再确认开始计时。";
     document.querySelector("[data-prepare-proxy]").hidden = !!latest.paper;
     byId("result").hidden = timing?.status !== "submitted";
-    byId("questions").hidden = timing?.status === "submitted";
+    byId("questions").hidden = !active();
+    byId("questions").inert = !active();
+    byId("focus-toolbar").hidden = !active();
+    if (!active()) {
+      byId("question-dialog").close();
+      byId("question-grid").replaceChildren();
+    }
     if (previousPaper !== latest.paper?.paper_id) {
       byId("result").replaceChildren();
       position = 0;
