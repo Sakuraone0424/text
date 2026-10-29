@@ -98,3 +98,39 @@ def test_scientific_evidence_must_only_use_the_four_locked_ocr_textbooks():
     assert not pinned_science_evidence({"evidence": [book, real_exam]})
     assert not pinned_science_evidence({"evidence": [{**book, "source_sha256": "0" * 64}]})
     assert not pinned_science_evidence({"evidence": [{"file_id": upper["file_id"]}]})
+
+
+def test_generation_accept_rejects_exam_as_answer_and_cross_subject_source():
+    import pytest
+    from app.auto_generation import accept
+
+    lock = json.loads(
+        (Path(__file__).parents[1] / "app" / "ocr_source_sha256_lock.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    upper = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_upper")
+    exam = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_exams")
+    book = dict(file_id=upper["file_id"],
+                source_sha256=lock["files"][upper["key"]]["sha256"],
+                source_kind="textbook", subject="biochemistry", quality_flags=[])
+    past = dict(file_id=exam["file_id"],
+                source_sha256=lock["files"][exam["key"]]["sha256"],
+                source_kind="exam_transcription", subject="biochemistry",
+                quality_flags=[])
+    mutations = [
+        ([past], [past]),  # A genuine past paper is NOT scientific answer evidence.
+        ([book], [book]),  # A textbook is NOT a genuine past exam style anchor.
+        ([dict(book, subject="cell_biology")], [past]),
+        ([book], [dict(past, subject="cell_biology")]),
+        ([book], [dict(past, quality_flags=["docx_table_requires_review"])]),
+        ([book], [dict(past, quality_flags=["ocr_uncertain"])]),
+    ]
+    for evidence, style in mutations:
+        job = dict(
+            state="succeeded",
+            result={"real_api": True, "response": {"question": {}}},
+            payload={"subject": "biochemistry", "evidence": evidence, "style": style},
+        )
+        with pytest.raises(ValueError, match="generation_source_not_in_locked"):
+            accept(None, job)
