@@ -18,8 +18,12 @@ from test_ocr_only import material
 def synthetic_collection(tmp_path):
     root = tmp_path / "six"
     lock = {"collection_version": COLLECTION["version"], "files": {}}
+    from app.source_bibliography import BIBLIOGRAPHY
     for item in COLLECTION["files"]:
-        path, _metadata = material(tmp_path, item["key"])
+        # Synthetic test headers carry the tokens used to test verification.
+        cover = (" ".join(BIBLIOGRAPHY[item["key"]]["cover_tokens"])
+                 if item["kind"] == "textbook" else None)
+        path, _metadata = material(tmp_path, item["key"], content=cover)
         dest = root / item["relative_path"]
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, dest)
@@ -81,11 +85,19 @@ def test_write_to_isolated_test_db_reads_back_all_six_without_synthetic_approval
     assert result["database_integrity"]["integrity_passed_files"] == 6
     assert len(result["imported"]) == 6
     assert report.exists()
+    from app.source_bibliography import BIBLIOGRAPHY
     for row in result["imported"]:
         assert db.execute(
             "SELECT count(*) AS n FROM source_units WHERE document_id=%s",
             (row["document_id"],),
         ).fetchone()["n"] > 0
+        if row["key"] in BIBLIOGRAPHY:
+            stored = db.execute(
+                "SELECT metadata FROM source_documents WHERE id=%s",
+                (row["document_id"],),
+            ).fetchone()["metadata"]
+            assert stored["authors"] == BIBLIOGRAPHY[row["key"]]["authors"]
+            assert stored["edition"] == BIBLIOGRAPHY[row["key"]]["edition"]
     assert db.execute("SELECT count(*) AS n FROM reviewed_questions").fetchone()["n"] == 0
 
 
