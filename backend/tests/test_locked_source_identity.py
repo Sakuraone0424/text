@@ -35,3 +35,37 @@ def test_source_id_and_valid_hash_cannot_be_mixed_across_two_books():
     upper = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_upper")
     lower_digest = locked["files"]["biochemistry_lower"]["sha256"]
     assert not pinned_source_bytes(upper["file_id"], lower_digest)
+
+
+def test_completed_generation_job_rejects_unpinned_sources_before_db_or_publication():
+    import pytest
+    from app.auto_generation import accept
+
+    locked = json.loads(
+        (Path(__file__).parents[1] / "app" / "ocr_source_sha256_lock.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    textbook = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_upper")
+    exam = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_exams")
+    good_book = {
+        "file_id": textbook["file_id"],
+        "source_sha256": locked["files"][textbook["key"]]["sha256"],
+    }
+    good_exam = {
+        "file_id": exam["file_id"],
+        "source_sha256": locked["files"][exam["key"]]["sha256"],
+    }
+    for evidence, style in (
+        ([{**good_book, "source_sha256": "0" * 64}], [good_exam]),
+        ([good_book], [{**good_exam, "source_sha256": "0" * 64}]),
+        ([], [good_exam]),
+        ([good_book], []),
+    ):
+        fake_completed_job = {
+            "state": "succeeded",
+            "result": {"real_api": True, "response": {"question": {}}},
+            "payload": {"evidence": evidence, "style": style},
+        }
+        with pytest.raises(ValueError, match="generation_source_not_in_locked"):
+            accept(None, fake_completed_job)
