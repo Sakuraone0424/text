@@ -28,6 +28,42 @@ def eligible_verified_reserve(conn, rows):
     )
 
 
+def complete_choice_style_unit_ids(rows):
+    """Retain real A-D option paragraphs; refuse stem-only choice examples.
+
+    DOCX often stores its single-choice stem and A-D options in DIFFERENT
+    source units. Never use another question's options to complete a stem.
+    Historical answer correctness is not inferred by this shape check.
+    """
+    import re
+
+    if not rows or set(rows[0].get("quality_flags") or []) & STYLE_SOURCE_BLOCKERS:
+        return None
+    pattern = re.compile(r"(?<![A-Za-z0-9])([ABCD])[.、．):：]\\s*")
+    ids = [rows[0]["id"]]
+    found = set(pattern.findall(rows[0]["text"]))
+    if found == set("ABCD"):
+        return ids
+    for row in rows[1:]:
+        if set(row.get("quality_flags") or []) & STYLE_SOURCE_BLOCKERS:
+            return None
+        markers = set(pattern.findall(row["text"]))
+        # After the stem, only option-bearing units may extend the same
+        # question. A new stem/section cannot provide a missing option.
+        if not markers or not any(
+            re.match(r"^\\s*" + letter + r"[.、．):：]", row["text"])
+            for letter in markers
+        ):
+            return None
+        ids.append(row["id"])
+        found |= markers
+        if found == set("ABCD"):
+            return ids
+        if len(ids) >= 7:
+            return None
+    return None
+
+
 def select_exam_style(conn, subject, kind, concept=None):
     """Find a genuine exam-style anchor; lexical overlap is NOT science proof.
 
@@ -39,7 +75,7 @@ def select_exam_style(conn, subject, kind, concept=None):
     import unicodedata
 
     rows = conn.execute(
-        "SELECT t.unit_id AS id,t.year,t.transcription FROM exam_transcript_candidates t "
+        "SELECT t.unit_id AS id,t.document_id,su.ordinal AS start_ordinal,t.year,t.transcription FROM exam_transcript_candidates t "
         "JOIN source_documents d ON d.id=t.document_id "
         "JOIN source_units su ON su.id=t.unit_id "
         "WHERE " + current_source_sql("d", kind="exam_transcription") +
@@ -67,10 +103,26 @@ def select_exam_style(conn, subject, kind, concept=None):
     best = max(matches, default=0)
     pool = [row for row, score in zip(rows, matches) if score == best]
     idx = (int((concept or {}).get("unit_id", 0)) % len(pool)) if concept else 0
-    chosen = dict(pool[idx])
-    chosen["lexical_topic_overlap"] = best
-    chosen["scope"] = "past_exam_style_not_textbook_answer_evidence"
-    return chosen
+    for offset in range(len(pool)):
+        chosen = dict(pool[(idx + offset) % len(pool)])
+        if kind == "single_choice":
+            chunks = conn.execute(
+                "SELECT id,text,quality_flags FROM source_units "
+                "WHERE document_id=%s AND ordinal >= %s "
+                "AND ordinal < %s + 8 ORDER BY ordinal LIMIT 8",
+                (chosen["document_id"], chosen["start_ordinal"],
+                 chosen["start_ordinal"]),
+            ).fetchall()
+            parts = complete_choice_style_unit_ids(chunks)
+            if not parts or parts[0] != chosen["id"]:
+                continue
+            chosen["style_unit_ids"] = parts
+        else:
+            chosen["style_unit_ids"] = [chosen["id"]]
+        chosen["lexical_topic_overlap"] = best
+        chosen["scope"] = "past_exam_style_not_textbook_answer_evidence"
+        return chosen
+    return None
 
 def plan(conn, uid):
     existing = conn.execute(
@@ -131,10 +183,16 @@ def plan(conn, uid):
                 style = select_exam_style(conn, subject, kind, concept)
                 if not style:
                     continue
-                s = snapshot_unit(conn, style["id"])
-                if (s["source_kind"] != "exam_transcription" or
-                    set(s["quality_flags"]) & STYLE_SOURCE_BLOCKERS):
+                style_units = [snapshot_unit(conn, sid) for sid in style["style_unit_ids"]]
+                if any(
+                    st["source_kind"] != "exam_transcription"
+                    or st["subject"] != subject
+                    or set(st["quality_flags"]) & STYLE_SOURCE_BLOCKERS
+                    or not pinned_source_bytes(st["file_id"], st["source_sha256"])
+                    for st in style_units
+                ):
                     continue
+                s = style_units[0]
                 if not pinned_source_bytes(s["file_id"], s["source_sha256"]):
                     # A newer/overwritten DOCX with the same Drive ID must not
                     # become an AI style anchor merely by being current in SQL.
@@ -156,7 +214,7 @@ def plan(conn, uid):
                         question_type=kind,
                         max_points=POINTS[kind],
                         evidence=[u],
-                        style=[s],
+                        style=style_units,
                         style_year=style["year"],
                         style_overlap=style["lexical_topic_overlap"],
                         source_bibliography=book,
