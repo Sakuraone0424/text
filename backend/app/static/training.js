@@ -207,7 +207,7 @@ async function discardPaperPhotos() {
   }
 }
 async function restore(show = true) {
-  const saved = cachedPaper(username);
+  const saved = cachedPaper(username, paper.paper_id);
   if (
     saved?.paper.timing.status === "in_progress" &&
     paper.timing.status === "not_started"
@@ -781,9 +781,11 @@ function rejectAccess(
   $("submit").hidden = true;
   status(message);
 }
-function cachedPaper(user) {
+function cachedPaper(user, paperId = null) {
   try {
-    const pointer = sessionStorage.getItem("quiz-v2-paper-key");
+    const pointer = paperId
+      ? `quiz:v2:${user}:${paperId}`
+      : sessionStorage.getItem("quiz-v2-paper-key");
     if (!pointer) return null;
     const saved = JSON.parse(localStorage.getItem(pointer) || "null");
     if (!saved) return null;

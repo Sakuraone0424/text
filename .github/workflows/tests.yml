@@ -32,7 +32,20 @@ jobs:
       - run: python -m pip install -r requirements-dev.txt
       - run: sudo apt-get update && sudo apt-get install -y libnss3-tools bubblewrap
       - run: python -m playwright install --with-deps chromium firefox webkit
+      - name: Preserve QA browser protocol pipes in the mount helper
+        run: |
+          printf '%s\n' 'Defaults!/usr/bin/bwrap closefrom_override' | sudo tee /etc/sudoers.d/quiz-qa-bwrap-fds >/dev/null
+          sudo chmod 0440 /etc/sudoers.d/quiz-qa-bwrap-fds
+          sudo visudo -cf /etc/sudoers.d/quiz-qa-bwrap-fds
+      - name: Preflight all three browsers over verified HTTPS
+        run: python -m pytest tests/test_https_recovery.py::test_real_https_offline_refresh_and_reconnect -x -q
+        env:
+          QUIZ_QA_PRIVILEGED_MOUNTS: '1'
+          TEST_DATABASE_URL: postgresql://quiz_test:local-ci-only@127.0.0.1:5432/quiz_test
       - run: python -m pytest -ra -q -p no:cacheprovider
         env:
           QUIZ_QA_PRIVILEGED_MOUNTS: '1'
           TEST_DATABASE_URL: postgresql://quiz_test:local-ci-only@127.0.0.1:5432/quiz_test
+      - name: Remove temporary QA mount-helper policy
+        if: always()
+        run: sudo rm -f /etc/sudoers.d/quiz-qa-bwrap-fds

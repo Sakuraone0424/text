@@ -197,3 +197,16 @@ def test_offline_expiry_keeps_deadline_and_rejects_late_answers(https_app,firefo
     with psycopg.connect(qa['dsn'],row_factory=dict_row) as c:
         value=c.execute('SELECT a.answer FROM answers_v2 a JOIN attempts_v2 t ON a.attempt_id=t.id WHERE t.paper_id=%s AND a.question_id=%s',(pid,qid)).fetchone()['answer'];assert json.loads(value)['text']=='截止前服务端答案'
     assert page.evaluate('(qid)=>JSON.parse(localStorage.getItem(key())).pending[qid].text',qid)=='离线未同步答案'
+
+
+def test_new_tab_without_session_pointer_preserves_unsynced_local_answers(https_app,firefox_https):
+    qa=https_app;context=firefox_https;page=context.new_page();paper=login_start(page,qa);pid=paper['paper_id']
+    q=next(x for x in paper['questions'] if x['question_type']=='term');open_question(page,q['id'])
+    page.route('**/drafts/*',lambda route:route.abort('internetdisconnected'))
+    page.locator('#questions textarea:visible').fill('关闭标签页前尚未同步的有效草稿')
+    page.wait_for_function('serverConfirmed===false && Object.keys(pending).length===1');page.close()
+    next_page=context.new_page();next_page.goto(qa['origin']);next_page.wait_for_function('startup===null')
+    assert next_page.evaluate("sessionStorage.getItem('quiz-v2-paper-key')")==None
+    next_page.locator('#prepare').click();expect(next_page.locator('#questions article:visible')).to_have_count(1);wait_saved(next_page)
+    assert row(qa,'SELECT value FROM answer_drafts WHERE paper_id=%s AND question_id=%s',(pid,q['id']))['value']['text']=='关闭标签页前尚未同步的有效草稿'
+    open_question(next_page,q['id']);expect(next_page.locator('#questions textarea:visible')).to_have_value('关闭标签页前尚未同步的有效草稿')

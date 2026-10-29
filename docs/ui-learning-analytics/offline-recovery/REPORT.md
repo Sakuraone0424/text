@@ -1,6 +1,6 @@
 # Firefox离线答卷恢复：修复与真实QA
 
-结论：原失败已重新复现，修复后同一31项流程为**31通过、0失败**；新增20项HTTPS回归通过，全量538项通过。没有部署或改动Railway、正式数据库、试卷ID1、题目、历史成绩及后端判分。
+结论：原失败已重新复现，修复后同一31项流程为**31通过、0失败**；新增21项HTTPS回归通过，全量539项通过。没有部署或改动Railway、正式数据库、试卷ID1、题目、历史成绩及后端判分。
 
 ## 原失败与新结果
 
@@ -43,7 +43,7 @@
 
 所有数据库证据均在删除临时schema/角色之前独立读回；JSON记录清理成功。没有把截图或HTTP200单独当成持久化验收。
 
-## 新增20项HTTPS回归
+## 新增21项HTTPS回归
 
 运行：`cd backend && TEST_DATABASE_URL=<独立本地测试库> python -m pytest tests/test_https_recovery.py -q`。
 
@@ -59,11 +59,13 @@
 
 鉴权、协议故障及丢收据采用明确标注的传输故障注入，其余调用为实际HTTPS和PostgreSQL；不是合成AI审核或模型调用。到期测试仅把一次性QA记录设置为接近截止，同时保持`deadline-started_at=3600秒`，不改系统时间或正式数据。
 
+- 新标签页失去sessionStorage指针后，以服务端核实的用户/试卷ID查找localStorage，仍恢复未同步草稿，不用空状态覆盖有效答案。
+
 ## TLS、CI与清理
 
 `https_qa_support.py`复用已有live_app隔离合成夹具，新增独立TLS进程及QA登录秘密。Firefox使用临时NSS profile；Chromium/WebKit用仅该进程树生效的文件系统命名空间信任测试CA，保留原系统CA，主机全局信任库不变。没有关闭TLS验证；原31项还实际验证了未受信任证书被拒绝。
 
-CI安装三个浏览器、libnss3-tools与bubblewrap，实际运行新增用例。Hosted Ubuntu拒绝非特权UID映射，因此仅在一次性CI runner中用sudo建立挂载隔离，随即通过setpriv回到原runner UID/GID并设置no-new-privs后启动浏览器；不改sysctl、AppArmor策略或主机证书库。本地仍使用非特权命名空间。此修正只作用于测试设施，不影响产品代码；没有跳过Firefox或把WebKit降成静态截图。全量538项包括原518项和新20项。唯一警告为既有Starlette弃用警告。
+CI安装三个浏览器、libnss3-tools与bubblewrap，实际运行新增用例。Hosted Ubuntu拒绝非特权UID映射，因此仅在一次性CI runner中用sudo建立挂载隔离，随即通过setpriv回到原runner UID/GID并设置no-new-privs后启动浏览器；不改sysctl、AppArmor策略或主机证书库。本地仍使用非特权命名空间。仅为bwrap命令临时允许sudo保留Playwright协议FD3/4（-C5），结束后删除该规则；不新增sudo执行权限。CI先做三引擎HTTPS启动预检，再执行完整回归。此修正只作用于测试设施，不影响产品代码；没有跳过Firefox或把WebKit降成静态截图。全量539项包括原518项和新21项。唯一警告为既有Starlette弃用警告。
 
 临时服务、数据库schema/角色、浏览器profile与一次性证书/私钥均清理。只保留脱敏JSON、合成截图和测试源码。Railway只读核验仍为8246cc0，PR预览关闭、API仓库触发器为空；本轮没有发布、改变量、建收费资源、访问正式数据或合并main。
 

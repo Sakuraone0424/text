@@ -51,10 +51,10 @@
     "qa_tls_keys_and_ca_removed": true,
     "qa_password_and_session_secret_not_persisted": true
   },
-  "ephemeral_qa_origin": "https://localhost:46255",
+  "ephemeral_qa_origin": "https://localhost:45103",
   "tls_version": "TLSv1.3",
   "runtime_source_sha256": {
-    "backend/app/static/training.js": "d75887b85329e8b8a94461d79538ff6ba9dfd48a07557306ce81c7346cca1a74",
+    "backend/app/static/training.js": "ec7e658864f6ad215321ddf317b39dd470cd55b556e6cce3d291117a9d1b003c",
     "backend/app/static/training-ui.js": "72509147c4180bda639f80940c564b6bd91fa60736c10fa6fd4e1acc5c38d5c2",
     "backend/app/static/training.css": "8e43350e3c3f77e8f5b6425bbf8b2f9796bc20f540532fb31c4ef0118b9b51b2",
     "backend/app/static/training-sw.js": "6344fade9483ae7997994dee048335582fc73f2070303e66729ca92d2c7c3d11"

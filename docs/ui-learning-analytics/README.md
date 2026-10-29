@@ -4,7 +4,7 @@
 
 ## Firefox离线恢复修复（2026-10-29）
 
-已在相同隔离HTTPS流程复现8246cc0的30通过/1失败，并对修复源码重验为**31/31通过**。新增20项真实HTTPS回归全部通过（含Chromium、Firefox、WebKit三引擎），全量**538 passed**，保留全部原测试。线上8246cc0未替换，正式数据库和试卷ID1未访问。
+已在相同隔离HTTPS流程复现8246cc0的30通过/1失败，并对修复源码重验为**31/31通过**。新增21项真实HTTPS回归全部通过（含Chromium、Firefox、WebKit三引擎），全量**539 passed**，保留全部原测试。线上8246cc0未替换，正式数据库和试卷ID1未访问。
 
 [完整修复与QA报告](offline-recovery/REPORT.md) · [原失败证据](offline-recovery/baseline-8246cc0.json) · [修复后31项实际记录及源码SHA](offline-recovery/verified-31.json)
 
@@ -79,7 +79,7 @@
 
 ## 验收与限制
 
-本地最终全量：**538 passed，1项既有Starlette弃用警告**（此前为518项，新增20项HTTPS回归）。保留四视口及原Chromium完整答题测试；新增三引擎真实HTTPS恢复，Firefox31项完整流程使用独立PostgreSQL17。
+本地最终全量：**539 passed，1项既有Starlette弃用警告**（此前为518项，新增21项HTTPS回归）。保留四视口及原Chromium完整答题测试；新增三引擎真实HTTPS恢复，Firefox31项完整流程使用独立PostgreSQL17。
 
 此前本地HTTP夹具的WebKit Secure Cookie限制已用独立HTTPS实例和进程私有CA信任解决。Chromium、Firefox、WebKit均真实完成HTTPS登录、开始、断网刷新和数据库同步回归，证书验证未关闭。实体iPhone Safari的中文键盘、系统相机、相册和移动网络后台切换仍需用户确认。
 

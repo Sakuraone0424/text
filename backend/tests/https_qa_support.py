@@ -17,6 +17,12 @@ from playwright.sync_api import sync_playwright
 import pytest
 
 
+class QAContext(dict):
+    def __repr__(self):
+        # pytest must never print a QA password or DSN when an assertion fails.
+        return "<isolated HTTPS QA context; credentials redacted>"
+
+
 def run(*args):
     subprocess.run(list(map(str, args)), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -56,7 +62,7 @@ def https_app(live_app, tmp_path):
         start()
         with httpx.Client(base_url=origin, verify=tls, trust_env=False, headers={'Origin':origin, 'Connection':'close'}, timeout=20) as h:
             assert h.post('/auth/login', json={'password':password}).status_code == 200
-            yield dict(client=h, dsn=dsn, blueprint=blueprint, origin=origin, password=password, root=root, restart=restart)
+            yield QAContext(client=h, dsn=dsn, blueprint=blueprint, origin=origin, password=password, root=root, restart=restart)
     finally:
         if process and process.poll() is None:
             process.terminate(); process.wait(timeout=10)
@@ -91,7 +97,7 @@ def trusted_browser(pw, kind, root):
     privileged_mount = os.environ.get('QUIZ_QA_PRIVILEGED_MOUNTS') == '1'
     if privileged_mount:
         preserved = 'HOME,USER,LOGNAME,HTTP_PROXY,HTTPS_PROXY,ALL_PROXY,NO_PROXY,http_proxy,https_proxy,all_proxy,no_proxy,SSL_CERT_FILE,SSL_CERT_DIR'
-        argv = ['sudo', '-n', '--preserve-env='+preserved, 'bwrap']
+        argv = ['sudo', '-n', '-C', '5', '--preserve-env='+preserved, 'bwrap']
     else:
         argv = ['bwrap', '--unshare-user']
     argv += ['--ro-bind', '/', '/', '--bind', '/tmp', '/tmp', '--proc', '/proc', '--dev', '/dev']
