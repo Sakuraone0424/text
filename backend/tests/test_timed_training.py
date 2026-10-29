@@ -511,3 +511,57 @@ def test_prestart_server_rejects_drafts_images_and_submit_without_writes(db, ban
     started = sessions.start(db, uid, pid)
     assert started["drafts"] == {} and started["version"] == 0
     assert q.load_paper(db, uid, pid)["questions"]
+
+
+def test_expiry_dispatches_authorized_subjective_grading_once_without_user_return(
+    db, running, monkeypatch
+):
+    """A background timeout must not leave subjective answers unqueued."""
+    from app import auto_grading, grading_activity
+
+    uid, paper = running
+    pid = paper["paper_id"]
+    term = next(q for q in paper["questions"] if q["question_type"] == "term")
+    sessions.save(db, uid, pid, term["id"], {"text": "synthetic saved answer"}, 0)
+    dispatched = []
+    monkeypatch.setattr(
+        grading_activity, "auto_queue_allowed", lambda conn, user: (True, None)
+    )
+
+    def record_schedule(conn, user_id, paper_id):
+        rows = conn.execute(
+            "SELECT a.question_id FROM answers_v2 a "
+            "JOIN attempts_v2 t ON t.id=a.attempt_id "
+            "WHERE t.paper_id=%s AND a.points IS NULL",
+            (paper_id,),
+        ).fetchall()
+        dispatched.append((user_id, paper_id, [r["question_id"] for r in rows]))
+        return ["mock_enqueue_only_no_paid_provider"]
+
+    monkeypatch.setattr(auto_grading, "schedule", record_schedule)
+    expire(db, pid)
+    assert sessions.expire_due(db) == 1
+    assert dispatched == [(uid, pid, [term["id"]])]
+    assert q.result(db, uid, pid)["pending"] == 1
+    assert sessions.expire_due(db) == 0
+    # Duplicate POST cannot initiate a second actual timeout finalization.
+    repeated = q.submit(db, uid, pid, {})
+    assert repeated["pending"] == 1
+    assert len(dispatched) == 1
+    assert db.execute(
+        "SELECT count(*) AS n FROM attempts_v2 WHERE paper_id=%s", (pid,)
+    ).fetchone()["n"] == 1
+
+
+def test_expiry_without_ai_authorization_never_queues_or_spends(db, running, monkeypatch):
+    uid, paper = running
+    pid = paper["paper_id"]
+    term = next(q for q in paper["questions"] if q["question_type"] == "term")
+    sessions.save(db, uid, pid, term["id"], {"text": "synthetic saved answer"}, 0)
+    monkeypatch.setenv("QUIZ_AUTO_GRADE_ON_SUBMIT", "0")
+    expire(db, pid)
+    assert sessions.expire_due(db) == 1
+    assert q.result(db, uid, pid)["pending"] == 1
+    assert db.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='grading'"
+    ).fetchone()["n"] == 0
