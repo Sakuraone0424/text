@@ -1,6 +1,6 @@
 """Bounded supplementation from current AI-verified knowledge, never quota padding."""
 
-from app.training_spec import SUBJECTS, COUNTS, POINTS
+from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
 from app.source_policy import current_source_sql, FILES
 from app.candidate_review import snapshot_unit, create_packet
 from app.question_quality import Question, AXES
