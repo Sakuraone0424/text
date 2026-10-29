@@ -13,26 +13,25 @@ from test_api_v2 import LEARNER, REVIEWER
 
 
 def test_single_current_product_contract_and_retired_legacy_routes(client):
-    from app.training_spec import default_blueprint
+    from app.training_spec_v2 import COUNTS as new_counts, POINTS as new_points, SPECIFICATION
 
-    spec = client.get("/v2/training-specification")
-    assert spec.status_code == 200
-    value = spec.json()
-    assert (value["questions"], value["points"], value["duration_seconds"]) == (28, 150, 3600)
-    assert (value["questions_per_subject"], value["points_per_subject"]) == (14, 75)
-    expected = dict(single_choice=3, fill_blank=3, term=4, short_answer=3, essay=1)
-    assert value["quotas"] == {s: expected for s in ("biochemistry", "cell_biology")}
-    assert value["points_by_type"] == dict(single_choice=2, fill_blank=3, term=4, short_answer=8, essay=20)
-    assert default_blueprint() == {k: value[k] for k in ("specification", "quotas")}
+    response = client.get("/v2/training-specification")
+    assert response.status_code == 200
+    value = response.json()
+    assert (value["questions"], value["points"], value["duration_seconds"]) == (60, 150, 3600)
+    assert (value["questions_per_subject"], value["points_per_subject"]) == (30, 75)
+    assert value["specification"] == SPECIFICATION
+    assert value["quotas"] == {s: new_counts for s in ("biochemistry", "cell_biology")}
+    assert value["points_by_type"] == new_points
+    assert "essay" not in value["quotas"]["biochemistry"]
     for route in ("/", "/training"):
         page = client.get(route).text
-        assert "唯一训练规格：28题" in page and "各14题75分" in page
-        assert "3道单选" in page and "3道填空" in page and "4道名词解释" in page
-        assert "3道简答" in page and "1道论述" in page
-        assert "60题" not in page and "双模式" not in page
+        assert "唯一新版训练规格：60题" in page and "各30题75分" in page
+        assert "每科18道单选" in page and "7道填空" in page
+        assert "4道名词解释" in page and "1道简答" in page
+        assert "3道简答" not in page and "1道论述" not in page
     assert client.get("/quiz/today", headers=LEARNER).status_code == 410
     assert client.post("/quiz/submit", headers=LEARNER).status_code == 410
-
 
 def test_daily_sixty_and_mode_switch_requests_are_rejected(client):
     data = {
@@ -48,7 +47,7 @@ def test_daily_sixty_and_mode_switch_requests_are_rejected(client):
 
 def test_chatgpt_adapter_uses_only_formal_blueprint():
     from app.chatgpt_adapter import TrainingAdapter
-    from app.training_spec import default_blueprint
+    from app.training_spec_v2 import default_blueprint
 
     class Transport:
         def request(self, method, path, *, json):
