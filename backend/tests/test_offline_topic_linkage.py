@@ -52,3 +52,43 @@ def test_unpinned_exam_revision_fails_before_topic_alignment(tmp_path):
         stream.write(b"changed exam bytes")
     with pytest.raises(ValueError, match="SHA-256"):
         report(root, lock_path=lock)
+
+
+def test_same_table_uncertainty_blocks_offline_topic_and_live_style_gate(tmp_path):
+    from app.offline_topic_linkage import REFUSE
+    from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
+    from app.exam_style_readiness import BOUNDARY_ISSUES
+
+    assert REFUSE == STYLE_SOURCE_BLOCKERS | BOUNDARY_ISSUES
+    root, lock = synthetic_collection(tmp_path)
+    item = next(x for x in COLLECTION["files"] if x["key"] == "cell_biology_exams")
+    path = root / item["relative_path"]
+    doc = Document()
+    doc.add_paragraph("2025年中国科学技术大学细胞生物学真题")
+    doc.add_paragraph("单项选择题")
+    doc.add_paragraph("1. 合成测试需依据下一表结果回答")
+    table = doc.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "未校验的合成表格"
+    doc.add_paragraph("2. 合成测试的另一个独立问题")
+    # Close the section: the synthetic fixture's table is truly tied only
+    # to question one, not to the following question.
+    doc.add_paragraph("2026年中国科学技术大学细胞生物学真题")
+    doc.save(path)
+    manifest = json.loads(lock.read_text(encoding="utf-8"))
+    raw = path.read_bytes()
+    manifest["files"][item["key"]].update(
+        sha256=sha256(raw).hexdigest(), bytes=len(raw)
+    )
+    lock.write_text(json.dumps(manifest), encoding="utf-8")
+    data = report(root, lock_path=lock)
+    row = next(
+        b for b in data["buckets"]
+        if b["subject"] == "cell_biology"
+        and b["question_type"] == "single_choice"
+    )
+    assert row["observed_candidate_starts"] == 2
+    assert row["blocked_before_topic_linkage"] == 1
+    assert row["parser_safe_style_starts"] == 1
+    assert row["lexically_linked_question_starts"] == 1
+    assert row["scientifically_supported_matches"] == 0
+    assert data["question_answers_or_rubrics_generated"] == 0
