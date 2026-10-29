@@ -1,9 +1,4 @@
-"""Proposed 60-question daily exam contract (v2).
-
-This module is intentionally not wired to /v2/papers yet. Do not activate a new
-format until a reviewed, publication-ready bank and all migration tests pass.
-Historical 28-question paper snapshots retain their original scoring contract.
-"""
+"""Versioned 60-question daily exam contract; legacy 28q paper snapshots remain immutable."""
 
 from collections import Counter
 
@@ -42,6 +37,7 @@ def formal_specification():
     return {
         **default_blueprint(),
         "questions": TOTAL_QUESTIONS,
+        "points": TOTAL_POINTS,
         "points_total": TOTAL_POINTS,
         "questions_per_subject": QUESTIONS_PER_SUBJECT,
         "points_per_subject": POINTS_PER_SUBJECT,
