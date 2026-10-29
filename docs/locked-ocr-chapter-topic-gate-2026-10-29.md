@@ -39,3 +39,30 @@ Both `exam_style_readiness` and `auto_generation.select_exam_style` now exclude 
 - No production rollout, no paid AI inference, no original 28-question historical mutations.
 
 **Next:** run the module on private originals in an authorized independent QA environment, compare the chapter and 8-bucket counts with source_documents/source_units/exam_transcript_candidates, resolve chapter-unmapped page types, then build confirmed textbook concept-to-exam links. The locked byte identities and all eight original exam-style buckets remain the sole input basis.
+
+## Reproduction (original bytes stay private)
+
+From `backend/`, with a local *private* directory matching
+`app/ocr_collection.json` and the checked-in immutable lock:
+
+```bash
+python -m app.offline_chapter_coverage \
+  --directory /private/locked-six-sources \
+  --report /private/audits/chapter-coverage.json
+
+python -m app.offline_topic_linkage \
+  --directory /private/locked-six-sources \
+  --report /private/audits/exam-chapter-candidates.json
+```
+
+Both commands fail if even one of the locked six original files is missing or
+its bytes differ. They write private `0600` JSON with *counts and source
+headings only*. Neither command contacts a provider, starts a paid AI job,
+publishes questions or writes a database.
+
+After the QA database is physically isolated and authorized, compare
+`source_readiness.audit` for each original: `mapped_chapter_count`,
+`mapped_chapter_ocr_pages`, `chapter_unmapped_ocr_pages`, and
+`chapter_unmapped_ocr_page_count`. Resolve discrepancies before accepting
+the real-source question-bank preflight. An unclassified page is not
+automatically a missing page.
