@@ -210,3 +210,64 @@ def test_new_tab_without_session_pointer_preserves_unsynced_local_answers(https_
     next_page.locator('#prepare').click();expect(next_page.locator('#questions article:visible')).to_have_count(1);wait_saved(next_page)
     assert row(qa,'SELECT value FROM answer_drafts WHERE paper_id=%s AND question_id=%s',(pid,q['id']))['value']['text']=='关闭标签页前尚未同步的有效草稿'
     open_question(next_page,q['id']);expect(next_page.locator('#questions textarea:visible')).to_have_value('关闭标签页前尚未同步的有效草稿')
+
+
+def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_browser):
+    """A browser with old v7 shell caches obtains v8 assets before an offline reload.
+
+    The prior CacheStorage payload is deliberately marked stale. It cannot be used
+    to pass this test: after activation only the new cache can serve offline.
+    Uses real HTTPS, real service worker activation, and disposable PostgreSQL.
+    """
+    qa = https_app
+    context = https_browser
+    page = context.new_page()
+    page.goto(qa['origin'] + '/static/model.html')
+    page.evaluate("""async () => {
+      const old = await caches.open('xiaohan-training-shell-v7-offline-recovery');
+      await old.put('/static/training.js', new Response(
+        'window.__staleV7Training = true;', {
+          headers: {'Content-Type': 'application/javascript'}
+        }
+      ));
+      await old.put('/', new Response(
+        '<!doctype html><title>obsolete v7 shell</title>', {
+          headers: {'Content-Type': 'text/html'}
+        }
+      ));
+    }""")
+    assert page.evaluate(
+        "async () => (await caches.keys()).includes('xiaohan-training-shell-v7-offline-recovery')"
+    )
+    paper = login_start(page, qa)
+    q = next(x for x in paper['questions'] if x['question_type'] == 'term')
+    open_question(page, q['id'])
+    field = page.locator('#questions textarea:visible')
+    field.fill('v7缓存升级前的合成草稿')
+    wait_saved(page)
+    page.evaluate('navigator.serviceWorker.ready')
+    page.wait_for_function('navigator.serviceWorker.controller !== null')
+    page.wait_for_function("""async () => {
+      const keys = await caches.keys();
+      return keys.includes('xiaohan-training-shell-v8-offline-recovery-upgrade') &&
+             !keys.includes('xiaohan-training-shell-v7-offline-recovery');
+    }""")
+    assert page.evaluate("""async () => {
+      const cache = await caches.open('xiaohan-training-shell-v8-offline-recovery-upgrade');
+      const asset = await cache.match('/static/training.js');
+      return !!asset && (await asset.text()).includes('cachedPaper(username, paper.paper_id)');
+    }""")
+    context.set_offline(True)
+    field.fill('v8升级后离线刷新保留的草稿')
+    page.reload()
+    expect(page.locator('#questions article:visible')).to_have_count(1)
+    expect(page.locator('#questions textarea:visible')).to_have_value('v8升级后离线刷新保留的草稿')
+    assert page.evaluate('serverConfirmed') is False
+    assert page.evaluate('paper.timing.deadline') == paper['timing']['deadline']
+    assert page.evaluate('typeof window.__staleV7Training') == 'undefined'
+    context.set_offline(False)
+    page.evaluate('reconnect()')
+    wait_saved(page)
+    assert row(qa, 'SELECT value FROM answer_drafts WHERE paper_id=%s AND question_id=%s',
+               (paper['paper_id'], q['id']))['value']['text'] == 'v8升级后离线刷新保留的草稿'
+    page.close()
