@@ -10,7 +10,16 @@ from test_ocr_only import material
 
 
 def test_style_anchor_reads_real_exam_transcript_without_candidate_packet(db, tmp_path):
-    path, metadata = material(tmp_path, "biochemistry_exams")
+    path, metadata = material(tmp_path, "biochemistry_exams", content=[
+        "2023年中国科学技术大学生物化学真题",
+        "单项选择题",
+        "1. Synthetic 2023 question",
+        "A. Option one B. Option two C. Option three D. Option four",
+        "2024年中国科学技术大学生物化学真题",
+        "简答题",
+        "1. Synthetic 2024 question",
+        "2025年中国科学技术大学生物化学真题",
+    ])
     sources.import_source(db, path, metadata)
     assert db.execute("SELECT count(*) AS n FROM candidate_review_packets").fetchone()["n"] == 0
     style = select_exam_style(db, "biochemistry", "single_choice")
@@ -41,9 +50,11 @@ def test_style_example_prefers_same_actual_topic_without_inferring_scientific_an
         "2023年中国科学技术大学生物化学真题",
         "单项选择题",
         "1. Synthetic ATP-dependent enzyme example",
+        "A. First B. Second C. Third D. Fourth",
         "2024年中国科学技术大学生物化学真题",
         "单项选择题",
         "1. Synthetic SRP-associated targeting example",
+        "A. Alpha B. Beta C. Gamma D. Delta",
         "2025年中国科学技术大学生物化学真题",
     ])
     sources.import_source(db, path, metadata)
@@ -67,6 +78,7 @@ def test_separate_untranscribed_figure_is_excluded_from_generation_style(db, tmp
         "单项选择题",
         "1. Examine the synthetic diagram below",
         "2. Complete self-contained synthetic text question",
+        "A. First B. Second C. Third D. Fourth",
         "2026年中国科学技术大学生物化学真题",
     ])
     image = tmp_path / "synthetic-exam-figure.png"
@@ -101,6 +113,7 @@ def test_critical_following_docx_table_blocks_parent_style_question(db, tmp_path
         "单项选择题",
         "1. Interpret the synthetic results in the following table",
         "2. Self-contained synthetic choice question",
+        "A. First B. Second C. Third D. Fourth",
         "2026年中国科学技术大学生物化学真题",
     ])
     doc = Document(path)
