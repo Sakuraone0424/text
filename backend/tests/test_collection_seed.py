@@ -192,3 +192,22 @@ def test_cannot_initialize_fresh_qa_on_nonstaging_cli(tmp_path):
             "--target", "development",
         ])
     assert not (tmp_path / "bad.json").exists()
+
+
+def test_six_real_import_operations_with_failed_commit_emit_no_false_report(
+    db, tmp_path, monkeypatch
+):
+    root, lock = synthetic_collection(tmp_path)
+    items = seed.preflight(root, lock_path=lock)
+
+    @contextmanager
+    def simulated_commit_failure(_schema, _target, **options):
+        assert not options.get("readonly")
+        yield db
+        raise RuntimeError("simulated PostgreSQL COMMIT failure")
+
+    monkeypatch.setattr(seed, "isolated_db", simulated_commit_failure)
+    report = tmp_path / "no-success-on-commit-error.json"
+    with pytest.raises(RuntimeError, match="COMMIT failure"):
+        seed.import_isolated(items, "source_staging_rollback_test", "staging", report)
+    assert not report.exists()
