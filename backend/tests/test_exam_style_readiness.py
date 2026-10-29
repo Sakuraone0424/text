@@ -50,3 +50,38 @@ def test_question_with_unreadable_figure_is_not_safe_style_anchor(db, tmp_path):
     assert term["observed_question_starts"] == 1
     assert term["safe_style_anchors"] == 0
     assert term["blocked_by_parsing_or_images"] == 1
+
+
+def test_image_in_next_paragraph_blocks_parent_question_style_anchor():
+    from app.transcript_analysis import candidates
+
+    item = {
+        "year_start": 1998,
+        "year_end": 2026,
+    }
+    texts = [
+        "2025年中国科学技术大学考研真题",
+        "名词解释",
+        "1. Identify the organelle illustrated here",
+        "[DOCX image without transcribed text]",
+        "2. Name the other organelle",
+    ]
+    units = [
+        {
+            "id": n,
+            "text": value,
+            "section": "",
+            "quality_flags": (
+                ["image_dependent", "untranscribed_image"] if n == 4 else []
+            ),
+        }
+        for n, value in enumerate(texts, start=1)
+    ]
+    rows = list(candidates(units, item))
+    starts = [row for row in rows if row["analysis"]["role"] == "question_start"]
+    assert len(starts) == 2
+    assert starts[0]["transcription"] == texts[2]
+    assert "untranscribed_image" in starts[0]["concerns"]
+    assert "image_dependent" in starts[0]["concerns"]
+    assert "untranscribed_image" not in starts[1]["concerns"]
+    assert "image_dependent" not in starts[1]["concerns"]
