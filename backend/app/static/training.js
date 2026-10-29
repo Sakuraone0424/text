@@ -60,11 +60,19 @@ async function api(path, options = {}) {
     throw error;
   }
   if (!r.ok) {
-    const e = new Error(
-      typeof value.detail === "string"
-        ? value.detail
-        : JSON.stringify(value.detail),
-    );
+    let reason = value.detail;
+    if (typeof reason === "string" && reason.startsWith("{")) {
+      try { reason = JSON.parse(reason); } catch { /* use original text */ }
+    }
+    if (reason && reason.code === "insufficient_reviewed_bank") {
+      const missing = (reason.shortages || []).filter(x => x.missing > 0);
+      reason = "自动核验合格题库不足，尚不能安全生成60题：" +
+        missing.map(x => (x.subject === "biochemistry" ? "生化" : "细胞") +
+          " " + (names[x.question_type] || x.question_type) +
+          "缺" + x.missing + "题").join("；") +
+        "。系统不会使用未经核验的题目凑数。";
+    }
+    const e = new Error(typeof reason === "string" ? reason : JSON.stringify(reason));
     e.status = r.status;
     if ([401, 403].includes(r.status) && path !== "/auth/login") rejectAccess();
     if (r.status >= 500) serverConfirmed = false;
