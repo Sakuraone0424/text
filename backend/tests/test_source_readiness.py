@@ -18,6 +18,7 @@ def test_six_unimported_sources_are_explicitly_unknown(db, client):
     assert report["complete_for_generation"] is False
     assert all(x["status"] == "not_imported" for x in report["files"])
     assert all(x["source_sha256"] is None for x in report["files"])
+    assert all(x["chapter_unmapped_ocr_pages"] == [] for x in report["files"])
     response = client.get("/v2/quality/six-source-readiness", headers=LEARNER)
     assert response.status_code == 200
     assert len(response.json()["files"]) == 6
@@ -37,6 +38,10 @@ def test_synthetic_textbook_source_report_has_real_hash_and_page_checks(db, tmp_
     assert book["blank_ocr_pages"] == []
     assert len(book["source_sha256"]) == 64
     assert book["mapped_chapter_count"] >= 1
+    assert book["mapped_chapter_ocr_pages"] == 385
+    assert book["chapter_unmapped_ocr_pages"] == []
+    assert book["chapter_unmapped_ocr_page_count"] == 0
+    assert book["chapter_mapping_scientifically_verified"] is False
     assert book["printed_original_verified"] is False
     assert report["complete_for_generation"] is False
     assert all(x["status"] == "not_imported" for x in report["files"] if x["key"] != "cell_biology")
