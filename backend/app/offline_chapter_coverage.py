@@ -62,6 +62,15 @@ def report(directory, *, lock_path=LOCK):
                 "scientific_answer_verified": False,
             })
         unmapped_pages = sorted(set(range(1, expected + 1)) - set(page_chapters))
+        first_body_page = min(page_chapters) if page_chapters else None
+        frontmatter_unmapped = (
+            [p for p in unmapped_pages if p < first_body_page]
+            if first_body_page is not None else []
+        )
+        body_or_after_unmapped = [
+            p for p in unmapped_pages if
+            first_body_page is None or p >= first_body_page
+        ]
         books.append({
             "key": item["key"],
             "sha256": item["sha256"],
@@ -71,6 +80,12 @@ def report(directory, *, lock_path=LOCK):
             "pages_with_any_mapped_chapter": len(page_chapters),
             "unmapped_ocr_pages": unmapped_pages,
             "unmapped_ocr_page_count": len(unmapped_pages),
+            "first_mapped_body_ocr_page": first_body_page,
+            "unmapped_before_first_chapter": frontmatter_unmapped,
+            "unmapped_at_or_after_first_chapter": body_or_after_unmapped,
+            "chapter_body_has_no_unmapped_ocr_pages": (
+                first_body_page is not None and not body_or_after_unmapped
+            ),
             "unclassified_paragraph_units": len(unclassified),
             "pages_spanning_multiple_chapters": sorted(
                 p for p, names in page_chapters.items() if len(names) > 1
