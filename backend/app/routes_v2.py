@@ -142,6 +142,14 @@ def result(paper_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: service.result(c, u, paper_id), username)
 
 
+@router.get("/papers/{paper_id}/verification")
+def question_verification(paper_id: int, username: str = Depends(require_auth)):
+    """Only the owner of a submitted exam may view evidence audit disclosures."""
+    from app.question_verification import report
+
+    return operation(lambda c, u: report(c, u, paper_id), username)
+
+
 @router.get("/papers/{paper_id}/grading-activity")
 def grading_activity(paper_id: int, username: str = Depends(require_auth)):
     """Read-only progress for the authenticated owner; no AI task is started."""
