@@ -15,6 +15,7 @@ from app.question_quality import (
 )
 from app.common import today_cn
 from app.training_spec import COUNTS, SUBJECTS, validate_items
+from app import training_spec_v2 as spec_v2
 
 
 class PreparationPaused(ValueError):
@@ -135,6 +136,8 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     day = day or today_cn()
     lock_bank(conn)
     spec = blueprint.model_dump()
+    is_v2 = spec["specification"] == spec_v2.SPECIFICATION
+    spec_counts = spec_v2.COUNTS if is_v2 else COUNTS
     existing = conn.execute(
         "SELECT * FROM papers_v2 WHERE user_id=%s AND paper_date=%s", (user_id, day)
     ).fetchone()
@@ -196,6 +199,12 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         except ValueError:
             reasons.append("invalid_question_or_rubric")
         if not reasons:
+            if is_v2 and (
+                content.get("question_type") not in spec_v2.POINTS
+                or content.get("max_points") != spec_v2.POINTS[content["question_type"]]
+            ):
+                reasons.append("not_compatible_with_60q_scoring")
+        if not reasons:
             automatic = conn.execute(
                 "SELECT status FROM auto_question_states WHERE question_id=%s",
                 (row["id"],),
@@ -205,7 +214,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
 
                 if not ready(conn, row["id"]):
                     reasons.append("automatic_quality_not_ready_or_stale")
-            elif os.environ.get("QUIZ_AUTO_ONLY") == "1":
+            elif is_v2 or os.environ.get("QUIZ_AUTO_ONLY") == "1":
                 reasons.append("automatic_ready_qualification_required")
             else:
                 # Historical API compatibility; new automatic records never fall back to it.
@@ -250,7 +259,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         ]
         eligible.append(row)
     for subject in SUBJECTS:
-        for kind, count in COUNTS.items():
+        for kind, count in spec_counts.items():
             pool = []
             for row in eligible:
                 content = row["content"]
@@ -297,7 +306,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             )
     if shortages:
         raise BankShortage(shortages)
-    validate_items([r["content"] for r in selected])
+    (spec_v2.validate_items if is_v2 else validate_items)([r["content"] for r in selected])
     from app.answer_cues import conflict
 
     if any(
@@ -386,7 +395,7 @@ def load_paper(conn, user_id, paper_id):
     return {
         "paper_id": paper_id,
         "date": row["paper_date"].isoformat(),
-        "mode": "reviewed_28",
+        "mode": "reviewed_60" if row["blueprint"].get("specification") == spec_v2.SPECIFICATION else "reviewed_28",
         "blueprint": row["blueprint"],
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),
