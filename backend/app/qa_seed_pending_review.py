@@ -52,6 +52,20 @@ CREATE TABLE IF NOT EXISTS qa_source_risk_events(
     created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     UNIQUE(issue_key,reviewer,review_phase)
 );
+CREATE OR REPLACE FUNCTION qa_source_risk_reject_mutation()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+    RAISE EXCEPTION 'QA source risk audits are append-only; add a new review event';
+END;
+$;
+DROP TRIGGER IF EXISTS qa_risk_items_append_only ON qa_source_risk_items;
+CREATE TRIGGER qa_risk_items_append_only
+BEFORE UPDATE OR DELETE ON qa_source_risk_items
+FOR EACH ROW EXECUTE FUNCTION qa_source_risk_reject_mutation();
+DROP TRIGGER IF EXISTS qa_risk_events_append_only ON qa_source_risk_events;
+CREATE TRIGGER qa_risk_events_append_only
+BEFORE UPDATE OR DELETE ON qa_source_risk_events
+FOR EACH ROW EXECUTE FUNCTION qa_source_risk_reject_mutation();
 CREATE OR REPLACE VIEW qa_source_risk_progress AS
     SELECT i.issue_key,i.source_key,i.risk_flag,
       CASE
@@ -190,22 +204,35 @@ def main():
         ).fetchone()["n"]
         if status["total"] != len(rows) or status["pending"] != len(rows):
             raise ValueError("QA risk queue incomplete or contaminated")
-        if event_count:
-            raise ValueError("QA automatic seeding cannot fabricate review decisions")
+        # Existing real reviewer events are permitted and immutable. The seeder
+        # does not insert any review event; re-read after commit to detect drift.
     with isolated_db(schema,"staging",readonly=True) as conn:
         final = conn.execute(
             "SELECT count(*) AS total,"
-            "count(*) FILTER (WHERE review_state='pending') AS pending "
+            "count(*) FILTER (WHERE review_state='pending') AS pending,"
+            "count(*) FILTER (WHERE review_state='rejected_repair_required') AS rejected,"
+            "count(*) FILTER (WHERE review_state="
+            "'two_distinct_reviews_recorded_not_automatic_science_approval') AS reviewed "
             "FROM qa_source_risk_progress"
         ).fetchone()
-        if final["total"] != len(rows) or final["pending"] != len(rows):
+        event_count_after = conn.execute(
+            "SELECT count(*) AS n FROM qa_source_risk_events"
+        ).fetchone()["n"]
+        if (
+            final["total"] != len(rows)
+            or final["pending"] + final["rejected"] + final["reviewed"] != len(rows)
+            or event_count_after != event_count
+        ):
             raise ValueError("QA risk queue failed independent postcommit readback")
     print("QA_RISK_LEDGER_SQL_READBACK=" + json.dumps({
-        "status":"pending_issues_seeded_postcommit_readback_verified",
+        "status":"source_risks_seeded_independent_postcommit_readback_verified",
         "risk_text_occurrences":stats["text"],
-        "unreviewed_media_objects":stats["media"],
-        "total_pending_issues":len(rows),
-        "two_distinct_independent_reviews_completed":0,
+        "original_media_objects":stats["media"],
+        "total_tracked_issues":len(rows),
+        "pending_issues":final["pending"],
+        "rejected_requires_repair":final["rejected"],
+        "review_events_already_recorded":event_count_after,
+        "two_distinct_review_recorded":final["reviewed"],
         "scientific_resolution_completed":False,
         "original_source_text_logged":False,
     }, separators=(",",":"),sort_keys=True),flush=True)
