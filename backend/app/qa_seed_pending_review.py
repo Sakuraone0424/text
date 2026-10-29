@@ -53,11 +53,11 @@ CREATE TABLE IF NOT EXISTS qa_source_risk_events(
     UNIQUE(issue_key,reviewer,review_phase)
 );
 CREATE OR REPLACE FUNCTION qa_source_risk_reject_mutation()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'QA source risk audits are append-only; add a new review event';
 END;
-$;
+$$;
 DROP TRIGGER IF EXISTS qa_risk_items_append_only ON qa_source_risk_items;
 CREATE TRIGGER qa_risk_items_append_only
 BEFORE UPDATE OR DELETE ON qa_source_risk_items
