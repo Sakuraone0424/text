@@ -763,8 +763,44 @@ async function showResult() {
   }
   window.TrainingUI?.result(result);
   startGradingActivity(paper.paper_id);
+  showVerificationStatus(paper.paper_id);
   status("已交卷。照片识别不清时须人工确认，不会直接判零。");
 }
+
+async function showVerificationStatus(paperId) {
+  const old = $("verification-status");
+  if (old) old.remove();
+  const root = element("section", undefined, $("result"));
+  root.id = "verification-status";
+  root.className = "card verification-status";
+  element("h2", "本卷教材与答案核验状态", root);
+  const summary = element("p", "正在读取真实核验记录……", root);
+  const detail = element("details", undefined, root);
+  element("summary", "逐题核验记录", detail);
+  try {
+    const result = await api("/v2/papers/" + paperId + "/verification");
+    if (!root.isConnected || paper?.paper_id !== paperId) return;
+    const excerpt = result.items.filter(q => q.ocr_quote_matches_stored_text).length;
+    const ai = result.items.filter(q => q.independent_ai_science_and_answer_review).length;
+    const audits = result.items.filter(q => q.review_audit_record_matches_current_question).length;
+    const bibliography = result.items.filter(q => q.book_metadata_pending).length;
+    summary.textContent = "OCR摘录匹配 " + excerpt + "/" + result.count +
+      "；独立AI双轮复核 " + ai + "/" + result.count +
+      "；审题记录匹配 " + audits + "/" + result.count +
+      "；书目信息待核查 " + bibliography + "题。";
+    element("p", "这些记录不代表已对照纸质原书逐页人工审核，也不代表真题官方答案核实。", root);
+    for (const entry of result.items) {
+      element("p", "第" + entry.position + "题： " +
+        (entry.ocr_quote_matches_stored_text ? "OCR摘录字段匹配" : "OCR摘录匹配未确认") + " · " +
+        (entry.independent_ai_science_and_answer_review ? "独立AI证据复核通过" :
+          entry.review_audit_record_matches_current_question ? "存在匹配的审题记录" : "科学复核状态未确认") +
+        (entry.book_metadata_pending ? " · 书目信息待核查" : ""), detail);
+    }
+  } catch (error) {
+    summary.textContent = "暂时无法核验本卷出处：" + error.message;
+  }
+}
+
 let gradingActivityTimer = null;
 function startGradingActivity(paperId) {
   if (gradingActivityTimer) clearInterval(gradingActivityTimer);
