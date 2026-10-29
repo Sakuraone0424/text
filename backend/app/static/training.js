@@ -654,6 +654,10 @@ async function showResult() {
   for (const answer of result.answers) {
     const article = element("article", undefined, $("result"));
     element("p", answer.stem, article);
+    if (answer.question_type === "single_choice" && answer.options) {
+      for (const [letter, label] of Object.entries(answer.options).sort(([a], [b]) => a.localeCompare(b)))
+        element("p", letter + ". " + label, article);
+    }
     try {
       for (const id of JSON.parse(answer.answer).image_ids || []) {
         const image = element("img", undefined, article);
@@ -672,15 +676,16 @@ async function showResult() {
     } catch {
       response = { text: answer.answer };
     }
-    element(
-      "p",
-      "你的作答：" +
-        (response.text ||
-          (response.blanks || []).join("；") ||
-          (response.image_ids?.length ? "手写图片" : "未作答")),
-      article,
-    );
-    element("p", "参考答案：" + answer.solution, article);
+    const ownAnswer = response.text ||
+      (response.blanks || []).join("；") ||
+      (response.image_ids?.length ? "手写图片" : "未作答");
+    const ownChoice = answer.question_type === "single_choice"
+      ? answer.options?.[ownAnswer.toUpperCase()]
+      : null;
+    element("p", "你的作答：" + ownAnswer +
+      (ownChoice ? ". " + ownChoice : ""), article);
+    element("p", "参考答案：" +
+      (answer.solution_display || answer.solution), article);
     for (const criterion of answer.rubric)
       element(
         "p",
@@ -742,11 +747,17 @@ async function showResult() {
       };
     }
     for (const evidence of answer.evidence) {
+      const bibliographicPending = /未核查|待核查/.test(
+        (evidence.authors || "") + " " + (evidence.edition || "")
+      );
       element(
         "p",
-        `${evidence.textbook} · ${evidence.edition} · ${evidence.chapter} · ${evidence.locator}`,
+        "教材依据：" + evidence.textbook + " · " + evidence.chapter +
+          " · " + evidence.locator,
         article,
       );
+      if (bibliographicPending)
+        element("p", "书目信息尚未核验；OCR定位不等于纸书页码。", article);
       element("blockquote", evidence.excerpt, article);
     }
   }
