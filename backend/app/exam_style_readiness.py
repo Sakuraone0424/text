@@ -7,9 +7,10 @@ by the AI generator. Scientific answers remain textbook-evidence-only.
 """
 from collections import defaultdict
 from app.source_policy import current_source_sql, pinned_source_bytes
+from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
 from app.training_spec_v2 import SUBJECTS, COUNTS
 
-UNRESOLVED_IMAGE = {"corrupt_ocr", "untranscribed_image", "image_dependent"}
+UNRESOLVED_IMAGE = set(STYLE_SOURCE_BLOCKERS)  # Includes tables, OCR doubts, figures
 BOUNDARY_ISSUES = {"question_boundary_unconfirmed", "question_type_unknown", "year_unassigned"}
 
 
