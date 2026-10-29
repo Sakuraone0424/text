@@ -134,3 +134,33 @@ def test_generation_accept_rejects_exam_as_answer_and_cross_subject_source():
         )
         with pytest.raises(ValueError, match="generation_source_not_in_locked"):
             accept(None, job)
+
+
+def test_automatic_two_day_reserve_refuses_unpinned_ready_database_rows(monkeypatch):
+    from app import auto_quality
+    from app.auto_generation import eligible_verified_reserve
+
+    lock = json.loads(
+        (Path(__file__).parents[1] / "app" / "ocr_source_sha256_lock.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    book = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_upper")
+    evidence = {
+        "file_id": book["file_id"],
+        "source_sha256": lock["files"][book["key"]]["sha256"],
+    }
+    rows = [
+        {"id": 1, "content": {"evidence": [{**evidence, "source_sha256": "0" * 64}]}},
+        {"id": 2, "content": {"evidence": [evidence]}},
+        {"id": 3, "content": {"evidence": []}},
+    ]
+    audited = []
+    monkeypatch.setattr(
+        auto_quality,
+        "ready",
+        lambda _conn, qid: audited.append(qid) or True,
+    )
+    assert eligible_verified_reserve(None, rows) == 1
+    # Never spend validation work on unrelated or changed source revisions.
+    assert audited == [2]
