@@ -92,7 +92,8 @@ def review(
 
 def due(conn, user_id):
     return conn.execute(
-        "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem "
+        "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem, "
+        "q.content->>'question_type' AS question_type,q.content->'options' AS options "
         "FROM fsrs_cards c JOIN reviewed_questions q ON q.id=c.question_id "
         "WHERE c.user_id=%s AND c.due<=clock_timestamp() ORDER BY c.due,c.question_id",
         (user_id,),
