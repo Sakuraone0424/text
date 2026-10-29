@@ -11,23 +11,47 @@ from app.ai_jobs import enqueue, content_sha
 STARTUP_RESERVE_DAYS = 2  # 60 questions/day, 120 verified candidates per user
 
 
-def select_exam_style(conn, subject, kind):
-    """Select a real supplied past-exam question without manual packet seeding.
+def select_exam_style(conn, subject, kind, concept=None):
+    """Find a genuine exam-style anchor; lexical overlap is NOT science proof.
 
-    Preserve its year and actual text; no inferred missing exam questions.
+    Prefer the same topic only when it appears literally in the old question.
+    Otherwise spread stylistic examples across real years so the generator does
+    not mimic the identical recent exam item for every topic.
     """
-    return conn.execute(
-        "SELECT t.unit_id AS id,t.year FROM exam_transcript_candidates t "
+    import re
+    import unicodedata
+
+    rows = conn.execute(
+        "SELECT t.unit_id AS id,t.year,t.transcription FROM exam_transcript_candidates t "
         "JOIN source_documents d ON d.id=t.document_id "
         "JOIN source_units su ON su.id=t.unit_id "
         "WHERE " + current_source_sql("d", kind="exam_transcription") +
         " AND d.subject=%s AND t.question_type=%s "
         "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
         "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent']) "
-        "ORDER BY t.year DESC,t.id LIMIT 1",
+        "ORDER BY t.year DESC,t.id LIMIT 200",
         (subject, kind),
-    ).fetchone()
-
+    ).fetchall()
+    if not rows:
+        return None
+    relation = (concept or {}).get("relation") or {}
+    terms = [
+        str(relation.get(key, "")).strip() for key in ("name", "target")
+    ]
+    def normal(text):
+        return re.sub(r"\\s+", "", unicodedata.normalize("NFKC", text).casefold())
+    anchors = [normal(x) for x in terms if len(normal(x)) >= 2]
+    matches = [
+        sum(term in normal(row["transcription"]) for term in anchors)
+        for row in rows
+    ]
+    best = max(matches, default=0)
+    pool = [row for row, score in zip(rows, matches) if score == best]
+    idx = (int((concept or {}).get("unit_id", 0)) % len(pool)) if concept else 0
+    chosen = dict(pool[idx])
+    chosen["lexical_topic_overlap"] = best
+    chosen["scope"] = "past_exam_style_not_textbook_answer_evidence"
+    return chosen
 
 def plan(conn, uid):
     existing = conn.execute(
@@ -78,7 +102,7 @@ def plan(conn, uid):
                 # transcript, rather than requiring an earlier hand-created
                 # candidate packet. Question boundaries must be recognized and
                 # text/image risks resolved before using an item as style.
-                style = select_exam_style(conn, subject, kind)
+                style = select_exam_style(conn, subject, kind, concept)
                 if not style:
                     continue
                 s = snapshot_unit(conn, style["id"])
@@ -105,6 +129,7 @@ def plan(conn, uid):
                         evidence=[u],
                         style=[s],
                         style_year=style["year"],
+                        style_overlap=style["lexical_topic_overlap"],
                         source_bibliography=book,
                         schema=Question.model_json_schema(),
                         instructions=exam_instructions(kind, POINTS[kind]),
@@ -148,7 +173,11 @@ def accept(conn, job):
             dict(
                 unit_id=u["unit_id"],
                 year=p["style_year"],
-                relationship="Exact user-provided genuine past-exam style anchor; independent scientific and answer review required",
+                relationship=(
+                    "Genuine past-exam style with lexical topic overlap; not answer evidence"
+                    if p.get("style_overlap", 0) else
+                    "Genuine past-exam style of same subject/type; topical similarity unverified"
+                ),
             )
             for u in p["style"]
         ],
