@@ -67,6 +67,23 @@ def preflight(directory, *, lock_path=LOCK):
                 raise ValueError("Blank OCR page requires explicit source version fix: " + ident)
         if not prepared["rows"]:
             raise ValueError("Missing source text units: " + ident)
+        media_inventory = None
+        if item["kind"] == "exam_transcription":
+            # Unlike plain DOCX text extraction, this retains the 27+4 image
+            # byte identities and Word paragraph coordinates as unresolved
+            # visual evidence. A relationship is NOT a scientific transcript.
+            from app.exam_media_audit import audit_bytes
+
+            media_inventory = audit_bytes(data)
+            expected_media = locked_item.get("embedded_media_objects")
+            if (
+                media_inventory["source_sha256"] != digest
+                or (
+                    expected_media is not None
+                    and media_inventory["media_objects"] != expected_media
+                )
+            ):
+                raise ValueError("Pinned DOCX media identity/count mismatch: " + ident)
         flags = Counter(f for r in prepared["rows"] for f in r["quality_flags"])
         loaded.append({
             "key": ident, "path": str(path), "metadata": metadata,
@@ -75,6 +92,7 @@ def preflight(directory, *, lock_path=LOCK):
             "ocr_units": len(prepared["rows"]),
             "risk_flags": dict(flags),
             "source_kind": item["kind"],
+            "exam_media_inventory": media_inventory,
         })
     if sum(item["ocr_page_markers"] for item in loaded) != 1915:
         raise ValueError("The four textbooks require exactly 1915 OCR page markers")
