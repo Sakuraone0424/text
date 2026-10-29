@@ -164,3 +164,47 @@ def test_automatic_two_day_reserve_refuses_unpinned_ready_database_rows(monkeypa
     assert eligible_verified_reserve(None, rows) == 1
     # Never spend validation work on unrelated or changed source revisions.
     assert audited == [2]
+
+
+def test_generated_single_choice_must_revalidate_complete_contiguous_original_options():
+    import pytest
+    from app.auto_generation import accept
+
+    locked = json.loads(
+        (Path(__file__).parents[1] / "app" / "ocr_source_sha256_lock.json")
+        .read_text(encoding="utf-8")
+    )
+    upper = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_upper")
+    exam = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_exams")
+    book = dict(
+        file_id=upper["file_id"],
+        source_sha256=locked["files"][upper["key"]]["sha256"],
+        source_kind="textbook",subject="biochemistry",quality_flags=[],
+    )
+    exam_base = dict(
+        file_id=exam["file_id"],
+        source_sha256=locked["files"][exam["key"]]["sha256"],
+        source_kind="exam_transcription",subject="biochemistry",quality_flags=[],
+    )
+    stem = dict(exam_base,unit_id=40,text="1. 请选择正确的答案")
+    options = dict(exam_base,unit_id=41,text="A.甲 B.乙 C.丙 D.丁")
+    for style in (
+        [stem],  # Source question has no options in the AI payload.
+        [stem,dict(options,unit_id=42)],  # Spliced from a noncontiguous unit.
+        [stem,dict(options,text="A.甲 B.乙 C.丙")],  # D missing.
+        [stem,dict(options,file_id=upper["file_id"],
+                   source_sha256=locked["files"][upper["key"]]["sha256"],
+                   source_kind="exam_transcription")],  # Mixed source identity.
+    ):
+        fake_job = dict(
+            state="succeeded",
+            result={"real_api":True,"response":{"question":{}}},
+            payload=dict(subject="biochemistry",question_type="single_choice",
+                         evidence=[book],style=style),
+        )
+        with pytest.raises(ValueError,match=(
+            "historical_single_choice_options_incomplete_or_spliced"
+            if style[-1].get("file_id")==exam["file_id"] else
+            "generation_source_not_in_locked"
+        )):
+            accept(None,fake_job)
