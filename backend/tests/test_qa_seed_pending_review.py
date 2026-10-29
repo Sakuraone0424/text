@@ -52,3 +52,12 @@ def test_changed_locked_book_source_rejected():
 def test_duplicate_source_issue_identity_refuses_approval_or_silent_merge():
     with pytest.raises(ValueError,match="Duplicate fingerprint"):
         build_rows([unit(1,["image_dependent"]),unit(1,["image_dependent"])],[])
+
+
+def test_append_only_review_trigger_has_valid_postgres_dollar_quoting():
+    from app.qa_seed_pending_review import DDL
+    assert "RETURNS trigger LANGUAGE plpgsql AS $$" in DDL
+    assert "END;\n$$;" in DDL
+    assert "BEFORE UPDATE OR DELETE ON qa_source_risk_items" in DDL
+    assert "BEFORE UPDATE OR DELETE ON qa_source_risk_events" in DDL
+    assert "count(DISTINCT e.reviewer)" in DDL
