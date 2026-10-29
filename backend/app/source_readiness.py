@@ -171,8 +171,18 @@ def audit(conn):
         "expected_files": len(FILES),
         "imported_files": sum(r["document_id"] is not None for r in rows),
         "integrity_passed_files": sum(r["status"].startswith("integrity_passed") for r in rows),
-        "complete_for_generation": all(
+        "all_six_byte_integrity_checks_passed": all(
             r["status"].startswith("integrity_passed") for r in rows
+        ),
+        "complete_for_generation": all(
+            r["status"] == "integrity_passed" and
+            r["embedded_media_review_status"] in ("not_applicable", "no_embedded_media")
+            for r in rows
+        ),
+        "generation_risk_note": (
+            "Hash/marker integrity does not remove per-unit scientific or figure "
+            "uncertainties. Automatic generation must independently screen each "
+            "source unit and never rely only on this collection-level boolean."
         ),
         "note": (
             "OCR hash, index and page-marker checks do not establish scientific "
