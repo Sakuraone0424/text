@@ -228,6 +228,17 @@ def login(page, base):
     page.locator("#start").wait_for(state="visible")
 
 
+def open_question(page, question_id):
+    """The redesigned UI keeps all drafts mounted; navigation only changes visibility."""
+    page.locator("#question-map").click()
+    page.locator(f'#question-grid button[data-question-id="{question_id}"]').click()
+
+
+def confirm_submission(page):
+    page.locator("#submit").click()
+    page.locator("#confirm-submit").click()
+
+
 def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     from test_timed_training import image_bytes
 
@@ -247,7 +258,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     assert page.locator("details").count() == 0
     assert page.locator("article").count() == 0
     page.locator("#start").click()
-    page.locator("article").first.wait_for()
+    page.locator("#questions article:not([hidden])").wait_for()
     pid = client.post(
         "/v2/papers",
         json={"specification": "xiaohan-150-60-v1", "quotas": blueprint.quotas},
@@ -257,6 +268,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     assert len(active["questions"]) == 28
     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
     for item in active["questions"]:
+        open_question(page, item["id"])
         article = page.locator(f"article[data-id='{item['id']}']")
         if item["question_type"] == "single_choice":
             article.locator(".option").first.click()
@@ -268,6 +280,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
         "Object.keys(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('quiz:v2:')))).pending).length===0"
     )
     term = next(i for i in active["questions"] if i["question_type"] == "term")
+    open_question(page, term["id"])
     article = page.locator(f"article[data-id='{term['id']}']")
     assert article.locator("input[type=file][capture=environment]").count() == 1
     article.locator("input[type=file]").nth(1).set_input_files(
@@ -276,7 +289,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     article.locator("img").wait_for()
     page.reload()
     page.locator("#prepare").click()
-    page.locator("article").first.wait_for()
+    page.locator("#questions article:not([hidden])").wait_for()
     assert (
         page.locator(f"article[data-id='{term['id']}'] textarea").input_value()
         == "Actual synthetic subjective explanation"
@@ -291,15 +304,15 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     second.locator("#login button").click()
     second.locator("#login").wait_for(state="hidden")
     second.locator("#prepare").click()
-    second.locator("article").first.wait_for()
+    second.locator("#questions article:not([hidden])").wait_for()
     assert (
         second.locator(f"article[data-id='{term['id']}'] textarea").input_value()
         == "Actual synthetic subjective explanation"
     )
     assert not second.evaluate("document.documentElement.scrollWidth > innerWidth")
     page.on("dialog", lambda dialog: dialog.accept())
-    page.locator("#submit").click()
-    page.locator("#result h2").wait_for()
+    confirm_submission(page)
+    page.locator("#result > h2").wait_for()
     assert page.get_by_text("本卷命题依据（训练优先级，不是考试概率）").count() == 1
     result = client.get(f"/v2/papers/{pid}/result").json()
     assert result["pending"] == 16 and result["graded_points"] == 30
@@ -348,11 +361,12 @@ def test_offline_text_and_photo_survive_reload_and_reconnect(live_app, browser):
     page = context.new_page()
     login(page, base)
     page.locator("#start").click()
-    page.locator("article").first.wait_for()
+    page.locator("#questions article:not([hidden])").wait_for()
     page.evaluate("navigator.serviceWorker.ready")
     page.wait_for_function("navigator.serviceWorker.controller !== null")
-    textarea = page.locator("textarea").first
-    qid = textarea.locator("xpath=..").get_attribute("data-id")
+    qid = page.locator("textarea").first.locator("xpath=..").get_attribute("data-id")
+    open_question(page, qid)
+    textarea = page.locator(f'article[data-id="{qid}"] textarea')
     context.set_offline(True)
     textarea.fill("Offline answer survives")
     article = page.locator(f"article[data-id='{qid}']")
@@ -363,7 +377,7 @@ def test_offline_text_and_photo_survive_reload_and_reconnect(live_app, browser):
         "document.querySelector('#status').textContent.includes('照片原件仍保留')"
     )
     page.reload()
-    page.locator("article").first.wait_for()
+    page.locator("#questions article:not([hidden])").wait_for()
     assert (
         page.locator(f"article[data-id='{qid}'] textarea").input_value()
         == "Offline answer survives"

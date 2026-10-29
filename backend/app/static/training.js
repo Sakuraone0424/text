@@ -16,10 +16,22 @@ let paper = null,
   deadline = null,
   anchor = 0,
   serverAnchor = 0,
-  conflicted = false;
+  conflicted = false,
+  compositionActive = false,
+  renderedResultSignature = "";
 const key = () => `quiz:v2:${username}:${paper.paper_id}`;
+function emitUI() {
+  window.TrainingUI?.state({
+    paper,
+    drafts: localDrafts,
+    pendingCount: Object.keys(pending).length,
+    conflicted,
+    message: $("status").textContent,
+  });
+}
 function status(t) {
   $("status").textContent = t;
+  emitUI();
 }
 async function api(path, options = {}) {
   const r = await fetch(path, {
@@ -75,6 +87,7 @@ function tick() {
   );
   $("clock").textContent =
     `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, "0")}`;
+  window.TrainingUI?.clock(remaining);
   if (!remaining) {
     $("submit").disabled = true;
     refresh().catch(() =>
@@ -88,6 +101,7 @@ async function identity() {
   username = me.username;
   sessionStorage.setItem("quiz-v2-user", username);
   $("login").hidden = true;
+  window.TrainingUI?.signedIn(username);
 }
 $("login").onsubmit = async (e) => {
   e.preventDefault();
@@ -132,6 +146,7 @@ async function restore() {
   }
   timing(paper.timing);
   render();
+  window.TrainingUI?.showView("exam");
   $("start").hidden = paper.timing.status !== "not_started";
   $("submit").hidden = paper.timing.status !== "in_progress";
   if (!conflicted) {
@@ -161,7 +176,8 @@ function change(id, update) {
   pending[id] = localDrafts[id];
   persist();
   renderProgress();
-  queue = queue.then(flush).catch((e) => status(e.message));
+  if (!compositionActive)
+    queue = queue.then(flush).catch((e) => status(e.message));
 }
 function showConflict() {
   conflicted = true;
@@ -169,7 +185,13 @@ function showConflict() {
   status("版本冲突：自动保存已暂停，避免覆盖另一台设备的较新答案。");
 }
 async function flush() {
-  if (!paper || conflicted || paper.timing.status !== "in_progress") return;
+  if (
+    !paper ||
+    conflicted ||
+    compositionActive ||
+    paper.timing.status !== "in_progress"
+  )
+    return;
   for (const id of Object.keys(pending)) {
     const value = pending[id];
     try {
@@ -218,7 +240,14 @@ $("local").onclick = async () => {
 };
 
 async function refresh() {
-  if (!paper) return;
+  if (
+    !paper ||
+    compositionActive ||
+    document.activeElement?.matches(
+      "#questions input, #questions textarea, #result input, #result textarea, #result select",
+    )
+  )
+    return;
   const fresh = await api(`/v2/papers/${paper.paper_id}`);
   if (fresh.timing.version !== version && Object.keys(pending).length) {
     const normalized = (v) =>
@@ -263,12 +292,14 @@ function renderProgress() {
       v.text?.trim() || v.blanks?.some((x) => x.trim()) || v.image_ids?.length,
   ).length;
   $("progress").textContent = `已答 ${done} / 28 · 剩余 ${28 - done}`;
+  emitUI();
 }
 function render() {
   $("questions").replaceChildren();
   for (const q of paper.questions) {
     const article = element("article", undefined, $("questions"));
     article.dataset.id = q.id;
+    article.className = "question-card";
     const value = localDrafts[q.id] || {};
     if (value.flagged) article.classList.add("flagged");
     element(
@@ -276,16 +307,27 @@ function render() {
       `${q.position}. ${q.subject === "biochemistry" ? "生化与分子生物学" : "细胞生物学"} · ${names[q.question_type]} · ${q.max_points}分${q.is_retest ? " · FSRS复测" : q.review_knowledge_tags?.length ? " · 知识点复测变式" : ""}`,
       article,
     );
-    element("p", q.stem, article);
+    const stem = element("p", q.stem, article);
+    stem.className = "question-stem";
+    stem.tabIndex = -1;
     if (q.question_type === "single_choice") {
+      const choices = element("div", undefined, article);
+      choices.setAttribute("role", "radiogroup");
+      choices.setAttribute("aria-label", `第${q.position}题单选选项`);
       for (const [option, label] of Object.entries(q.options)) {
-        const b = element("button", `${option}. ${label}`, article);
+        const b = element("button", undefined, choices);
+        element("span", `${option}.`, b).className = "option-letter";
+        element("span", label, b);
+        b.setAttribute("role", "radio");
+        b.setAttribute("aria-checked", String(value.text === option));
         b.className = "option" + (value.text === option ? " chosen" : "");
         b.onclick = () => {
-          article
-            .querySelectorAll(".option")
-            .forEach((x) => x.classList.remove("chosen"));
+          article.querySelectorAll(".option").forEach((x) => {
+            x.classList.remove("chosen");
+            x.setAttribute("aria-checked", "false");
+          });
           b.classList.add("chosen");
+          b.setAttribute("aria-checked", "true");
           change(q.id, { text: option });
         };
       }
@@ -294,6 +336,7 @@ function render() {
         const label = element("label", `第${i + 1}空`, article);
         const input = element("input", undefined, label);
         input.value = value.blanks?.[i] || "";
+        input.setAttribute("aria-label", `第${q.position}题第${i + 1}空`);
         input.oninput = () => {
           const answers = [
             ...(localDrafts[q.id]?.blanks || Array(q.blank_count).fill("")),
@@ -339,6 +382,7 @@ function render() {
       value.flagged ? "取消标记" : "标记此题",
       article,
     );
+    flag.className = "question-flag";
     flag.onclick = () => {
       const flagged = !localDrafts[q.id]?.flagged;
       change(q.id, { flagged });
@@ -347,6 +391,13 @@ function render() {
     };
   }
   renderProgress();
+  window.TrainingUI?.rendered({
+    paper,
+    drafts: localDrafts,
+    pendingCount: Object.keys(pending).length,
+    conflicted,
+    message: $("status").textContent,
+  });
 }
 async function sendImage(id, file, article, jobKey) {
   if (!file) return;
@@ -379,7 +430,10 @@ async function sendImage(id, file, article, jobKey) {
   status("图片已保存；手写内容在确认后批改。");
 }
 $("submit").onclick = async () => {
-  if (!confirm("确认统一交卷？未答题按0分，已答主观题待批改。")) return;
+  const approved = window.TrainingUI
+    ? await window.TrainingUI.confirmSubmit()
+    : confirm("确认统一交卷？未答题按0分，已答主观题待批改。");
+  if (!approved) return;
   try {
     await flush();
     if (conflicted || Object.keys(pending).length)
@@ -400,7 +454,11 @@ async function showResult() {
   $("start").hidden = true;
   $("submit").hidden = true;
   const result = await api(`/v2/papers/${paper.paper_id}/result`);
+  const signature = JSON.stringify(result);
   $("questions").replaceChildren();
+  if (signature === renderedResultSignature && $("result").childElementCount)
+    return;
+  renderedResultSignature = signature;
   $("result").replaceChildren();
   element(
     "h2",
@@ -509,6 +567,7 @@ async function showResult() {
       element("blockquote", evidence.excerpt, article);
     }
   }
+  window.TrainingUI?.result(result);
   status("已交卷。照片识别不清时须人工确认，不会直接判零。");
 }
 identity()
@@ -522,6 +581,7 @@ identity()
         );
         if (stored?.paper) {
           username = sessionStorage.getItem("quiz-v2-user");
+          window.TrainingUI?.cachedIdentity(username);
           paper = stored.paper;
           pending = stored.pending;
           localDrafts = stored.localDrafts;
@@ -530,6 +590,7 @@ identity()
           anchor = performance.now();
           deadline = Date.parse(paper.timing.deadline);
           render();
+          window.TrainingUI?.showView("exam");
           $("login").hidden = true;
           $("submit").hidden = false;
           status(
@@ -677,6 +738,7 @@ $("weekly").onclick = async () => {
         `${row.chapter}：${row.graded_points || 0}/${row.graded_max_points || 0}分，${row.pending}题待批改`,
         $("learning"),
       );
+    window.TrainingUI?.weekly(result.chapters);
   } catch (e) {
     status(e.message);
   }
@@ -875,3 +937,17 @@ $("insights").onclick = async () => {
     status(error.message);
   }
 };
+
+// Keep IME composition local; send only after the final composition input commits.
+document.addEventListener("compositionstart", (event) => {
+  if (event.target.matches("#questions input, #questions textarea"))
+    compositionActive = true;
+});
+document.addEventListener("compositionend", (event) => {
+  if (!event.target.matches("#questions input, #questions textarea")) return;
+  compositionActive = false;
+  setTimeout(() => {
+    queue = queue.then(flush).catch((error) => status(error.message));
+  }, 0);
+});
+window.TrainingUI?.actions({ flush });
