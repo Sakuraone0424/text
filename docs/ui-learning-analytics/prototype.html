@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1,viewport-fit=cover"
+  /><title>方案四 · 高保真移动端视觉稿</title
+  ><style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background: #f6f8fa;
+      color: #182230;
+      font:
+        15px/1.6 -apple-system,
+        BlinkMacSystemFont,
+        "PingFang SC",
+        sans-serif;
+      padding: 24px 20px 100px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 36px;
+    }
+    .logo {
+      background: #ea653b;
+      color: white;
+      border-radius: 12px;
+      padding: 8px 12px;
+      font-weight: 800;
+    }
+    .wordmark {
+      font-weight: 750;
+      margin-left: 8px;
+    }
+    .avatar {
+      border: 1px solid #e7ebf0;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      background: white;
+    }
+    small,
+    .muted {
+      color: #667085;
+    }
+    h1 {
+      font-size: 28px;
+      line-height: 1.3;
+      letter-spacing: -1px;
+      margin: 8px 0;
+    }
+    h2 {
+      font-size: 17px;
+      margin: 0;
+    }
+    section {
+      background: white;
+      border: 1px solid #e7ebf0;
+      border-radius: 18px;
+      padding: 24px;
+      margin: 20px 0;
+      box-shadow: 0 3px 14px #18223004;
+    }
+    .line {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .pill {
+      font-size: 12px;
+      background: #f2f4f7;
+      border-radius: 30px;
+      padding: 4px 10px;
+      color: #667085;
+    }
+    .spec {
+      display: flex;
+      justify-content: space-between;
+      margin: 24px 0;
+    }
+    .spec b {
+      display: block;
+      font-size: 28px;
+      line-height: 1.3;
+    }
+    .spec span {
+      font-size: 12px;
+      color: #667085;
+    }
+    .subjects {
+      display: flex;
+      gap: 8px;
+      margin: 16px 0;
+    }
+    .subjects span {
+      background: #f6f8fa;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 12px;
+      flex: 1;
+    }
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 12px;
+      background: #ea653b;
+      color: white;
+      min-height: 50px;
+      font-size: 15px;
+      font-weight: 650;
+    }
+    .note {
+      font-size: 11px;
+      text-align: center;
+      color: #667085;
+      margin-top: 12px;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin: 24px 0;
+    }
+    .metrics b {
+      font-size: 24px;
+      display: block;
+    }
+    .metrics small {
+      font-size: 11px;
+    }
+    .empty {
+      padding: 32px 0;
+      text-align: center;
+    }
+    .empty .icon {
+      width: 40px;
+      height: 40px;
+      background: #eff5ff;
+      border-radius: 12px;
+      color: #2563eb;
+      display: grid;
+      place-items: center;
+      margin: 0 auto 12px;
+    }
+    .bar {
+      height: 7px;
+      background: #f1f3f6;
+      border-radius: 20px;
+      margin: 12px 0 22px;
+    }
+    .foot {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      border-top: 1px solid #e7ebf0;
+      display: flex;
+      justify-content: space-around;
+      padding: 14px 8px 22px;
+      color: #667085;
+      font-size: 11px;
+    }
+    .foot span {
+      display: grid;
+      text-align: center;
+      gap: 4px;
+    }
+    .foot .active {
+      color: #ea653b;
+    }
+    .fixture {
+      font-size: 10px;
+      letter-spacing: 1px;
+      color: #667085;
+      margin-bottom: 16px;
+    }
+  </style>
+  <header>
+    <div>
+      <span class="logo">研</span><span class="wordmark">研习空间</span>
+    </div>
+    <span class="avatar">我</span>
+  </header>
+  <div class="fixture">方案四 · 高保真视觉稿 · 空状态，无模拟成绩</div>
+  <small>中科大考研 · 学习工作台</small>
+  <h1>把每一次练习，<br />变成看得见的进步。</h1>
+  <p class="muted">专注当下，循证学习。</p>
+  <section>
+    <div class="line">
+      <h2>今日考试</h2>
+      <span class="pill">尚未开始</span>
+    </div>
+    <div class="spec">
+      <div>
+        <b>28<span> 题</span></b
+        ><span>双科正式试卷</span>
+      </div>
+      <div>
+        <b>150<span> 分</span></b
+        ><span>完整评分标准</span>
+      </div>
+      <div>
+        <b>60<span> 分钟</span></b
+        ><span>服务端限时</span>
+      </div>
+    </div>
+    <div class="subjects">
+      <span>生物化学 · 14题</span><span>细胞生物学 · 14题</span>
+    </div>
+    <button>开始今日考试　↗</button>
+    <div class="note">先准备试卷，确认后才开始计时</div>
+  </section>
+  <section>
+    <h2>学习概览</h2>
+    <div class="metrics">
+      <div><b>0</b><small>已提交试卷</small></div>
+      <div><b>0</b><small>完整判分</small></div>
+      <div><b>0</b><small>到期复习</small></div>
+    </div>
+    <small>视觉稿展示空状态；实际指标以接口读回为准。</small>
+  </section>
+  <section>
+    <div class="line">
+      <h2>科目表现</h2>
+      <small>近7天</small>
+    </div>
+    <p class="line">生物化学 <small>暂无已判分记录</small></p>
+    <div class="bar"></div>
+    <p class="line">细胞生物学 <small>暂无已判分记录</small></p>
+    <div class="bar"></div>
+    <small>以已判分得分率展示；待批改题目不计入。</small>
+  </section>
+  <section>
+    <h2>成绩趋势</h2>
+    <div class="empty">
+      <div class="icon">↗</div>
+      <b>每一步进步，都值得记录</b>
+      <p class="muted">完成考试并判分后，查看真实成绩趋势。</p>
+    </div>
+  </section>
+  <nav class="foot">
+    <span class="active">▦<br />首页</span><span>▤<br />考试</span
+    ><span>▱<br />错题</span><span>▥<br />统计</span><span>◯<br />我的</span>
+  </nav>
+</html>

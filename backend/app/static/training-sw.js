@@ -1,6 +1,13 @@
 "use strict";
-const CACHE = "xiaohan-training-shell-v4";
-const ASSETS = ["/", "/training", "/static/training.js", "/static/app.css"];
+const CACHE = "xiaohan-training-shell-v8-offline-recovery-upgrade";
+const ASSETS = [
+  "/",
+  "/training",
+  "/static/training.js",
+  "/static/app.css",
+  "/static/training.css",
+  "/static/training-ui.js",
+];
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches

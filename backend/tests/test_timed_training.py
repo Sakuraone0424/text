@@ -480,3 +480,25 @@ def test_learning_views_are_owned_and_archive_configuration_is_truthful(
     monkeypatch.setenv("QUIZ_USERNAME", "stranger")
     assert client.get(f"/v2/memory/{qid}/solution", headers=LEARNER).status_code == 404
     assert client.get("/v2/stats/weekly", headers=LEARNER).json()["chapters"] == []
+
+
+def test_prestart_server_rejects_drafts_images_and_submit_without_writes(db, bank, blueprint):
+    """Existing server gates are independently verified; no DB schema/data fix required."""
+    from app.images import store_image
+    uid = ensure_user(db, "prestart-owner")
+    paper = q.create_paper(db, uid, blueprint)
+    pid = paper["paper_id"]
+    qid = db.execute("SELECT question_id FROM paper_items_v2 WHERE paper_id=%s LIMIT 1", (pid,)).fetchone()["question_id"]
+    assert q.load_paper(db, uid, pid)["questions"] == []
+    for action in (
+        lambda: sessions.save(db, uid, pid, qid, {"text": "A"}, 0),
+        lambda: store_image(db, uid, pid, qid, b"image", "image/png", 0),
+        lambda: sessions.submit_training(db, uid, pid, {qid: {"text": "A"}}, 0),
+    ):
+        with pytest.raises(ValueError, match="Start the training"):
+            action()
+    for table in ("training_sessions", "answer_drafts", "answer_images", "attempts_v2"):
+        assert db.execute(f"SELECT count(*) AS n FROM {table} WHERE paper_id=%s", (pid,)).fetchone()["n"] == 0
+    started = sessions.start(db, uid, pid)
+    assert started["drafts"] == {} and started["version"] == 0
+    assert q.load_paper(db, uid, pid)["questions"]
