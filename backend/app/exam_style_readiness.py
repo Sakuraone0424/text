@@ -6,7 +6,7 @@ It counts only classified question starts whose words can actually be cited
 by the AI generator. Scientific answers remain textbook-evidence-only.
 """
 from collections import defaultdict
-from app.source_policy import current_source_sql
+from app.source_policy import current_source_sql, pinned_source_bytes
 from app.training_spec_v2 import SUBJECTS, COUNTS
 
 UNRESOLVED_IMAGE = {"corrupt_ocr", "untranscribed_image", "image_dependent"}
@@ -15,7 +15,7 @@ BOUNDARY_ISSUES = {"question_boundary_unconfirmed", "question_type_unknown", "ye
 
 def report(conn):
     rows = conn.execute(
-        "SELECT d.subject,t.question_type,t.year,t.question_number,"
+        "SELECT d.subject,d.file_id,d.sha256,t.question_type,t.year,t.question_number,"
         "t.concerns,s.quality_flags "
         "FROM exam_transcript_candidates t "
         "JOIN source_documents d ON d.id=t.document_id "
@@ -34,6 +34,11 @@ def report(conn):
             continue  # A section heading or continuation is not another question.
         totals[key] += 1
         reasons = set(row["concerns"] or []) | set(row["quality_flags"] or [])
+        if not pinned_source_bytes(row["file_id"], row["sha256"]):
+            # Same file ID or a self-consistent newer SQL revision is not
+            # evidence that these are the owner's pinned genuine DOCX bytes.
+            blocked[key] += 1
+            continue
         if not row["year"] or reasons & (UNRESOLVED_IMAGE | BOUNDARY_ISSUES):
             blocked[key] += 1
             continue
