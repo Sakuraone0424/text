@@ -535,10 +535,20 @@ def review_solution(question_id: int, username: str = Depends(require_auth)):
         ).fetchone()
         if not row:
             raise LookupError("Review card not found")
+        question = row["content"]
+        options = question.get("options") or {}
+        answer = question["answer"]
         return {
-            "answer": row["content"]["answer"],
-            "rubric": row["content"]["rubric"],
-            "evidence": row["content"]["evidence"],
+            "answer": answer,
+            "question_type": question["question_type"],
+            "options": options,
+            "answer_display": (
+                f"{answer}. {options[answer]}"
+                if question["question_type"] == "single_choice" and answer in options
+                else answer
+            ),
+            "rubric": question["rubric"],
+            "evidence": question["evidence"],
         }
 
     return operation(read, username)
