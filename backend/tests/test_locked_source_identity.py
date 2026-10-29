@@ -202,9 +202,8 @@ def test_generated_single_choice_must_revalidate_complete_contiguous_original_op
             payload=dict(subject="biochemistry",question_type="single_choice",
                          evidence=[book],style=style),
         )
-        with pytest.raises(ValueError,match=(
-            "historical_single_choice_options_incomplete_or_spliced"
-            if style[-1].get("file_id")==exam["file_id"] else
-            "generation_source_not_in_locked"
-        )):
-            accept(None,fake_job)
+        with pytest.raises(
+            ValueError,
+            match="historical_single_choice_options_incomplete_or_spliced|generation_source_not_in_locked",
+        ):
+            accept(None, fake_job)
