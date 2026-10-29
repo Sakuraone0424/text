@@ -85,6 +85,9 @@ def test_original_source_book_flags_remain_pending_not_scientifically_approved(
     assert results[0]["source_key"] == "biochemistry_notes"
     assert results[0]["ocr_page"] == 1
     assert "image_dependent" in json.loads(results[0]["risk_flags_json"])
+    assert search(index, "atp", limit=5)  # ASCII lower-case finds original ATP
+    with pytest.raises(ValueError):
+        search(index, "ATP" * 100)
     with sqlite3.connect(index) as conn:
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
