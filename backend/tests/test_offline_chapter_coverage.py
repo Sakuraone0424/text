@@ -18,6 +18,11 @@ def test_four_pinned_textbooks_chapter_coverage_has_exact_page_denominators(tmp_
         assert book["ocr_pages_total"] == spec["expected_pages"]
         assert book["mapped_chapter_count"] >= 1
         assert book["pages_with_any_mapped_chapter"] <= book["ocr_pages_total"]
+        assert book["first_mapped_body_ocr_page"] is not None
+        assert book["chapter_body_has_no_unmapped_ocr_pages"]
+        assert book["unmapped_at_or_after_first_chapter"] == []
+        assert all(p < book["first_mapped_body_ocr_page"]
+                   for p in book["unmapped_before_first_chapter"])
         assert all(0 < chapter["first_ocr_page"] <= chapter["last_ocr_page"]
                    <= spec["expected_pages"] for chapter in book["chapters"])
         assert all(chapter["scientific_answer_verified"] is False
