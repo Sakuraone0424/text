@@ -1304,6 +1304,63 @@ $("memory").onclick = async () => {
     status(e.message);
   }
 };
+$("source-status").onclick = async () => {
+  const root = $("learning");
+  root.replaceChildren();
+  element("h2", "教材与60题题库核验", root);
+  element("p", "下列数据直接从系统数据库读取；不会把原文件已下载、OCR可检索或AI任务排队误写成已审核。", root);
+  const endpoints = [
+    ["/v2/quality/six-source-readiness", "六份教材与真题文件"],
+    ["/v2/quality/genuine-exam-style-readiness", "真实真题题型与风格依据"],
+    ["/v2/quality/60q-bank-readiness", "60题最低库存与120题储备"],
+  ];
+  const answers = await Promise.allSettled(endpoints.map(([path]) => api(path)));
+  const display = {biochemistry: "生物化学", cell_biology: "细胞生物学"};
+  const typeName = {single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答"};
+  answers.forEach((answer, index) => {
+    const section = element("section", undefined, root);
+    element("h3", endpoints[index][1], section);
+    if (answer.status !== "fulfilled") {
+      element("p", "暂时无法读取该部分：" + answer.reason.message, section);
+      return;
+    }
+    const value = answer.value;
+    if (index === 0) {
+      element("p", "真实文件已入库 " + value.imported_files + "/" + value.expected_files +
+        " · 字节/页标完整性通过 " + value.integrity_passed_files + "/" + value.expected_files,
+        section);
+      for (const file of value.files) {
+        const issue = file.issues.length ? " · 需检查：" + file.issues.join("、") : "";
+        const figures = file.embedded_media_objects
+          ? " · 内嵌图像 " + file.embedded_media_objects + " 个（图像内容未独立核验）"
+          : "";
+        element("p", file.filename + " · " + file.status + issue + figures, section);
+      }
+    } else if (index === 1) {
+      element("p", "你提供的两份试题汇编作为真实历年真题。这里只核实能否从DOCX可靠提取题目，不审核真题身份。", section);
+      for (const bucket of value.buckets) {
+        element("p", (display[bucket.subject] || bucket.subject) + " · " +
+          (typeName[bucket.question_type] || bucket.question_type) +
+          "：可引用风格题 " + bucket.safe_style_anchors +
+          "，待处理图像/解析问题 " + bucket.blocked_by_parsing_or_images, section);
+      }
+    } else {
+      const min = value.buckets.reduce((n, x) => n + x.eligible_upper_bound, 0);
+      const shortages = value.buckets.reduce((n, x) => n + x.shortage_at_least, 0);
+      const reserve = value.buckets.reduce((n, x) => n + x.two_day_reserve_shortage_at_least, 0);
+      element("p", "经当前AI双轮审查且符合新版分值、可抽取的候选上限 " +
+        min + " 题；当天至少还缺 " + shortages +
+        " 题，两天储备目标至少还缺 " + reserve + " 题。", section);
+      for (const bucket of value.buckets) {
+        element("p", (display[bucket.subject] || bucket.subject) + " · " +
+          (typeName[bucket.question_type] || bucket.question_type) +
+          "：可用上限 " + bucket.eligible_upper_bound +
+          "/" + bucket.required + "，两天目标 " + bucket.two_day_reserve_target, section);
+      }
+      element("p", "以上数量仍需经过跨题提示、相似题及章节覆盖的最终抽卷检查；不保证已经能生成完整60题。", section);
+    }
+  });
+};
 $("weekly").onclick = async () => {
   try {
     const result = await api("/v2/stats/weekly");
