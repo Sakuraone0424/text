@@ -22,7 +22,7 @@ def test_offline_private_index_uses_all_six_and_verifies_after_commit(tmp_path):
     assert report["independent_ai_rounds_completed"] is False
     assert report["unit_count"] > 1915
     assert index.exists()
-    rows = search(index, "生物化学", limit=3)
+    rows = search(index, "昌增益", limit=3)
     assert len(rows) == 3
     assert all(x["ocr_page"] is not None and x["source_key"] for x in rows)
     with sqlite3.connect(f"file:{index}?mode=ro", uri=True) as conn:
@@ -35,7 +35,7 @@ def test_offline_private_index_uses_all_six_and_verifies_after_commit(tmp_path):
             "SELECT count(*) FROM units WHERE scientifically_approved != 0"
         ).fetchone()[0] == 0
         assert conn.execute(
-            "SELECT count(*) FROM fulltext WHERE fulltext MATCH '生物化学'"
+            "SELECT count(*) FROM fulltext WHERE fulltext MATCH '昌增益'"
         ).fetchone()[0] > 0
     metadata = json.dumps(report, ensure_ascii=False)
     assert "Synthetic evidence paragraph" not in metadata
