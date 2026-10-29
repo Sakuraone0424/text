@@ -1076,34 +1076,100 @@ $("memory").onclick = async () => {
     for (const card of result.items) {
       const article = element("article", undefined, $("learning"));
       element("p", card.stem, article);
+      const choice = card.question_type === "single_choice";
+      const options = choice && card.options && typeof card.options === "object"
+        ? Object.entries(card.options).sort(([a], [b]) => a.localeCompare(b))
+        : [];
+      let selected = null;
+      const optionButtons = [];
+      if (choice && !options.length) {
+        element("p", "旧卡片缺少选项，不能完整复测。请联系维护者核查题目快照。", article);
+      }
+      for (const [letter, text] of options) {
+        const button = element("button", letter + ". " + text, article);
+        button.type = "button";
+        button.className = "review-choice";
+        button.setAttribute("aria-pressed", "false");
+        button.onclick = () => {
+          selected = letter;
+          for (const item of optionButtons)
+            item.setAttribute("aria-pressed", String(item === button));
+        };
+        optionButtons.push(button);
+      }
+      if (choice && options.length)
+        element("p", "先独立选择，再查看答案；选择只用于本次复习，不改写原卷。", article);
       const reveal = element("button", "先回忆，再查看答案", article);
       reveal.onclick = async () => {
-        const solution = await api(`/v2/memory/${card.question_id}/solution`);
-        element("p", solution.answer, article);
-        reveal.disabled = true;
-        for (const [rating, label] of [
-          [1, "忘记"],
-          [2, "困难"],
-          [3, "记得"],
-          [4, "轻松"],
-        ]) {
-          const button = element("button", label, article);
-          button.onclick = async () => {
+        try {
+          const solution = await api("/v2/memory/" + card.question_id + "/solution");
+          const answerDisplay = solution.answer_display || solution.answer;
+          reveal.disabled = true;
+          for (const button of optionButtons) button.disabled = true;
+          if (choice && selected !== null) {
+            const picked = options.find(([letter]) => letter === selected);
+            element("p", "本次选择：" + selected + ". " + (picked ? picked[1] : ""), article);
+            element("p", selected === solution.answer ? "本次选择正确" : "本次选择需要订正", article);
+          }
+          element("p", "正确答案：" + answerDisplay, article);
+          const criteria = (solution.rubric || []).map(
+            (item) => "评分核对点（" + item.points + "分）：" + item.description
+          );
+          for (const line of criteria) element("p", line, article);
+          const evidence = (solution.evidence || []).map((entry) =>
+            entry.textbook + " · " + entry.chapter + " · " + entry.locator +
+            "：" + entry.excerpt
+          );
+          if (solution.evidence?.length) {
+            const detail = element("details", undefined, article);
+            element("summary", "教材依据与出处核验状态", detail);
+            for (const entry of solution.evidence) {
+              const unknown = /未核查|待核查/.test(
+                (entry.authors || "") + " " + (entry.edition || "")
+              );
+              element("p", entry.textbook + " · " + entry.chapter +
+                " · " + entry.locator + (unknown ? " · 书目信息待核查" : ""), detail);
+              element("blockquote", entry.excerpt, detail);
+            }
+          }
+          const copy = element("button", "复制正确答案、评分点及教材依据", article);
+          copy.onclick = async () => {
             try {
-              await api(`/v2/memory/${card.question_id}/review`, {
-                method: "POST",
-                body: JSON.stringify({
-                  rating,
-                  expected_version: card.version,
-                  event_key: crypto.randomUUID(),
-                }),
-              });
-              article.replaceChildren();
-              element("p", "复习反馈已保存，下次复测时间已更新。", article);
-            } catch (e) {
-              status(e.message);
+              await navigator.clipboard.writeText([
+                card.stem, ...options.map(([letter, text]) => letter + ". " + text),
+                "正确答案：" + answerDisplay, ...criteria, ...evidence
+              ].join("\n"));
+              status("已复制完整复习内容。");
+            } catch {
+              status("复制未成功，请长按正确答案或教材依据选择文本。");
             }
           };
+          for (const [rating, label] of [
+            [1, "忘记"],
+            [2, "困难"],
+            [3, "记得"],
+            [4, "轻松"],
+          ]) {
+            const button = element("button", label, article);
+            button.onclick = async () => {
+              try {
+                await api("/v2/memory/" + card.question_id + "/review", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    rating,
+                    expected_version: card.version,
+                    event_key: crypto.randomUUID(),
+                  }),
+                });
+                article.replaceChildren();
+                element("p", "复习反馈已保存，下次复测时间已更新。", article);
+              } catch (e) {
+                status(e.message);
+              }
+            };
+          }
+        } catch (e) {
+          status(e.message);
         }
       };
     }
