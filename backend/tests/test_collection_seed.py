@@ -72,7 +72,7 @@ def test_write_to_isolated_test_db_reads_back_all_six_without_synthetic_approval
     items = seed.preflight(root, lock_path=lock)
 
     @contextmanager
-    def test_schema(_schema, _target):
+    def test_schema(_schema, _target, **kwargs):
         yield db
 
     monkeypatch.setattr(seed, "isolated_db", test_schema)
@@ -83,6 +83,7 @@ def test_write_to_isolated_test_db_reads_back_all_six_without_synthetic_approval
     assert result["status"] == "committed_to_isolated_schema"
     assert result["database_integrity"]["imported_files"] == 6
     assert result["database_integrity"]["integrity_passed_files"] == 6
+    assert result["database_integrity"]["independent_post_commit_readback_verified"]
     assert len(result["imported"]) == 6
     assert report.exists()
     from app.source_bibliography import BIBLIOGRAPHY
@@ -128,3 +129,21 @@ def test_synthetic_docx_media_inventory_is_not_claimed_transcribed(tmp_path):
         assert media["source_sha256"] == item["sha256"]
         assert media["images_scientifically_verified"] is False
         assert media["question_image_anchors_verified"] is False
+
+
+def test_commit_failing_never_writes_false_success_report(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    @contextmanager
+    def fails_on_commit(_schema, _target, **kwargs):
+        class FakeConnection:
+            def execute(self, *args, **kw):
+                raise RuntimeError("simulated-db-write-error")
+        yield FakeConnection()
+        raise RuntimeError("simulated-commit-error")
+
+    monkeypatch.setattr(seed, "isolated_db", fails_on_commit)
+    report_path = tmp_path / "must-not-exist.json"
+    with pytest.raises(RuntimeError):
+        seed.import_isolated([], "source_staging_test", "development", report_path)
+    assert not report_path.exists()
