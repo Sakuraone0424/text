@@ -170,14 +170,16 @@ def main():
         if (stats.get("text") != expected_text or stats.get("media") != 31):
             raise ValueError("QA source risk queue does not match canonical source audit")
         conn.execute(DDL)
-        conn.executemany(
-            "INSERT INTO qa_source_risk_items("
-            "issue_key,source_key,source_sha256,source_unit_id,"
-            "source_ocr_page,text_sha256,media_member,media_sha256,risk_flag"
-            ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-            " ON CONFLICT(issue_key) DO NOTHING",
-            rows,
-        )
+        # psycopg3 executes batches on a Cursor, never the Connection.
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO qa_source_risk_items("
+                "issue_key,source_key,source_sha256,source_unit_id,"
+                "source_ocr_page,text_sha256,media_member,media_sha256,risk_flag"
+                ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+                " ON CONFLICT(issue_key) DO NOTHING",
+                rows,
+            )
         status = conn.execute(
             "SELECT count(*) AS total,"
             "count(*) FILTER (WHERE baseline_state='pending') AS pending "
