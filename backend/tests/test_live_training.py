@@ -55,6 +55,8 @@ def live_app(tmp_path):
             "QUIZ_REVIEW_API_KEY": "operator-live",
             "NOTION_SYNC_ENABLED": "0",
             "QUIZ_WORKER_ENABLED": "1",
+            "QUIZ_DB_SCHEMA": schema,
+            "QUIZ_QA_LEGACY_FIXTURE": "1",
         }
         with (tmp_path / "server.log").open("w+") as log:
             process = subprocess.Popen(
