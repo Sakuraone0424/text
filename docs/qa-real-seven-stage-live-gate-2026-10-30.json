@@ -1,0 +1,55 @@
+{
+  "evidence_origin": "Railway ustc-exam-ocr-qa / qa deployed true database, immutable QA_SEVEN_STAGE_HARD_GATE output",
+  "deployment_id": "973fc55b-79b1-4da8-8978-4ccf76dbae96",
+  "accepted_as_complete": false,
+  "real_data_audit": {
+    "stage_1": {
+      "all_visual_and_science_risks_resolved": false,
+      "chapter_mapping_issues_total": 72,
+      "chapter_mapping_pending": 72,
+      "risk_issues_pending": 5094,
+      "risk_issues_total": 5094,
+      "six_pinned_originals_postcommit_integrity_verified": true
+    },
+    "stage_2": {
+      "chapter_groups": 83,
+      "definitions_and_mechanisms_scientifically_complete": false,
+      "four_textbooks_all_unit_nodes_created": true,
+      "regex_facet_candidates": 12896,
+      "scientifically_approved_graph_nodes": 0,
+      "textbook_nodes": 9655
+    },
+    "stage_3": {
+      "52_year_transcription_inventory": true,
+      "numbered_parser_candidates": 1986,
+      "official_original_papers_independently_authenticated": false
+    },
+    "stage_4": {
+      "draft_or_reviewed_question_records_in_QA": 0,
+      "evidence_based_generation_real_verified": false
+    },
+    "stage_5": {
+      "confirmed_double_round_six_source_eligible_questions": 0,
+      "qualified_reserve_complete": false,
+      "required_questions": 120
+    },
+    "stage_6": {
+      "papers_v2_in_private_QA": 0,
+      "real_qualified_60_question_end_to_end_completed": false
+    },
+    "stage_7": {
+      "all_seven_stages_accepted": false,
+      "merge_draft_pr_authorized": false,
+      "production_deployment_authorized": false,
+      "rollback_plan_is_technical_implementation_not_acceptance": true
+    },
+    "status": "seven_stage_QA_checkpoint_not_production_release"
+  },
+  "limitations": [
+    "Synthetic CI cannot substitute for actual scientific review",
+    "52-year coverage and 1986 parsed question starts are transcription only",
+    "OCR/media pending issues cannot be treated as resolved",
+    "Qualified 120 reserve and real 60-item learner E2E still unverified"
+  ],
+  "production_modified": false
+}
