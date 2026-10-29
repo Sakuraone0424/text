@@ -6,8 +6,10 @@ published material; this test validates the exam/score/transaction mechanics.
 """
 from datetime import date, timedelta
 
+import pytest
+
 from app.common import ensure_user
-from app import quiz_v2, training_sessions, auto_quality
+from app import quiz_v2, training_sessions, auto_quality, source_policy
 from app.question_quality import Question, Blueprint
 from app.training_spec_v2 import COUNTS, POINTS, SPECIFICATION, default_blueprint
 
@@ -36,6 +38,15 @@ def test_sixty_question_prepare_start_submit_readback(db, question_factory, pass
     spec = Blueprint.model_validate({
         "specification": SPECIFICATION, "quotas": default_blueprint()["quotas"],
     })
+    # A genuinely unpinned synthetic textbook must be rejected by the REAL
+    # 60q admission gate, even if a test simulates ready AI reviews.
+    with pytest.raises(quiz_v2.BankShortage) as blocked:
+        quiz_v2.create_paper(db, uid, spec, day=date(2026, 12, 1))
+    assert sum(x["missing"] for x in blocked.value.shortages) == 60
+
+    # Bypass the lock in this explicitly synthetic, rollback-only *mechanical*
+    # transaction test; never install this stub in production or source review.
+    monkeypatch.setattr(source_policy, "pinned_science_evidence", lambda q: True)
     prepared = quiz_v2.create_paper(db, uid, spec, day=date(2026, 12, 1))
     pid = prepared["paper_id"]
     assert prepared["count"] == 60
