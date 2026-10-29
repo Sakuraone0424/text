@@ -39,7 +39,7 @@ def complete_choice_style_unit_ids(rows):
 
     if not rows or set(rows[0].get("quality_flags") or []) & STYLE_SOURCE_BLOCKERS:
         return None
-    pattern = re.compile(r"(?<![A-Za-z0-9])([ABCD])[.、．):：]\\s*")
+    pattern = re.compile(r"(?<![A-Za-z0-9])([ABCD])[.、．):：]\s*")
     ids = [rows[0]["id"]]
     found = set(pattern.findall(rows[0]["text"]))
     if found == set("ABCD"):
@@ -51,7 +51,7 @@ def complete_choice_style_unit_ids(rows):
         # After the stem, only option-bearing units may extend the same
         # question. A new stem/section cannot provide a missing option.
         if not markers or not any(
-            re.match(r"^\\s*" + letter + r"[.、．):：]", row["text"])
+            re.match(r"^\s*" + letter + r"[.、．):：]", row["text"])
             for letter in markers
         ):
             return None
