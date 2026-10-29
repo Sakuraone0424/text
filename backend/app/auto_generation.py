@@ -94,7 +94,15 @@ def plan(conn, uid):
                     u = snapshot_unit(conn, concept["unit_id"])
                 except ValueError:
                     continue
-                if u["unit_sha256"] != concept["unit_sha256"]:
+                if (
+                    u["unit_sha256"] != concept["unit_sha256"]
+                    or u["source_kind"] != "textbook"
+                    or u["subject"] != subject
+                    or not pinned_source_bytes(u["file_id"], u["source_sha256"])
+                ):
+                    # Validate scientific evidence BEFORE an authorized,
+                    # possibly billable model task is enqueued. A genuine-exam
+                    # DOCX is style only, never scientific answer evidence.
                     continue
                 key = f"supplement:{subject}:{kind}:{concept['unit_id']}:{concept['unit_sha256']}"
                 if conn.execute(
@@ -156,7 +164,16 @@ def accept(conn, job):
         or not p.get("style")
         or any(
             not pinned_source_bytes(unit.get("file_id"), unit.get("source_sha256"))
-            for group in ("evidence", "style")
+            or unit.get("source_kind") != expected_kind
+            or unit.get("subject") != p.get("subject")
+            or (
+                expected_kind == "exam_transcription"
+                and set(unit.get("quality_flags") or []) & STYLE_SOURCE_BLOCKERS
+            )
+            for group, expected_kind in (
+                ("evidence", "textbook"),
+                ("style", "exam_transcription"),
+            )
             for unit in p[group]
         )
     ):
