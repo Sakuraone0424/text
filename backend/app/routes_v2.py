@@ -842,7 +842,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             ).fetchall()
         ]
         recent = c.execute(
-            "SELECT p.id AS paper_id,p.paper_date,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
+            "SELECT p.id AS paper_id,p.paper_date,p.blueprint->>'specification' AS specification,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
             (u,),
         ).fetchall()
         return {
@@ -850,7 +850,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             "training": [
                 {
                     **r,
-                    "mode": "reviewed_28",
+                    "mode": "reviewed_60" if r["specification"] == "xiaohan-60q-150pt-v2" else "reviewed_28",
                     "score": None if r["pending"] else r["graded_points"],
                 }
                 for r in recent
