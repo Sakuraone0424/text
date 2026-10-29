@@ -146,6 +146,41 @@ def page_report(prepared):
     }
 
 
+def _validate_staging_database_url(url):
+    """Reject known production targets before opening a database connection.
+
+    This is a fail-closed check for known aliases, not proof that an unlisted
+    URL points to a physically independent QA cluster. The latter requires
+    the separate QA environment and deployment acceptance checks.
+    """
+    if os.environ.get("RAILWAY_ENVIRONMENT_NAME", "").strip().lower() in (
+        "production", "prod"
+    ):
+        raise ValueError("Source intake is forbidden in the production Railway runtime")
+
+    from psycopg.conninfo import conninfo_to_dict
+
+    def endpoint(dsn):
+        try:
+            values = conninfo_to_dict(dsn)
+        except (psycopg.Error, ValueError) as exc:
+            raise ValueError("Invalid database connection configuration") from None
+        # A second database name or role on the same host:port is NOT an
+        # isolated PostgreSQL cluster. Passwords and database names are
+        # deliberately ignored for this comparison.
+        host = (values.get("hostaddr") or values.get("host") or "localhost")
+        port = str(values.get("port") or "5432")
+        return (host.strip().lower(), port)
+
+    target_endpoint = endpoint(url)
+    for name in ("DATABASE_URL", "PRODUCTION_DATABASE_URL"):
+        known_production_url = os.environ.get(name)
+        if known_production_url and endpoint(known_production_url) == target_endpoint:
+            raise ValueError(
+                "Source intake target shares a PostgreSQL endpoint with " + name
+            )
+
+
 @contextmanager
 def isolated_db(schema, target, *, create=False, readonly=False):
     import psycopg
@@ -161,6 +196,7 @@ def isolated_db(schema, target, *, create=False, readonly=False):
         raise ValueError(
             "SOURCE_STAGING_DATABASE_URL must explicitly identify the authorized nonproduction database"
         )
+    _validate_staging_database_url(url)
     with psycopg.connect(url, row_factory=dict_row) as conn:
         if readonly:
             conn.execute("SET TRANSACTION READ ONLY")
