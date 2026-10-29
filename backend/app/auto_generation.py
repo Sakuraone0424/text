@@ -8,6 +8,24 @@ from app.exam_authoring import instructions as exam_instructions, issues as exam
 from app.ai_jobs import enqueue, content_sha
 
 
+def select_exam_style(conn, subject, kind):
+    """Select a real supplied past-exam question without manual packet seeding.
+
+    Preserve its year and actual text; no inferred missing exam questions.
+    """
+    return conn.execute(
+        "SELECT t.unit_id AS id,t.year FROM exam_transcript_candidates t "
+        "JOIN source_documents d ON d.id=t.document_id "
+        "JOIN source_units su ON su.id=t.unit_id "
+        "WHERE " + current_source_sql("d", kind="exam_transcription") +
+        " AND d.subject=%s AND t.question_type=%s "
+        "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
+        "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent']) "
+        "ORDER BY t.year DESC,t.id LIMIT 1",
+        (subject, kind),
+    ).fetchone()
+
+
 def plan(conn, uid):
     existing = conn.execute(
         "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND state IN ('pending','running','retrying')"
@@ -57,17 +75,7 @@ def plan(conn, uid):
                 # transcript, rather than requiring an earlier hand-created
                 # candidate packet. Question boundaries must be recognized and
                 # text/image risks resolved before using an item as style.
-                style = conn.execute(
-                    "SELECT t.unit_id AS id,t.year FROM exam_transcript_candidates t "
-                    "JOIN source_documents d ON d.id=t.document_id "
-                    "JOIN source_units su ON su.id=t.unit_id "
-                    "WHERE " + current_source_sql("d", kind="exam_transcription") +
-                    " AND d.subject=%s AND t.question_type=%s "
-                    "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
-                    "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent']) "
-                    "ORDER BY t.year DESC,t.id LIMIT 1",
-                    (subject, kind),
-                ).fetchone()
+                style = select_exam_style(conn, subject, kind)
                 if not style:
                     continue
                 s = snapshot_unit(conn, style["id"])
