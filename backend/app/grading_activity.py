@@ -26,17 +26,19 @@ def auto_queue_allowed(conn, user_id):
 
 def try_queue(conn, user_id, paper_id):
     """Commit answer first; enqueue idempotently, never make grading block submission."""
-    allowed, why = auto_queue_allowed(conn, user_id)
-    if not allowed:
-        return {"queued": False, "reason": why}
-    from app import auto_grading
-
     try:
-        # A failure rolls back job writes only, never a submitted answer.
+        # A failure rolls back *only* this savepoint; the submitted attempt and
+        # scores are already written in the enclosing transaction.
         with conn.transaction():
+            allowed, why = auto_queue_allowed(conn, user_id)
+            if not allowed:
+                return {"queued": False, "reason": why}
+            from app import auto_grading
             jobs = auto_grading.schedule(conn, user_id, paper_id)
-    except (LookupError, ValueError, KeyError) as exc:
-        return {"queued": False, "reason": type(exc).__name__}
+    except Exception:
+        # Database, provider configuration and job-serialization failures must
+        # never roll back an otherwise valid completed exam.
+        return {"queued": False, "reason": "automatic_queue_unavailable"}
     return {"queued": bool(jobs), "jobs": len(jobs), "reason": None if jobs else "no_eligible_text_answers"}
 
 
@@ -93,7 +95,7 @@ def progress(conn, user_id, paper_id):
             "points": row["points"],
             "reviewer_kind": (
                 "AI" if row["graded_by"] == "AI自动核验"
-                else "manual_or_rule" if row["graded_by"] else None
+                else "historical_or_rule" if row["graded_by"] else None
             ),
             "attempts": job["attempts"] if job else 0,
             "error_code": job["error_code"] if job else (
