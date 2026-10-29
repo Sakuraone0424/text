@@ -15,6 +15,10 @@ def test_terms_are_real_headings_not_invented_definitions():
     assert "氧化磷酸化" in science_terms("第十九章 氧化磷酸化")
     assert science_terms("细胞") == []
     assert science_terms("生物化学") == []
+    assert "DNA" not in science_terms("第三十章 DNA 的复制和修复")
+    assert "RNA" not in science_terms("第三十二章 RNA 的生物合成和加工")
+    assert "ATP" not in science_terms("氧化磷酸化与 ATP")
+    assert "SRP" in science_terms("蛋白质分选中的 SRP")
 
 
 def test_synthetic_literal_question_chapter_match_is_candidate_only(tmp_path):
