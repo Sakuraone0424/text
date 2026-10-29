@@ -6,6 +6,7 @@ additionally filters previously seen stems, duplicate/cross-answer cues, FSRS
 policy and within-paper coverage. Never promise a whole paper from these counts.
 """
 from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
+from app.source_policy import pinned_science_evidence
 
 
 def report(conn, user_id):
@@ -28,6 +29,11 @@ def report(conn, user_id):
             continue
         if content.get("max_points") != POINTS[kind]:
             rejected["not_v2_scoring"] = rejected.get("not_v2_scoring", 0) + 1
+            continue
+        if not pinned_science_evidence(content):
+            rejected["scientific_evidence_outside_locked_ocr_four"] = (
+                rejected.get("scientific_evidence_outside_locked_ocr_four", 0) + 1
+            )
             continue
         if not ready(conn, item["id"]):
             rejected["stale_or_incomplete_AI_verification"] = (
