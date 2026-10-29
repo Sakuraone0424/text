@@ -142,6 +142,14 @@ def result(paper_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: service.result(c, u, paper_id), username)
 
 
+@router.get("/papers/{paper_id}/grading-activity")
+def grading_activity(paper_id: int, username: str = Depends(require_auth)):
+    """Read-only progress for the authenticated owner; no AI task is started."""
+    from app.grading_activity import progress
+
+    return operation(lambda c, u: progress(c, u, paper_id), username)
+
+
 ErrorCategory = Literal[
     "concept_unclear",
     "memory_omission",
