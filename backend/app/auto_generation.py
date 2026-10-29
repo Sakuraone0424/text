@@ -16,10 +16,22 @@ def plan(conn, uid):
         return
     for subject in SUBJECTS:
         for kind, required in COUNTS.items():
-            count = conn.execute(
-                "SELECT count(*) AS n FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id WHERE s.status='ready' AND q.content->>'subject'=%s AND q.content->>'question_type'=%s AND (NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id WHERE i.question_id=q.id AND p.user_id=%s) OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id AND f.user_id=%s AND f.due<=clock_timestamp()))",
-                (subject, kind, uid, uid),
-            ).fetchone()["n"]
+            from app.auto_quality import ready
+            # A merely "ready" state does not prove current science/answer
+            # review, publication or v2 scoring compatibility.
+            eligible = conn.execute(
+                "SELECT q.id FROM auto_question_states s "
+                "JOIN reviewed_questions q ON q.id=s.question_id "
+                "WHERE s.status='ready' AND q.status='published' "
+                "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
+                "AND q.content->>'max_points'=%s AND "
+                "(NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
+                "WHERE i.question_id=q.id AND p.user_id=%s) "
+                "OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id "
+                "AND f.user_id=%s AND f.due<=clock_timestamp()))",
+                (subject, kind, str(POINTS[kind]), uid, uid),
+            ).fetchall()
+            count = sum(bool(ready(conn, row["id"])) for row in eligible)
             if count >= required:
                 continue
             # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
