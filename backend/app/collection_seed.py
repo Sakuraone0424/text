@@ -161,8 +161,27 @@ def import_isolated(items, schema, target, report_path):
                 ),
             },
         }
-        # Report persistence failure must not commit partial source imports.
-        private_json(report_path, final)
+        # The transaction has NOT committed while inside this context.
+        # Do not persist a report claiming committed data until it has.
+    # Reopen a new, READ-ONLY transaction: this is an independent post-commit
+    # database readback, not an echo of the import transaction's own writes.
+    with isolated_db(schema, target, readonly=True) as conn:
+        after = audit(conn)
+        expected = {item["key"]: item["sha256"] for item in items}
+        rows = {row["key"]: row for row in after["files"]}
+        if (
+            set(rows) != set(expected)
+            or after["imported_files"] != 6
+            or after["integrity_passed_files"] != 6
+            or any(
+                rows[key]["source_sha256"] != digest
+                or not rows[key]["status"].startswith("integrity_passed")
+                for key, digest in expected.items()
+            )
+        ):
+            raise ValueError("Post-commit six-file source readback failed")
+    final["database_integrity"]["independent_post_commit_readback_verified"] = True
+    private_json(report_path, final)
     return final
 
 
