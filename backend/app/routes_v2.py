@@ -21,12 +21,12 @@ from app.common import ensure_user
 from app.dynamic_model import Policy
 from app import quiz_v2 as service
 
-router = APIRouter(prefix="/v2", tags=["reviewed-28"])
+router = APIRouter(prefix="/v2", tags=["reviewed-training"])
 
 
 @router.get("/training-specification")
 def training_specification():
-    from app.training_spec import formal_specification
+    from app.training_spec_v2 import formal_specification
 
     return formal_specification()
 
@@ -123,18 +123,20 @@ def read_paper(paper_id: int, username: str = Depends(require_auth)):
 
 
 class Submission(StrictModel):
-    answers: dict[int, str | dict] = Field(default_factory=dict, max_length=28)
+    answers: dict[int, str | dict] = Field(default_factory=dict, max_length=60)
     expected_version: StrictInt = Field(default=0, ge=0)
 
 
 @router.post("/papers/{paper_id}/submit")
 def submit(paper_id: int, payload: Submission, username: str = Depends(require_auth)):
-    return operation(
-        lambda c, u: service.submit(
-            c, u, paper_id, payload.answers, payload.expected_version
-        ),
-        username,
-    )
+    def finalize_and_queue(c, u):
+        result = service.submit(c, u, paper_id, payload.answers, payload.expected_version)
+        if result.get("pending"):
+            from app.grading_activity import try_queue
+            result["grading_queue"] = try_queue(c, u, paper_id)
+        return result
+
+    return operation(finalize_and_queue, username)
 
 
 @router.get("/papers/{paper_id}/result")
