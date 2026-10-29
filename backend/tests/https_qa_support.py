@@ -104,6 +104,11 @@ def trusted_browser(pw, kind, root):
     for directory in {str(root), str(Path.cwd())}:
         argv += ['--bind', directory, directory]
     argv += ['--ro-bind', str(certdir), '/etc/ssl/certs']
+    # Bundled Chromium's crashpad and WebKit caches need writable private paths;
+    # the host home/config/cache stay read-only in this mount namespace.
+    for variable, directory in [('XDG_CONFIG_HOME','browser-config'),('XDG_CACHE_HOME','browser-cache')]:
+        location = root/directory; location.mkdir()
+        argv += ['--setenv', variable, str(location)]
     if kind == 'chromium':
         nss = root/'chromium-nss'; nss.mkdir()
         run('certutil', '-N', '--empty-password', '-d', 'sql:'+str(nss))
