@@ -762,7 +762,69 @@ async function showResult() {
     }
   }
   window.TrainingUI?.result(result);
+  startGradingActivity(paper.paper_id);
   status("已交卷。照片识别不清时须人工确认，不会直接判零。");
+}
+let gradingActivityTimer = null;
+function startGradingActivity(paperId) {
+  if (gradingActivityTimer) clearInterval(gradingActivityTimer);
+  gradingActivityTimer = null;
+  const existing = $("grading-activity");
+  if (existing) existing.remove();
+  const section = element("section", undefined, $("result"));
+  section.id = "grading-activity";
+  section.className = "card grading-activity";
+  section.setAttribute("aria-label", "本卷实时批改活动");
+  element("h2", "实时批改活动", section);
+  const hint = element("p", "正在读取服务端批改状态……", section);
+  hint.setAttribute("role", "status");
+  const events = element("div", undefined, section);
+  const refreshScores = element("button", "刷新成绩与解析", section);
+  refreshScores.type = "button";
+  refreshScores.onclick = () => showResult().catch((e) => status(e.message));
+  let busy = false;
+  const labels = {
+    pending: "等待处理", retrying: "等待重试", running: "正在批改",
+    succeeded: "模型响应已返回，等待评分写入", blocked: "需要人工处理或重新授权",
+    cancelled: "已取消", pending_manual_or_queue: "未进入自动队列／待人工复核",
+    graded: "已判分"
+  };
+  async function poll() {
+    if (busy || paper?.paper_id !== paperId || document.visibilityState !== "visible") return;
+    busy = true;
+    try {
+      const data = await api("/v2/papers/" + paperId + "/grading-activity");
+      if (!section.isConnected) {
+        if (gradingActivityTimer) clearInterval(gradingActivityTimer);
+        gradingActivityTimer = null;
+        return;
+      }
+      hint.textContent = "已判分 " + data.graded + "/" + data.total +
+        " 题，待批 " + data.pending + " 题。" +
+        (data.auto_queue_available ? "自动批改需独立工作进程执行。" :
+          "自动批改尚未启用或授权不足；不会假装已发送AI任务。");
+      events.replaceChildren();
+      for (const row of data.questions.filter((q) =>
+        q.state !== "graded" || q.reviewer_kind === "AI"
+      ).slice(0, 60)) {
+        const item = element("p", "第" + row.position + "题 · " +
+          (labels[row.state] || row.state) +
+          (row.points === null ? "" : " · " + row.points + "分"), events);
+        if (row.error_code) item.textContent += " · " + row.error_code;
+      }
+      if (data.complete && gradingActivityTimer) {
+        clearInterval(gradingActivityTimer);
+        gradingActivityTimer = null;
+        hint.textContent += " 全部完成，点击“刷新成绩与解析”查看最终成绩。";
+      }
+    } catch (error) {
+      hint.textContent = "批改状态暂时无法读取：" + error.message;
+    } finally {
+      busy = false;
+    }
+  }
+  poll();
+  gradingActivityTimer = setInterval(poll, 5000);
 }
 // Identity confirmation, paper reachability and local recovery are separate checks.
 const recoverable = (error) =>
