@@ -65,8 +65,15 @@ def report(conn, user_id):
         }
         for sub in SUBJECTS for kind, required in COUNTS.items()
     ]
+    from app.exam_style_readiness import report as past_exam_style_report
+    past_exam_style = past_exam_style_report(conn)
     return {
         "specification": "xiaohan-60q-150pt-v2",
+        "genuine_past_exam_style": {
+            "ready_for_same_type_style": past_exam_style["ready_for_same_type_style"],
+            "missing_same_type_style": past_exam_style["missing_same_type_style"],
+            "buckets": past_exam_style["buckets"],
+        },
         "minimum_bucket_counts_met": all(b["shortage_at_least"] == 0 for b in buckets),
         "two_day_reserve_counts_met": all(
             b["two_day_reserve_shortage_at_least"] == 0 for b in buckets
