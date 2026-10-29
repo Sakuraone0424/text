@@ -110,3 +110,17 @@ def test_forward_only_position_migration_allows_60_slots(db):
     assert '1' in row['definition']
     # A schema expansion is not permission to change old question snapshots.
     assert legacy.formal_specification()['questions'] == 28
+
+
+def test_empty_verified_bank_rejects_sixty_without_creating_paper(client, db):
+    from test_api_v2 import LEARNER
+    response = client.post(
+        "/v2/papers",
+        headers=LEARNER,
+        json={"specification": v2.SPECIFICATION,
+              "quotas": v2.default_blueprint()["quotas"]},
+    )
+    assert response.status_code == 409
+    data = response.json()
+    assert "insufficient_reviewed_bank" in str(data)
+    assert db.execute("SELECT count(*) AS n FROM papers_v2").fetchone()["n"] == 0
