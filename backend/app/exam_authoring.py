@@ -48,8 +48,9 @@ TYPE_GUIDANCE = {
 }
 
 _COMMON = (
-    "Produce a challenging USTC-style ORIGINAL training question, not a claimed "
-    "official original or official answer. Scientific claims and ALL scoring criteria "
+    "Produce a challenging NEW training question grounded in the user-provided genuine "
+    "USTC past-exam question corpus for exam style, while keeping new questions "
+    "distinguishable from copied past questions. Scientific claims and ALL scoring criteria "
     "must be recoverable from provided textbook evidence units; no outside facts, "
     "fabricated bibliographic authors or page numbers. The OCR locator identifies "
     "an OCR unit, not necessarily a printed page. Use verified past-paper source "
