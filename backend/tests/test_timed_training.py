@@ -461,10 +461,20 @@ def test_learning_views_are_owned_and_archive_configuration_is_truthful(
     pid = paper["paper_id"]
     qid = paper["questions"][0]["id"]
     q.submit(db, uid, pid, {qid: "B"})
-    assert (
-        client.get(f"/v2/memory/{qid}/solution", headers=LEARNER).json()["answer"]
-        == "A"
+    solution = client.get(f"/v2/memory/{qid}/solution", headers=LEARNER).json()
+    assert solution["answer"] == "A"
+    assert solution["question_type"] == "single_choice"
+    assert solution["answer_display"] == "A. alpha"
+    assert solution["options"] == {"A": "alpha", "B": "beta", "C": "gamma", "D": "delta"}
+    db.execute(
+        "UPDATE fsrs_cards SET due=clock_timestamp()-interval '1 minute' WHERE user_id=%s AND question_id=%s",
+        (uid, qid),
     )
+    due_cards = client.get("/v2/memory/due", headers=LEARNER).json()["items"]
+    review = next(item for item in due_cards if item["question_id"] == qid)
+    assert review["options"] == solution["options"]
+    assert review["question_type"] == "single_choice"
+    assert "answer" not in review and "rubric" not in review and "evidence" not in review
     assert client.get("/v2/stats/weekly", headers=LEARNER).json()["chapters"]
     assert not client.get("/v2/archive/status", headers=LEARNER).json()["configured"]
     assert (
