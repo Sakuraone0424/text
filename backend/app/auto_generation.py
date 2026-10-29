@@ -5,6 +5,7 @@ from app.source_policy import current_source_sql, FILES, pinned_source_bytes
 from app.candidate_review import snapshot_unit, create_packet
 from app.question_quality import Question, AXES
 from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
+from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
 
@@ -28,9 +29,9 @@ def select_exam_style(conn, subject, kind, concept=None):
         "WHERE " + current_source_sql("d", kind="exam_transcription") +
         " AND d.subject=%s AND t.question_type=%s "
         "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
-        "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent']) "
+        "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent','docx_table_requires_review','complex_table','ocr_uncertain','transcription_gap_reported']) "
         "AND NOT (t.concerns ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent',"
-        "'question_boundary_unconfirmed','question_type_unknown','year_unassigned']) "
+        "'docx_table_requires_review','complex_table','ocr_uncertain','transcription_gap_reported','question_boundary_unconfirmed','question_type_unknown','year_unassigned']) "
         "ORDER BY t.year DESC,t.id LIMIT 200",
         (subject, kind),
     ).fetchall()
@@ -109,9 +110,7 @@ def plan(conn, uid):
                     continue
                 s = snapshot_unit(conn, style["id"])
                 if (s["source_kind"] != "exam_transcription" or
-                    set(s["quality_flags"]) & {
-                        "corrupt_ocr", "untranscribed_image", "image_dependent"
-                    }):
+                    set(s["quality_flags"]) & STYLE_SOURCE_BLOCKERS):
                     continue
                 if not pinned_source_bytes(s["file_id"], s["source_sha256"]):
                     # A newer/overwritten DOCX with the same Drive ID must not
