@@ -118,8 +118,9 @@
         `第${index + 1}题，${done ? "已作答" : "未作答"}${flag ? "，已标记" : ""}${position === index ? "，当前题" : ""}`,
       );
     });
+    byId("answer-progress").max = latest.paper?.count || 60;
     byId("answer-progress").value = count;
-    byId("map-progress").textContent = `${count}/${questions.length || 28}`;
+    byId("map-progress").textContent = `${count}/${questions.length || latest.paper?.count || 60}`;
     byId("map-summary").textContent =
       `已答${count}题 · 未答${Math.max(0, questions.length - count)}题 · 已标记${marked}题`;
   }
@@ -127,6 +128,9 @@
     const previousPaper = latest.paper?.paper_id;
     latest = next;
     const timing = latest.paper?.timing;
+    const count = latest.paper?.count || 60;
+    const totalIndicator = document.querySelector("#current-number + .muted");
+    if (totalIndicator) totalIndicator.textContent = " / " + count;
     byId("paper-state").textContent = timing
       ? {
           not_started: "尚未开始",
@@ -323,7 +327,7 @@
     make("p", description, root, "chart-description");
     make(
       "p",
-      "仅含正式28题、150分试卷的完整判分成绩；待批与旧制60分记录不混算。",
+      "历史28题与新版60题均为150分，不将主观题未批的成绩作为完整成绩；统计应按卷型区分。",
       root,
       "card-footnote",
     );
@@ -433,7 +437,7 @@
     ring.setAttribute("role", "img");
     ring.setAttribute(
       "aria-label",
-      `已判分${graded}/28题，待批${data.pending}题`,
+      `已判分${graded}/${data.answers.length}题，待批${data.pending}题`,
     );
     const total = document.createElementNS(ns, "circle"),
       done = document.createElementNS(ns, "circle");
@@ -449,13 +453,13 @@
     });
     total.setAttribute("stroke", "#edf1f5");
     done.setAttribute("stroke", "#2563eb");
-    done.setAttribute("stroke-dasharray", `${(graded / 28) * 251.3} 251.3`);
+    done.setAttribute("stroke-dasharray", `${(graded / data.answers.length) * 251.3} 251.3`);
     done.setAttribute("transform", "rotate(-90 50 50)");
     const text = document.createElementNS(ns, "text");
     text.setAttribute("x", "50");
     text.setAttribute("y", "49");
     text.setAttribute("text-anchor", "middle");
-    text.textContent = `${graded}/28`;
+    text.textContent = `${graded}/${data.answers.length}`;
     ring.append(text);
     const caption = document.createElementNS(ns, "text");
     caption.setAttribute("x", "50");
