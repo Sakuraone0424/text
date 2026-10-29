@@ -1,10 +1,9 @@
-"""Recover *review-only* candidates omitted from unnumbered past-exam sections.
+"""Review 2017 exam question boundaries from text and DOCX native numbering.
 
-A historical exam paragraph without a true question number must NOT be given
-an invented one or silently counted as independently authenticated original.
-Only the exact user-locked 2017 biochemistry transcript is currently
-structurally scoped here: six unnumbered term lines plus four short answers.
-All ten remain pending original-text, boundary and scientific review.
+Visible 2017 question lines lack literal numeric prefixes, but Word DOCX list
+paragraphs carry native decimal numbering. Preserve that numbering; never
+fabricate a number when absent. Six terms and four short answers remain
+pending independent official original-paper and scientific review.
 """
 from hashlib import sha256
 import json
@@ -38,18 +37,24 @@ def review_candidates(rows, item, *, source_sha256):
     for row in candidates(numbered, item):
         if row["year"] != 2017 or row["question_type"] not in scope:
             continue
-        if row["analysis"]["role"] != "unassigned" or row["question_number"] is not None:
+        role = row["analysis"]["role"]
+        if role not in ("unassigned", "question_start"):
             continue
+        native = row["analysis"]["word_numbering"]
+        if role == "question_start" and not (
+            native and native["level"] == 0
+            and native["format"] in ("decimal", "decimalZero")
+            and row["question_number"] is not None
+        ):
+            raise ValueError("2017 question number not verified as native Word list")
+        if role == "unassigned" and row["question_number"] is not None:
+            raise ValueError("Unassigned 2017 line has a contradictory number")
         text = row["transcription"].strip()
         if not text or len(text) > 800:
-            raise ValueError("Ambiguous unnumbered 2017 exam paragraph")
-        flags = [
-            f for f in row["concerns"] if f not in (
-                "question_boundary_unconfirmed",
-            )
-        ]
+            raise ValueError("Ambiguous 2017 exam paragraph")
+        flags = [f for f in row["concerns"] if f != "question_boundary_unconfirmed"]
         if flags:
-            raise ValueError("2017 unnumbered candidate has unresolved source flags")
+            raise ValueError("2017 candidate has unresolved source flags")
         counts[row["question_type"]] += 1
         selected.append({
             "source_key": key, "source_sha256": source_sha256,
@@ -57,7 +62,10 @@ def review_candidates(rows, item, *, source_sha256):
             "unit_id": row["unit_id"],
             "text_sha256": sha256(text.encode("utf-8")).hexdigest(),
             "text_length": len(text),
-            "original_question_number": None,
+            "original_question_number": int(row["question_number"])
+                if native and role == "question_start" else None,
+            "number_origin": "docx_native_decimal_list"
+                if native and role == "question_start" else "not_recorded",
             "candidate_status": "pending_original_question_boundary_review",
             "usable_for_generation_style": False,
             "scientific_answer_verified": False,
@@ -65,7 +73,7 @@ def review_candidates(rows, item, *, source_sha256):
     if counts != scope:
         raise ValueError(
             "2017 biochemistry transcript no longer matches locked 6+4 "
-            "unnumbered structure; do not fabricate exam questions"
+            "2017 question structure; do not fabricate exam questions"
         )
     if len({x["unit_id"] for x in selected}) != len(selected):
         raise ValueError("Duplicate source units in unnumbered question review")
@@ -76,7 +84,9 @@ def review_candidates(rows, item, *, source_sha256):
         "term_candidate_lines": counts["term"],
         "short_answer_candidate_lines": counts["short_answer"],
         "distinct_source_units": len(selected),
-        "status": "pending_original_verification_not_certified_question_counts",
+        "status": "2017_6plus4_word_structured_candidates_pending_original_review",
+        "native_word_numbered": sum(x["number_origin"] == "docx_native_decimal_list" for x in selected),
+        "not_numbered_in_source": sum(x["number_origin"] == "not_recorded" for x in selected),
         "candidates": selected,
     }
 
@@ -104,7 +114,7 @@ def main(argv=None):
         }, source_sha256=exam["sha256"]
     )
     private_json(args.output, report)
-    print("2017_biochemistry_unnumbered_6plus4_pending_original_review")
+    print("2017_biochemistry_6plus4_word_numbering_reconciled_pending_original_review")
     return 0
 
 
