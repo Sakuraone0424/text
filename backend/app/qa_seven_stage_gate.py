@@ -10,8 +10,10 @@ import os
 from app.source_intake import SCHEMA, isolated_db
 from app.source_readiness import audit as source_audit
 from app.qa_exam_year_inventory import summarize as exam_year_summary
+from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
+from app.training_spec_v2 import SUBJECTS, COUNTS
 
-def analyze(source,graph,risk,chapter,years,questions,papers):
+def analyze(source,graph,risk,chapter,years,questions,papers,accepted_buckets=None):
     source_six=(
         source["imported_files"]==6
         and source["integrity_passed_files"]==6
@@ -23,9 +25,23 @@ def analyze(source,graph,risk,chapter,years,questions,papers):
     annual=years["expected_years"]==52 and years["years_with_transcription"]==52
     pending_risk=risk["pending"]
     pending_chapter=chapter["pending"]
-    # A ready/published row is not a certified double-reviewed question.
-    # This conservative count never treats an ordinary status flag as proof.
-    reserve_verified=0
+    # Authenticated real AI science+answer events and current byte-locked
+    # evidence are checked by eligible_verified_reserve before calling here.
+    # No rows (or no attached validator) means zero rather than fabricated
+    # reserve. Keep all eight type/subject quotas independent.
+    expected = {
+        f"{subject}:{kind}": count * STARTUP_RESERVE_DAYS
+        for subject in SUBJECTS for kind, count in COUNTS.items()
+    }
+    if accepted_buckets is None:
+        accepted_buckets = {key: 0 for key in expected}
+    if set(accepted_buckets) != set(expected) or any(
+        type(n) is not int or n < 0 for n in accepted_buckets.values()
+    ):
+        raise ValueError("QA verified reserve buckets missing or invalid")
+    reserve_verified = sum(accepted_buckets.values())
+    reserve_ready = all(accepted_buckets[key] >= n
+                        for key, n in expected.items())
     return {
         "status":"seven_stage_QA_checkpoint_not_production_release",
         "stage_1": {
@@ -56,7 +72,9 @@ def analyze(source,graph,risk,chapter,years,questions,papers):
         "stage_5":{
             "confirmed_double_round_six_source_eligible_questions":reserve_verified,
             "required_questions":120,
-            "qualified_reserve_complete":False,
+            "verified_by_subject_type":dict(sorted(accepted_buckets.items())),
+            "minimum_required_by_subject_type":dict(sorted(expected.items())),
+            "qualified_reserve_complete":reserve_ready,
         },
         "stage_6":{
             "papers_v2_in_private_QA":papers,
@@ -110,10 +128,25 @@ def main():
         years=exam_year_summary(docs)
         q=conn.execute("SELECT count(*) AS n FROM reviewed_questions").fetchone()["n"]
         papers=conn.execute("SELECT count(*) AS n FROM papers_v2").fetchone()["n"]
+        candidate_rows = conn.execute(
+            "SELECT q.id,q.content FROM reviewed_questions q "
+            "JOIN auto_question_states s ON s.question_id=q.id "
+            "WHERE q.status='published' AND s.status='ready'"
+        ).fetchall()
+        accepted_buckets = {
+            f"{subject}:{kind}":eligible_verified_reserve(
+                conn, [
+                    row for row in candidate_rows
+                    if row["content"].get("subject")==subject
+                    and row["content"].get("question_type")==kind
+                ]
+            )
+            for subject in SUBJECTS for kind in COUNTS
+        }
         data=analyze(
             source,{"nodes":g["nodes"],"approved":g["approved"],
                     "chapters":chapters,"facets":facets},
-            risk,chapter,years,q,papers
+            risk,chapter,years,q,papers,accepted_buckets=accepted_buckets
         )
     print("QA_SEVEN_STAGE_HARD_GATE="+json.dumps(
         data,ensure_ascii=False,separators=(",",":"),sort_keys=True
