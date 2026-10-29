@@ -107,3 +107,24 @@ def test_invalid_production_import_is_refused_before_database_access(
     monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
     with pytest.raises(ValueError, match="production"):
         seed.import_isolated([], "source_staging_test", "staging", tmp_path / "report.json")
+
+
+def test_pinned_docx_media_count_must_match_actual_original(tmp_path):
+    root, lock_path = synthetic_collection(tmp_path)
+    pinned = json.loads(lock_path.read_text(encoding="utf-8"))
+    pinned["files"]["biochemistry_exams"]["embedded_media_objects"] = 27
+    lock_path.write_text(json.dumps(pinned), encoding="utf-8")
+    with pytest.raises(ValueError, match="Pinned DOCX media identity/count mismatch"):
+        seed.preflight(root, lock_path=lock_path)
+
+
+def test_synthetic_docx_media_inventory_is_not_claimed_transcribed(tmp_path):
+    root, lock_path = synthetic_collection(tmp_path)
+    items = seed.preflight(root, lock_path=lock_path)
+    exams = [item for item in items if item["source_kind"] == "exam_transcription"]
+    assert len(exams) == 2
+    for item in exams:
+        media = item["exam_media_inventory"]
+        assert media["source_sha256"] == item["sha256"]
+        assert media["images_scientifically_verified"] is False
+        assert media["question_image_anchors_verified"] is False
