@@ -211,6 +211,11 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             if (content.get("question_type") not in supported_points
                 or content.get("max_points") != supported_points[content["question_type"]]):
                 reasons.append("not_compatible_with_paper_version_scoring")
+        if not reasons and is_v2:
+            from app.source_policy import pinned_science_evidence
+
+            if not pinned_science_evidence(content):
+                reasons.append("scientific_evidence_outside_locked_ocr_four")
         if not reasons:
             automatic = conn.execute(
                 "SELECT status FROM auto_question_states WHERE question_id=%s",
