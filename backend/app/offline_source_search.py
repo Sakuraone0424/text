@@ -41,6 +41,7 @@ def _schema(conn):
         UNIQUE(source_key,ordinal)
     );
     CREATE INDEX source_ocr_location ON units(source_key,ocr_page,ordinal);
+    CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE VIRTUAL TABLE fulltext
         USING fts5(text,content='units',content_rowid='id',tokenize='trigram');
     """)
@@ -103,6 +104,9 @@ def build(directory, target, *, lock_path=LOCK):
                     "media_count":media,
                     "unit_risk_occurrences":dict(sorted(counts.items())),
                 })
+            conn.execute(
+                "INSERT INTO metadata(key,value) VALUES('index_complete','1')"
+            )
             conn.execute("INSERT INTO fulltext(fulltext) VALUES('rebuild')")
             if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite precommit integrity check failed")
@@ -126,9 +130,14 @@ def build(directory, target, *, lock_path=LOCK):
                     item["sha256"],item["ocr_page_markers"],media,item["bytes"]
                 ):
                     raise ValueError("Source index postcommit identity mismatch")
+            if check.execute(
+                "SELECT value FROM metadata WHERE key='index_complete'"
+            ).fetchone() != ("1",):
+                raise ValueError("Private source index completion marker missing")
             if check.execute("SELECT COUNT(*) FROM units").fetchone()[0] != total:
                 raise ValueError("Source unit index readback mismatch")
-        temporary.rename(target)
+        os.link(temporary, target)
+        temporary.unlink()
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise
