@@ -819,6 +819,7 @@ function startGradingActivity(paperId) {
   refreshScores.type = "button";
   refreshScores.onclick = () => showResult().catch((e) => status(e.message));
   let busy = false;
+  let priorGraded = null;
   const labels = {
     pending: "等待处理", retrying: "等待重试", running: "正在批改",
     succeeded: "模型响应已返回，等待评分写入", blocked: "需要人工处理或重新授权",
@@ -849,10 +850,18 @@ function startGradingActivity(paperId) {
           (row.points === null ? "" : " · " + row.points + "分"), events);
         if (row.error_code) item.textContent += " · " + row.error_code;
       }
+      const gained = priorGraded !== null && data.graded > priorGraded;
+      priorGraded = data.graded;
+      if (gained) {
+        // Read the actual revised result; do not invent a full score while
+        // individual grading jobs remain pending.
+        showResult().catch((error) => status(error.message));
+        return;
+      }
       if (data.complete && gradingActivityTimer) {
         clearInterval(gradingActivityTimer);
         gradingActivityTimer = null;
-        hint.textContent += " 全部完成，点击“刷新成绩与解析”查看最终成绩。";
+        hint.textContent += " 批改已完成，成绩以服务端记录为准。";
       }
     } catch (error) {
       hint.textContent = "批改状态暂时无法读取：" + error.message;
