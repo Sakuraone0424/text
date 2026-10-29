@@ -5,6 +5,7 @@ from app.source_policy import current_source_sql, FILES
 from app.candidate_review import snapshot_unit, create_packet
 from app.question_quality import Question, AXES
 from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
+from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
 
 
@@ -84,6 +85,12 @@ def plan(conn, uid):
                         "corrupt_ocr", "untranscribed_image", "image_dependent"
                     }):
                     continue
+                try:
+                    book = source_bibliography(conn, u)
+                except ValueError:
+                    # Unknown author/edition or a changed source checksum must
+                    # never be replaced by an invented bibliographic label.
+                    continue
                 enqueue(
                     conn,
                     uid,
@@ -96,12 +103,7 @@ def plan(conn, uid):
                         evidence=[u],
                         style=[s],
                         style_year=style["year"],
-                        source_bibliography=dict(
-                            file_id=u["file_id"],
-                            textbook=FILES[u["file_id"]]["filename"],
-                            authors="未核查（当前OCR交接未提供书目认证）",
-                            edition="校订OCR文本，不声明原书物理页核验",
-                        ),
+                        source_bibliography=book,
                         schema=Question.model_json_schema(),
                         instructions=exam_instructions(kind, POINTS[kind]),
                     ),
