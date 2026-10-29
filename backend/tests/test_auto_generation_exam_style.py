@@ -54,3 +54,37 @@ def test_style_example_prefers_same_actual_topic_without_inferring_scientific_an
     assert matched["lexical_topic_overlap"] == 1
     assert matched["scope"] == "past_exam_style_not_textbook_answer_evidence"
     assert "answer" not in matched
+
+
+def test_separate_untranscribed_figure_is_excluded_from_generation_style(db, tmp_path):
+    from docx import Document
+    from PIL import Image
+
+    path, metadata = material(tmp_path, "biochemistry_exams", content=[
+        "2025年中国科学技术大学生物化学真题",
+        "单项选择题",
+        "1. Examine the synthetic diagram below",
+        "2. Complete self-contained synthetic text question",
+    ])
+    image = tmp_path / "synthetic-exam-figure.png"
+    Image.new("RGB", (10, 10), "white").save(image)
+    document = Document(path)
+    # Insert the image immediately after Q1, not within its own question stem.
+    paragraph = document.paragraphs[2].insert_paragraph_before("")
+    # Place paragraph after Q1 by moving the appended drawing element to this
+    # position. The original question text does not itself carry the image flag.
+    picture = document.add_picture(str(image))
+    image_paragraph = document.paragraphs[-1]
+    document.paragraphs[2]._p.addnext(image_paragraph._p)
+    document.save(path)
+
+    sources.import_source(db, path, metadata)
+    q1 = db.execute(
+        "SELECT concerns FROM exam_transcript_candidates "
+        "WHERE transcription LIKE '1. Examine%'"
+    ).fetchone()
+    assert q1 is not None and "untranscribed_image" in q1["concerns"]
+    chosen = select_exam_style(db, "biochemistry", "single_choice")
+    assert chosen is not None
+    assert "Complete self-contained" in chosen["transcription"]
+    assert "Examine" not in chosen["transcription"]
