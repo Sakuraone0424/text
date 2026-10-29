@@ -94,6 +94,10 @@ def audit(conn):
             "missing_ocr_page_markers": [],
             "risk_flag_counts": {},
             "mapped_chapter_count": 0,
+            "mapped_chapter_ocr_pages": 0,
+            "chapter_unmapped_ocr_pages": [],
+            "chapter_unmapped_ocr_page_count": 0,
+            "chapter_mapping_scientifically_verified": False,
             "exam_candidate_count": 0,
             "exam_candidate_years": [],
             "embedded_media_objects": None,
@@ -158,6 +162,17 @@ def audit(conn):
                     "embedded_media_not_independently_transcribed"
                     if media_count else "no_embedded_media"
                 )
+        # Chapter mapping is a structural, OCR-page-only heuristic.
+        # A cover/TOC/unclassified page is NOT automatically a missing page.
+        # This enables an exact private offline-vs-SQL comparison after import.
+        classified_pages = {
+            u["ocr_global_page"] for u in units
+            if u["chapter"] not in ("unclassified", "unknown", "contents", "")
+            and u["ocr_global_page"] is not None
+        } if item["kind"] == "textbook" else set()
+        unclassified_pages = sorted(
+            set(p["ocr_global_page"] for p in pages) - classified_pages
+        ) if item["kind"] == "textbook" else []
         rows.append({
             **base,
             "ocr_unit_count": len(units),
@@ -166,8 +181,13 @@ def audit(conn):
             "missing_ocr_page_markers": missing,
             "risk_flag_counts": dict(sorted(flagged.items())),
             "mapped_chapter_count": len({
-                u["chapter"] for u in units if u["chapter"] not in ("unclassified", "unknown")
+                u["chapter"] for u in units
+                if u["chapter"] not in ("unclassified", "unknown", "contents", "")
             }),
+            "mapped_chapter_ocr_pages": len(classified_pages),
+            "chapter_unmapped_ocr_pages": unclassified_pages,
+            "chapter_unmapped_ocr_page_count": len(unclassified_pages),
+            "chapter_mapping_scientifically_verified": False,
             "exam_candidate_count": len(candidates),
             "exam_candidate_years": sorted({r["year"] for r in candidates if r["year"] is not None}),
             "embedded_media_objects": media_count,
