@@ -154,7 +154,9 @@
     document.querySelector("[data-prepare-proxy]").hidden = !!latest.paper;
     byId("result").hidden = timing?.status !== "submitted";
     byId("questions").hidden = !active();
-    byId("questions").inert = !active();
+    byId("questions").inert = !active() || !!latest.expired;
+    byId("submit").disabled = !!latest.expired || !!latest.serverPending;
+    byId("toggle-mark").disabled = !!latest.expired;
     byId("focus-toolbar").hidden = !active();
     if (!active()) {
       byId("question-dialog").close();
@@ -172,8 +174,8 @@
     if (latest.paper?.questions?.length) navigate(position, false);
     byId("save-state").textContent = latest.conflicted
       ? "版本冲突 · 同步已暂停"
-      : !navigator.onLine && active()
-        ? "离线 · 草稿保存在本机"
+      : latest.serverPending && active()
+        ? "离线暂存 · 服务端状态待确认"
         : latest.pendingCount
           ? `本机暂存 · ${latest.pendingCount}题待同步`
           : timing?.status === "in_progress"
@@ -189,7 +191,7 @@
       !!(
         latest.conflicted ||
         latest.pendingCount ||
-        !navigator.onLine ||
+        latest.serverPending ||
         photoPending
       ),
     );

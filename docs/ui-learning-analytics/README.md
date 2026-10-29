@@ -2,6 +2,18 @@
 
 本改版仅在独立分支实现，未部署Railway。正式28题、150分、60分钟及两科3/3/4/3/1配额不变；没有修改后端路由、数据库、题目、成绩、审核、计费或FSRS算法。
 
+## Firefox离线恢复修复（2026-10-29）
+
+已在相同隔离HTTPS流程复现8246cc0的30通过/1失败，并对修复源码重验为**31/31通过**。新增20项真实HTTPS回归全部通过（含Chromium、Firefox、WebKit三引擎），全量**538 passed**，保留全部原测试。线上8246cc0未替换，正式数据库和试卷ID1未访问。
+
+[完整修复与QA报告](offline-recovery/REPORT.md) · [原失败证据](offline-recovery/baseline-8246cc0.json) · [修复后31项实际记录及源码SHA](offline-recovery/verified-31.json)
+
+|原版Firefox断网刷新|修复后本机答卷恢复|交卷后待批状态|
+|---|---|---|
+|![原版失败](offline-recovery/before-firefox-offline.png)|![修复后恢复](offline-recovery/after-firefox-offline.png)|![合成QA待批](offline-recovery/qa-pending-result.png)|
+
+所有图像和分数都来自明确的合成QA数据。入口为临时loopback HTTPS，已清理；不能作为Railway独立公网QA或实体iPhone验收。此次修复仅改前端恢复、待确认/只读状态及SW缓存版本，后端应用、判分、数据库结构不变。
+
 ## PR初审修复（2026-10-29）
 
 - **开始前只显示须知和配额**：`training.js`在非`in_progress`状态不创建题目DOM；`training-ui.js`同时隐藏并禁用题目区、工具栏、答题卡及导航。初始HTML也默认隐藏，避免脚本初始化时闪现。
@@ -67,9 +79,9 @@
 
 ## 验收与限制
 
-本地最终全量：**518 passed，1项既有Starlette弃用警告**（初审版本为514项）。四视口与完整答题/图片/离线/幂等流程使用真实Chromium浏览器和独立PostgreSQL17。
+本地最终全量：**538 passed，1项既有Starlette弃用警告**（此前为518项，新增20项HTTPS回归）。保留四视口及原Chromium完整答题测试；新增三引擎真实HTTPS恢复，Firefox31项完整流程使用独立PostgreSQL17。
 
-WebKit已在工作区启动并实际渲染页面，但本地HTTP夹具下其拒绝Secure Cookie，完整登录流程无法作为Safari HTTPS验收。没有为此关闭产品Secure Cookie或修改鉴权；不把测试夹具适配尝试计为产品验收通过。实体iPhone Safari的HTTPS、中文键盘和系统相册仍需发布前实际确认。
+此前本地HTTP夹具的WebKit Secure Cookie限制已用独立HTTPS实例和进程私有CA信任解决。Chromium、Firefox、WebKit均真实完成HTTPS登录、开始、断网刷新和数据库同步回归，证书验证未关闭。实体iPhone Safari的中文键盘、系统相机、相册和移动网络后台切换仍需用户确认。
 
 - 本地独立PostgreSQL测试库，不是正式数据库；继续运行全部原测试，原手机用例只适配题号导航与交卷对话框，没有删除保存、上传、评分或幂等断言。
 - 新增四视口、准备与开始分离、导航/标记/选项键盘、中文composition、焦点/光标、多设备冲突、待批口径、真实图表分母、读取失败不造0、减少动画和结果刷新稳定性回归。
