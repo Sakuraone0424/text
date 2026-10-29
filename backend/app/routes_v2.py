@@ -30,7 +30,7 @@ def training_specification():
     # Never expose this legacy preview in a deployed production environment.
     if (
         os.environ.get("QUIZ_QA_LEGACY_FIXTURE") == "1"
-        and os.environ.get("QUIZ_DB_SCHEMA", "").startswith("quiz_live_test_")
+        and os.environ.get("QUIZ_QA_LEGACY_FIXTURE_SCHEMA", "").startswith("quiz_live_test_")
     ):
         from app.training_spec import formal_specification
     else:
