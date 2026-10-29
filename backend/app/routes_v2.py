@@ -26,8 +26,15 @@ router = APIRouter(prefix="/v2", tags=["reviewed-training"])
 
 @router.get("/training-specification")
 def training_specification():
-    from app.training_spec_v2 import formal_specification
-
+    # Local isolated regression fixtures explicitly exercise pre-upgrade papers.
+    # Never expose this legacy preview in a deployed production environment.
+    if (
+        os.environ.get("QUIZ_QA_LEGACY_FIXTURE") == "1"
+        and os.environ.get("QUIZ_DB_SCHEMA", "").startswith("quiz_live_test_")
+    ):
+        from app.training_spec import formal_specification
+    else:
+        from app.training_spec_v2 import formal_specification
     return formal_specification()
 
 
