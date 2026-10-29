@@ -115,7 +115,7 @@ def import_isolated(items, schema, target, report_path):
         if (
             db_report["imported_files"] != 6
             or db_report["integrity_passed_files"] != 6
-            or not db_report["complete_for_generation"]
+            or not db_report["all_six_byte_integrity_checks_passed"]
             or any(x["source_sha256"] != next(
                 i["sha256"] for i in items if i["key"] == x["key"]
             ) for x in db_report["files"])
