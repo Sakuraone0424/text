@@ -204,11 +204,13 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         except ValueError:
             reasons.append("invalid_question_or_rubric")
         if not reasons:
-            if is_v2 and (
-                content.get("question_type") not in spec_v2.POINTS
-                or content.get("max_points") != spec_v2.POINTS[content["question_type"]]
-            ):
-                reasons.append("not_compatible_with_60q_scoring")
+            supported_points = spec_v2.POINTS if is_v2 else {
+                "single_choice": 2, "fill_blank": 3, "term": 4,
+                "short_answer": 8, "essay": 20,
+            }
+            if (content.get("question_type") not in supported_points
+                or content.get("max_points") != supported_points[content["question_type"]]):
+                reasons.append("not_compatible_with_paper_version_scoring")
         if not reasons:
             automatic = conn.execute(
                 "SELECT status FROM auto_question_states WHERE question_id=%s",
