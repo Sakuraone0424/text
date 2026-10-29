@@ -220,7 +220,7 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
         "SELECT question_id,snapshot FROM paper_items_v2 WHERE paper_id=%s ORDER BY position",
         (paper_id,),
     ).fetchall()
-    validate_items([i["snapshot"] for i in items])
+    validate_paper_items(conn, paper_id, [i["snapshot"] for i in items])
     drafts = {
         r["question_id"]: r["value"]
         for r in conn.execute(
