@@ -30,6 +30,11 @@ def evaluate(db_audit, locked):
         key = item["key"]
         observed = database_files.get(key)
         pinned = locked["files"][key]
+        if (
+            key in EXPECTED_MEDIA
+            and pinned.get("embedded_media_objects") != EXPECTED_MEDIA[key]
+        ):
+            raise ValueError("DOCX media counts missing or changed in SHA lock")
         issues = []
         if observed is None or observed.get("document_id") is None:
             issues.append("source_not_imported")
