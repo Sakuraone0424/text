@@ -43,7 +43,9 @@ def test_readonly_2017_real_source_metadata_and_null_official_question_numbers()
     assert data["term_candidate_lines"] == 6
     assert data["short_answer_candidate_lines"] == 4
     assert data["total_unnumbered_candidate_lines"] == 10
-    assert data["word_native_numbered_question_lines"] == 0\n    assert data["visibly_unnumbered_without_native_list"] == 10\n    assert not data["all_ten_use_native_word_numbering"]
+    assert data["word_native_numbered_question_lines"] == 0
+    assert data["visibly_unnumbered_without_native_list"] == 10
+    assert not data["all_ten_use_native_word_numbering"]
     assert len(data["source_unit_ids"])==10
     assert data["official_original_review_completed"] is False
     assert data["scientific_answer_review_completed"] is False
