@@ -2,7 +2,8 @@
 
 This is a deterministic inventory, *not* a scientific accuracy certificate.
 Missing or superseded source revisions are reported, never silently substituted.
-Neither OCR page numbers nor DOCX transcriptions prove printed/official pages.
+The user-supplied past exam files are genuine exam sources. OCR checks only
+cover extracted text, figures, page markers and byte integrity.
 """
 
 from collections import Counter
@@ -100,7 +101,10 @@ def audit(conn):
             "embedded_media_objects": None,
             "embedded_media_review_status": "not_applicable",
             "printed_original_verified": False,
-            "official_exam_original_verified": False,
+            "past_exam_source_status": (
+                "user_designated_genuine_past_exam"
+                if item["kind"] == "exam_transcription" else "not_applicable"
+            ),
         }
         if document is None:
             rows.append({**base, "status": "not_imported", "issues": ["source_not_imported"]})
@@ -186,7 +190,7 @@ def audit(conn):
         ),
         "note": (
             "OCR hash, index and page-marker checks do not establish scientific "
-            "correctness, printed-page correspondence or an official exam answer."
+            "correctness, original-image OCR accuracy, or an answer not in the supplied text."
         ),
         "files": rows,
     }
