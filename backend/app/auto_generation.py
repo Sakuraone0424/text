@@ -29,6 +29,8 @@ def select_exam_style(conn, subject, kind, concept=None):
         " AND d.subject=%s AND t.question_type=%s "
         "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
         "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent']) "
+        "AND NOT (t.concerns ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent',"
+        "'question_boundary_unconfirmed','question_type_unknown','year_unassigned']) "
         "ORDER BY t.year DESC,t.id LIMIT 200",
         (subject, kind),
     ).fetchall()
