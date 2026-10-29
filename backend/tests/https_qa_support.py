@@ -85,7 +85,16 @@ def trusted_browser(pw, kind, root):
     executable = (os.environ.get('QUIZ_BROWSER_EXECUTABLE') if kind=='chromium' else os.environ.get('QUIZ_WEBKIT_EXECUTABLE')) or browser_type.executable_path
     # Bubblewrap changes only filesystem mounts in this browser's process tree.
     # Network namespace/proxy settings are preserved; nothing is imported globally.
-    argv = ['bwrap', '--unshare-user', '--ro-bind', '/', '/', '--bind', '/tmp', '/tmp', '--proc', '/proc', '--dev', '/dev']
+    # Hosted Ubuntu denies unprivileged UID maps. In that disposable CI runner only,
+    # allow sudo to establish mount isolation, then drop back to the original UID
+    # before the browser starts. No sysctl/AppArmor changes or global CA imports.
+    privileged_mount = os.environ.get('QUIZ_QA_PRIVILEGED_MOUNTS') == '1'
+    if privileged_mount:
+        preserved = 'HOME,USER,LOGNAME,HTTP_PROXY,HTTPS_PROXY,ALL_PROXY,NO_PROXY,http_proxy,https_proxy,all_proxy,no_proxy,SSL_CERT_FILE,SSL_CERT_DIR'
+        argv = ['sudo', '-n', '--preserve-env='+preserved, 'bwrap']
+    else:
+        argv = ['bwrap', '--unshare-user']
+    argv += ['--ro-bind', '/', '/', '--bind', '/tmp', '/tmp', '--proc', '/proc', '--dev', '/dev']
     for directory in {str(root), str(Path.cwd())}:
         argv += ['--bind', directory, directory]
     argv += ['--ro-bind', str(certdir), '/etc/ssl/certs']
@@ -101,7 +110,10 @@ def trusted_browser(pw, kind, root):
             argv += ['--setenv', 'XDG_DATA_HOME', str(data)]
     import shlex
     wrapper = root/(kind+'-trusted')
-    wrapper.write_text('#!/bin/sh\nexec '+shlex.join(argv+['--', str(executable)])+' "$@"\n'); wrapper.chmod(0o700)
+    command = [str(executable)]
+    if privileged_mount:
+        command = ['/usr/bin/setpriv', '--reuid', str(os.getuid()), '--regid', str(os.getgid()), '--clear-groups', '--no-new-privs'] + command
+    wrapper.write_text('#!/bin/sh\nexec '+shlex.join(argv+['--']+command)+' "$@"\n'); wrapper.chmod(0o700)
     browser = browser_type.launch(headless=True, executable_path=str(wrapper))
     return browser.new_context(viewport={'width':390,'height':844}, has_touch=True, ignore_https_errors=False)
 

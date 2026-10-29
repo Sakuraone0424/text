@@ -63,7 +63,7 @@
 
 `https_qa_support.py`复用已有live_app隔离合成夹具，新增独立TLS进程及QA登录秘密。Firefox使用临时NSS profile；Chromium/WebKit用仅该进程树生效的文件系统命名空间信任测试CA，保留原系统CA，主机全局信任库不变。没有关闭TLS验证；原31项还实际验证了未受信任证书被拒绝。
 
-CI安装三个浏览器、libnss3-tools与bubblewrap，实际运行新增用例；没有跳过Firefox或把WebKit降成静态截图。全量538项包括原518项和新20项。唯一警告为既有Starlette弃用警告。
+CI安装三个浏览器、libnss3-tools与bubblewrap，实际运行新增用例。Hosted Ubuntu拒绝非特权UID映射，因此仅在一次性CI runner中用sudo建立挂载隔离，随即通过setpriv回到原runner UID/GID并设置no-new-privs后启动浏览器；不改sysctl、AppArmor策略或主机证书库。本地仍使用非特权命名空间。此修正只作用于测试设施，不影响产品代码；没有跳过Firefox或把WebKit降成静态截图。全量538项包括原518项和新20项。唯一警告为既有Starlette弃用警告。
 
 临时服务、数据库schema/角色、浏览器profile与一次性证书/私钥均清理。只保留脱敏JSON、合成截图和测试源码。Railway只读核验仍为8246cc0，PR预览关闭、API仓库触发器为空；本轮没有发布、改变量、建收费资源、访问正式数据或合并main。
 
