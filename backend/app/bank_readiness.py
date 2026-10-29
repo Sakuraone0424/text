@@ -58,14 +58,19 @@ def report(conn, user_id):
             "subject": sub,
             "question_type": kind,
             "required": required,
+            "two_day_reserve_target": 2 * required,
             "eligible_upper_bound": counts[(sub, kind)],
             "shortage_at_least": max(0, required - counts[(sub, kind)]),
+            "two_day_reserve_shortage_at_least": max(0, 2 * required - counts[(sub, kind)]),
         }
         for sub in SUBJECTS for kind, required in COUNTS.items()
     ]
     return {
         "specification": "xiaohan-60q-150pt-v2",
         "minimum_bucket_counts_met": all(b["shortage_at_least"] == 0 for b in buckets),
+        "two_day_reserve_counts_met": all(
+            b["two_day_reserve_shortage_at_least"] == 0 for b in buckets
+        ),
         "exact_selection_verified": False,
         "interpretation": (
             "These are strict current-evidence upper bounds, not a guaranteed "
