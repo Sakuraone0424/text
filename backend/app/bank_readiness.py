@@ -65,7 +65,7 @@ def report(conn, user_id):
     ]
     return {
         "specification": "xiaohan-60q-150pt-v2",
-        "available_to_prepare": all(b["shortage_at_least"] == 0 for b in buckets),
+        "minimum_bucket_counts_met": all(b["shortage_at_least"] == 0 for b in buckets),
         "exact_selection_verified": False,
         "interpretation": (
             "These are strict current-evidence upper bounds, not a guaranteed "
