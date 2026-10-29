@@ -33,3 +33,24 @@ def test_explicit_docx_fidelity_does_not_invent_missing_exam_question_types(db, 
     result = select_exam_style(db, "cell_biology", "term")
     assert result and result["year"] == 2025
     assert select_exam_style(db, "cell_biology", "single_choice") is None
+
+
+def test_style_example_prefers_same_actual_topic_without_inferring_scientific_answer(db, tmp_path):
+    path, metadata = material(tmp_path, "biochemistry_exams", content=[
+        "2023年中国科学技术大学生物化学真题",
+        "单项选择题",
+        "1. Synthetic ATP-dependent enzyme example",
+        "2024年中国科学技术大学生物化学真题",
+        "单项选择题",
+        "1. Synthetic SRP-associated targeting example",
+    ])
+    sources.import_source(db, path, metadata)
+    latest = select_exam_style(db, "biochemistry", "single_choice")
+    assert latest["year"] == 2024
+    matched = select_exam_style(db, "biochemistry", "single_choice", {
+        "unit_id": 7, "relation": {"name": "ATP", "target": ""}
+    })
+    assert matched["year"] == 2023
+    assert matched["lexical_topic_overlap"] == 1
+    assert matched["scope"] == "past_exam_style_not_textbook_answer_evidence"
+    assert "answer" not in matched
