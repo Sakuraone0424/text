@@ -39,7 +39,7 @@ def select_exam_style(conn, subject, kind, concept=None):
         str(relation.get(key, "")).strip() for key in ("name", "target")
     ]
     def normal(text):
-        return re.sub(r"\\s+", "", unicodedata.normalize("NFKC", text).casefold())
+        return re.sub(r"\s+", "", unicodedata.normalize("NFKC", text).casefold())
     anchors = [normal(x) for x in terms if len(normal(x)) >= 2]
     matches = [
         sum(term in normal(row["transcription"]) for term in anchors)
