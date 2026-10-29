@@ -44,6 +44,15 @@ def preflight(directory, *, lock_path=LOCK):
         if len(data) != locked_item["bytes"] or digest != locked_item["sha256"]:
             raise ValueError("Downloaded source changed from its locked SHA-256: " + ident)
         metadata = dict(item["metadata"], expected_sha256=digest)
+        if item["kind"] == "textbook":
+            from app.source_bibliography import from_locked_cover
+
+            book = from_locked_cover(
+                ident, digest, data[:16000].decode("utf-8", errors="ignore")
+            )
+            metadata["authors"] = book["authors"]
+            metadata["edition"] = book["edition"]
+            metadata["bibliography_validation"] = book["verification"]
         prepared = sources.prepare_source(path, metadata, raw=data)
         if prepared["sha256"] != digest:
             raise ValueError("Source preflight produced unexpected bytes: " + ident)
