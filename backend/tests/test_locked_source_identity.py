@@ -5,7 +5,7 @@ database, trigger a model, or copy any of the six copyrighted source bodies.
 """
 import json
 
-from app.source_policy import COLLECTION, FILES, pinned_source_bytes
+from app.source_policy import COLLECTION, FILES, pinned_source_bytes, pinned_science_evidence
 from pathlib import Path
 
 
@@ -69,3 +69,32 @@ def test_completed_generation_job_rejects_unpinned_sources_before_db_or_publicat
         }
         with pytest.raises(ValueError, match="generation_source_not_in_locked"):
             accept(None, fake_completed_job)
+
+
+def test_scientific_evidence_must_only_use_the_four_locked_ocr_textbooks():
+    locked = json.loads(
+        (Path(__file__).parents[1] / "app" / "ocr_source_sha256_lock.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    upper = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_upper")
+    notes = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_notes")
+    exams = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_exams")
+    book = {
+        "file_id": upper["file_id"],
+        "source_sha256": locked["files"][upper["key"]]["sha256"],
+    }
+    note = {
+        "file_id": notes["file_id"],
+        "source_sha256": locked["files"][notes["key"]]["sha256"],
+    }
+    real_exam = {
+        "file_id": exams["file_id"],
+        "source_sha256": locked["files"][exams["key"]]["sha256"],
+    }
+    assert pinned_science_evidence({"evidence": [book, note]})
+    assert not pinned_science_evidence({"evidence": []})
+    assert not pinned_science_evidence({"evidence": [real_exam]})
+    assert not pinned_science_evidence({"evidence": [book, real_exam]})
+    assert not pinned_science_evidence({"evidence": [{**book, "source_sha256": "0" * 64}]})
+    assert not pinned_science_evidence({"evidence": [{"file_id": upper["file_id"]}]})
