@@ -103,7 +103,7 @@ def evidence(conn, qid):
         ):
             raise ValueError("transcription_style_mismatch")
         style.append(
-            {**u, "source_level": "transcription", "official_original_verified": False}
+            {**u, "source_level": "user_provided_genuine_past_exam"}
         )
     if not style:
         raise ValueError("style_evidence_required")
@@ -199,9 +199,7 @@ def source_views(q, refs, style):
             **{k: u[k] for k in fields},
             "text": u["text"],
             "year": u.get("year"),
-            "source_level": "transcription",
-            "original_verified": False,
-            "official_answer_verified": False,
+            "source_level": "user_provided_genuine_past_exam",
         }
         for u in style
     ]
@@ -231,7 +229,7 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
         question=question,
         evidence=refs,
         style=style,
-        source_level="transcription_not_official",
+        source_level="user_provided_genuine_past_exam",
         schema=Finding.model_json_schema(),
         instructions="For single-choice science review derive the unique correct letter as independent_choice without a supplied answer (other types use null). Independently verify mechanisms, limitations, OCR risks and scientific claims against the provided original extracts. Return all five checks: "
         + ",".join(AXES)
@@ -240,8 +238,9 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
     if phase == "answer":
         payload["instructions"] += (
             " In this answer round exam_style means subject/type scope consistency only; "
-            "transcription style provenance is independently checked in science round. "
-            "Do not infer official original-paper or official-answer verification."
+            "The user-supplied past-exam questions are genuine exam material. "
+            "Check whether the new draft follows their observed questioning patterns; "
+            "derive scientific answers and rubric criteria independently from textbook evidence."
         )
     if contract_version in (2, 3, 4, 5, 6, 7):
         if phase == "answer":
