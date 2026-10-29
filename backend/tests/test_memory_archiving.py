@@ -132,7 +132,9 @@ def test_chatgpt_adapter_contract_uses_actual_v2_api(client, bank):
 
     client.headers.update({"x-api-key": "learner-test-key"})
     adapter = TrainingAdapter(client)
-    prepared = adapter.prepare()
+    from app.training_spec import default_blueprint as historical_28q_blueprint
+    prepared = adapter.prepare(historical_blueprint=historical_28q_blueprint())
+    assert prepared["count"] == 28
     assert not prepared["questions"]
     active = adapter.start(prepared["paper_id"])
     qid = active["questions"][0]["id"]
