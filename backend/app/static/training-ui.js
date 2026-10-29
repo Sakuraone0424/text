@@ -671,7 +671,7 @@
   });
   document.querySelector("[data-prepare-proxy]").onclick = () =>
     byId("prepare").click();
-  ["memory", "weekly", "history", "insights", "archive"].forEach((id) =>
+  ["memory", "weekly", "history", "insights", "archive", "source-status"].forEach((id) =>
     byId(id).addEventListener("click", () =>
       showView(
         id === "memory" ? "mistakes" : id === "archive" ? "profile" : "stats",
