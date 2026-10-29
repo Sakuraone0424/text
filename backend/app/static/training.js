@@ -764,7 +764,7 @@ async function showResult() {
   window.TrainingUI?.result(result);
   startGradingActivity(paper.paper_id);
   showVerificationStatus(paper.paper_id);
-  status("已交卷。照片识别不清时须人工确认，不会直接判零。");
+  status("已交卷。照片识别未通过自动核验时保持待处理，不会直接判零。");
 }
 
 async function showVerificationStatus(paperId) {
@@ -822,7 +822,8 @@ function startGradingActivity(paperId) {
   const labels = {
     pending: "等待处理", retrying: "等待重试", running: "正在批改",
     succeeded: "模型响应已返回，等待评分写入", blocked: "需要人工处理或重新授权",
-    cancelled: "已取消", pending_manual_or_queue: "未进入自动队列／待人工复核",
+    cancelled: "已取消", pending_automatic_queue: "尚未进入自动批改队列",
+    vision_pipeline_unavailable: "照片待自动识别；当前视觉流程不可用",
     graded: "已判分"
   };
   async function poll() {
