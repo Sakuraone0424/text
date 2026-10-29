@@ -21,11 +21,13 @@
     },
     "biochemistry_exams": {
       "sha256": "6add10fad4708453f7f8cff5562ee73bf0853d70e43c8c3d67d06299cf82c001",
-      "bytes": 1697187
+      "bytes": 1697187,
+      "embedded_media_objects": 27
     },
     "cell_biology_exams": {
       "sha256": "63b0eea0b1dbb5a7b6323dcd769792bba60a96ce9d93c6b8bd8c79fd4939ef79",
-      "bytes": 272001
+      "bytes": 272001,
+      "embedded_media_objects": 4
     }
   }
 }
