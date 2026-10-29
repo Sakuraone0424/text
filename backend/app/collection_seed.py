@@ -119,7 +119,8 @@ def import_isolated(items, schema, target, report_path, *, initialize_schema=Fal
     if os.environ.get("RAILWAY_ENVIRONMENT_NAME", "").lower() == "production":
         raise ValueError("Cannot import sources from a production Railway runtime")
     # This function never calls init() or migrations and never invents tables.
-    # All six sources and the private report must commit in one transaction.
+    # All six source versions commit atomically. The private success report is
+    # written only after a separate read-only post-commit source audit.
     with isolated_db(
         schema, target, **({"create": True} if initialize_schema else {})
     ) as conn:
