@@ -153,11 +153,13 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         # paper must remain reachable when cloud activation happens another day.
         previous = conn.execute(
             "SELECT p.id FROM papers_v2 p LEFT JOIN training_sessions s ON s.paper_id=p.id "
-            "WHERE p.user_id=%s AND p.paper_date<%s AND p.blueprint=%s "
+            "WHERE p.user_id=%s AND p.paper_date<%s "
+            "AND (p.blueprint=%s OR (%s AND p.blueprint->>'specification'=%s "
+            "AND s.paper_id IS NOT NULL AND s.submitted_at IS NULL AND s.deadline>clock_timestamp())) "
             "AND NOT EXISTS(SELECT 1 FROM attempts_v2 a WHERE a.paper_id=p.id) "
             "AND (s.paper_id IS NULL OR (s.submitted_at IS NULL AND s.deadline>clock_timestamp())) "
             "ORDER BY p.paper_date DESC,p.id DESC LIMIT 1 FOR UPDATE OF p",
-            (user_id, day, Jsonb(spec)),
+            (user_id, day, Jsonb(spec), is_v2, "xiaohan-150-60-v1"),
         ).fetchone()
         if previous:
             return load_paper(conn, user_id, previous["id"])
