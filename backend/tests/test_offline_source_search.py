@@ -70,7 +70,7 @@ def test_original_source_book_flags_remain_pending_not_scientifically_approved(
     item = next(x for x in COLLECTION["files"] if x["key"] == "biochemistry_notes")
     target = root / item["relative_path"]
     target.write_text(target.read_text(encoding="utf-8").replace(
-        "===== page-001 =====", "===== page-001 =====\\n过氧化物酶体定位需参考原图 ATP", 1
+        "===== page-001 =====", "===== page-001 =====\n过氧化物酶体定位需参考原图 ATP", 1
     ), encoding="utf-8")
     manifest = json.loads(lock.read_text(encoding="utf-8"))
     raw = target.read_bytes()
