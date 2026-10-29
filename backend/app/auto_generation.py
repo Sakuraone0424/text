@@ -4,6 +4,7 @@ from app.training_spec import SUBJECTS, COUNTS, POINTS
 from app.source_policy import current_source_sql, FILES
 from app.candidate_review import snapshot_unit, create_packet
 from app.question_quality import Question, AXES
+from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
 from app.ai_jobs import enqueue, content_sha
 
 
@@ -65,7 +66,7 @@ def plan(conn, uid):
                             edition="校订OCR文本，不声明原书物理页核验",
                         ),
                         schema=Question.model_json_schema(),
-                        instructions="Generate one complete original training question grounded only in supplied original textbook evidence, not freely invented facts. Use the declared exact subject/type/points and full answer/rubric with exact evidence identities. Style is transcription only, not verified original paper. Return JSON {question: complete Question}. Definitions must test concepts; short/essay tasks require mechanism, conditions and reasoning. Avoid obvious distractors or answer leakage.",
+                        instructions=exam_instructions(kind, POINTS[kind]),
                     ),
                 )
                 return
@@ -82,6 +83,9 @@ def accept(conn, job):
         p["max_points"],
     ):
         raise ValueError("generated_quota_mismatch")
+    structural_issues = exam_issues(q)
+    if structural_issues:
+        raise ValueError("generated_question_quality_gate_failed:" + ",".join(structural_issues))
     allowed = {u["unit_id"] for u in p["evidence"]}
     bibliography = p["source_bibliography"]
     if any(
