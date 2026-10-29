@@ -102,3 +102,22 @@ def test_same_genuine_exam_drive_file_id_with_wrong_sha_never_counts_as_safe(db,
     assert selected["safe_style_anchors"] == 0
     assert selected["blocked_by_parsing_or_images"] == 1
     assert selected["years_with_safe_anchors"] == []
+
+
+def test_table_ocr_and_missing_transcription_in_next_paragraph_block_parent():
+    from app.transcript_analysis import candidates, STYLE_SOURCE_BLOCKERS
+
+    item = {"year_start": 1998, "year_end": 2026}
+    units = [
+        dict(id=1, text="2025年中国科学技术大学细胞生物学真题", section="", quality_flags=[]),
+        dict(id=2, text="名词解释", section="", quality_flags=[]),
+        dict(id=3, text="1. Explain the synthetic table below", section="", quality_flags=[]),
+        dict(id=4, text="Synthetic tabular continuation", section="",
+             quality_flags=["docx_table_requires_review", "ocr_uncertain"]),
+        dict(id=5, text="2. Define a self-contained synthetic concept", section="", quality_flags=[]),
+    ]
+    found = list(candidates(units, item))
+    starts = [x for x in found if x["analysis"]["role"] == "question_start"]
+    assert len(starts) == 2
+    assert {"docx_table_requires_review", "ocr_uncertain"} <= set(starts[0]["concerns"])
+    assert not set(starts[1]["concerns"]) & STYLE_SOURCE_BLOCKERS
