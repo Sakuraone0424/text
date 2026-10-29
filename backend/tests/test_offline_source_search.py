@@ -93,3 +93,21 @@ def test_original_source_book_flags_remain_pending_not_scientifically_approved(
             conn.execute(
                 "UPDATE units SET scientifically_approved=1 WHERE id=(SELECT id FROM units LIMIT 1)"
             )
+
+
+def test_publish_does_not_replace_index_created_during_build(tmp_path, monkeypatch):
+    from app import offline_source_search as module
+
+    root, lock = synthetic_collection(tmp_path)
+    db = tmp_path / "concurrent.sqlite"
+    real_link = module.os.link
+
+    def competing_writer(src, dst):
+        dst.write_bytes(b"existing-winner")
+        return real_link(src, dst)
+
+    monkeypatch.setattr(module.os, "link", competing_writer)
+    with pytest.raises(FileExistsError):
+        build(root, db, lock_path=lock)
+    assert db.read_bytes() == b"existing-winner"
+    assert not (tmp_path / "concurrent.sqlite.partial").exists()
