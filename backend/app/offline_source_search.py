@@ -144,7 +144,7 @@ def build(directory, target, *, lock_path=LOCK):
 
 def search(index_path, phrase, *, limit=20):
     """Local exact-phrase FTS/trigram retrieval, never certifies the answer."""
-    if not isinstance(phrase,str) or len(phrase.strip()) < 2:
+    if not isinstance(phrase,str) or not 2 <= len(phrase.strip()) <= 256:
         raise ValueError("Search phrase must contain at least two characters")
     if not 1 <= limit <= 100:
         raise ValueError("Invalid search limit")
@@ -156,13 +156,13 @@ def search(index_path, phrase, *, limit=20):
                 "SELECT u.source_key,u.ordinal,u.ocr_page,u.chapter,u.section,"
                 "u.text,u.risk_flags_json FROM fulltext f "
                 "JOIN units u ON u.id=f.rowid WHERE fulltext MATCH ? "
-                "AND instr(u.text,?)>0 ORDER BY u.source_key,u.id LIMIT ?"
+                "AND instr(lower(u.text),lower(?))>0 ORDER BY u.source_key,u.id LIMIT ?"
             )
             rows = conn.execute(sql, ('"'+phrase.replace('"','""')+'"',phrase,limit))
         else:
             rows = conn.execute(
                 "SELECT source_key,ordinal,ocr_page,chapter,section,text,"
-                "risk_flags_json FROM units WHERE instr(text,?)>0 "
+                "risk_flags_json FROM units WHERE instr(lower(text),lower(?))>0 "
                 "ORDER BY source_key,id LIMIT ?",(phrase,limit)
             )
         return [dict(row) for row in rows]
