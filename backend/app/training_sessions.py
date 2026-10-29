@@ -6,7 +6,17 @@ from datetime import timedelta
 from psycopg.types.json import Jsonb
 
 from app.training_spec import DURATION_SECONDS, validate_items
+from app import training_spec_v2 as new_spec
 from app.question_quality import normalize_answer
+
+
+def validate_paper_items(conn, paper_id, items):
+    row = conn.execute("SELECT blueprint FROM papers_v2 WHERE id=%s", (paper_id,)).fetchone()
+    if not row:
+        raise LookupError("Paper not found")
+    if row["blueprint"].get("specification") == new_spec.SPECIFICATION:
+        return new_spec.validate_items(items)
+    return validate_items(items)
 
 
 def server_now(conn):
@@ -28,7 +38,7 @@ def start(conn, user_id, paper_id):
         items = conn.execute(
             "SELECT snapshot FROM paper_items_v2 WHERE paper_id=%s", (paper_id,)
         ).fetchall()
-        validate_items([i["snapshot"] for i in items])
+        validate_paper_items(conn, paper_id, [i["snapshot"] for i in items])
         if conn.execute(
             "SELECT 1 FROM attempts_v2 WHERE paper_id=%s", (paper_id,)
         ).fetchone():
