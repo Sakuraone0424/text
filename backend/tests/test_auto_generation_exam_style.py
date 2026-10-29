@@ -87,3 +87,33 @@ def test_separate_untranscribed_figure_is_excluded_from_generation_style(db, tmp
     assert chosen is not None
     assert "Complete self-contained" in chosen["transcription"]
     assert "Examine" not in chosen["transcription"]
+
+
+def test_critical_following_docx_table_blocks_parent_style_question(db, tmp_path):
+    """A question in normal text cannot silently lose its following table."""
+    from docx import Document
+
+    path, metadata = material(tmp_path, "biochemistry_exams", content=[
+        "2025年中国科学技术大学生物化学真题",
+        "单项选择题",
+        "1. Interpret the synthetic results in the following table",
+        "2. Self-contained synthetic choice question",
+    ])
+    doc = Document(path)
+    table = doc.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "Critical tabulated synthetic results"
+    # Move table between Q1 and Q2 (not an image and not embedded in Q1).
+    doc.paragraphs[2]._p.addnext(table._tbl)
+    doc.save(path)
+
+    sources.import_source(db, path, metadata)
+    q1 = db.execute(
+        "SELECT concerns FROM exam_transcript_candidates "
+        "WHERE transcription LIKE '1. Interpret%'"
+    ).fetchone()
+    assert q1 is not None
+    assert "docx_table_requires_review" in q1["concerns"]
+    candidate = select_exam_style(db, "biochemistry", "single_choice")
+    assert candidate is not None
+    assert "Self-contained" in candidate["transcription"]
+    assert "Interpret" not in candidate["transcription"]
