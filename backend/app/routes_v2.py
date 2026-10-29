@@ -167,6 +167,14 @@ def six_source_readiness(username: str = Depends(require_auth)):
     return operation(lambda c, u: audit(c), username)
 
 
+@router.get("/quality/genuine-exam-style-readiness")
+def genuine_exam_style_readiness(username: str = Depends(require_auth)):
+    """Original supplied exam content, not model-generated style examples."""
+    from app.exam_style_readiness import report
+
+    return operation(lambda c, u: report(c), username)
+
+
 @router.get("/quality/60q-bank-readiness")
 def sixty_question_bank_readiness(username: str = Depends(require_auth)):
     """Authenticated learner can inspect exact verified-inventory shortages.
