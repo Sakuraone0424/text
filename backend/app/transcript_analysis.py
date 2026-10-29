@@ -6,7 +6,12 @@ OCR/images and answer support, not whether the supplied exams are real.
 
 import re
 
-VERSION = "transcript-index/1.1"
+VERSION = "transcript-index/1.2"
+STYLE_SOURCE_BLOCKERS = frozenset({
+    "corrupt_ocr", "untranscribed_image", "image_dependent",
+    "docx_table_requires_review", "complex_table", "ocr_uncertain",
+    "transcription_gap_reported",
+})
 TYPES = {
     "多项选择题": "multiple_choice",
     "多项选择": "multiple_choice",
@@ -211,9 +216,7 @@ def candidates(units, item):
         parent = row["analysis"]["parent_question_unit_id"]
         if parent not in beginnings:
             continue
-        risks = set(row["concerns"]) & {
-            "image_dependent", "untranscribed_image", "corrupt_ocr"
-        }
+        risks = set(row["concerns"]) & STYLE_SOURCE_BLOCKERS
         if risks:
             original = beginnings[parent]
             original["concerns"] = sorted(set(original["concerns"]) | risks)
