@@ -35,10 +35,10 @@ def audit(conn):
         "term_candidate_lines": details["term_candidate_lines"],
         "short_answer_candidate_lines": details["short_answer_candidate_lines"],
         "total_unnumbered_candidate_lines": details["distinct_source_units"],
-        "all_original_question_numbers_missing": all(
-            x["original_question_number"] is None
-            for x in details["candidates"]
-        ),
+        "word_native_numbered_question_lines": details["native_word_numbered"],
+        "visibly_unnumbered_without_native_list": details["not_numbered_in_source"],
+        "all_ten_use_native_word_numbering": details["native_word_numbered"] == 10,
+        "word_list_numbers_do_not_authenticate_official_paper": True,
         "source_unit_ids": [x["unit_id"] for x in details["candidates"]],
         "official_original_review_completed": False,
         "scientific_answer_review_completed": False,
