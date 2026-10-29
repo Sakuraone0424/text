@@ -56,3 +56,41 @@ def test_choices_co_located_in_one_source_unit_remain_valid():
     assert complete_choice_style_unit_ids([
         unit(10,"1. 以下哪项？\nA.甲\nB.乙\nC.丙\nD.丁"),
     ])==[10]
+
+
+def test_selector_skips_stem_only_style_and_returns_all_complete_option_ids():
+    from app.auto_generation import select_exam_style
+
+    class Fake:
+        def execute(self, sql, params):
+            if "FROM exam_transcript_candidates" in sql:
+                return [
+                    dict(id=10,document_id=6,start_ordinal=100,year=2004,
+                         transcription="1. 选择最正确的说法？"),
+                    dict(id=20,document_id=6,start_ordinal=200,year=2004,
+                         transcription="2. 请选择"),
+                ]
+            assert "FROM source_units" in sql
+            if params[1]==100:
+                return [unit(10,"1. 选择最正确的说法？"),
+                        unit(11,"下一道题干")]
+            assert params[1]==200
+            return [unit(20,"2. 请选择"),
+                    unit(21,"A.甲 B.乙"),
+                    unit(22,"C.丙 D.丁")]
+    selected=select_exam_style(Fake(),"cell_biology","single_choice")
+    assert selected["id"]==20
+    assert selected["style_unit_ids"]==[20,21,22]
+    assert selected["scope"]=="past_exam_style_not_textbook_answer_evidence"
+
+
+def test_other_types_keep_single_original_style_unit_without_choice_reconstruction():
+    from app.auto_generation import select_exam_style
+
+    class Fake:
+        def execute(self, sql, params):
+            assert "FROM exam_transcript_candidates" in sql
+            return [dict(id=31,document_id=6,start_ordinal=310,
+                         year=2024,transcription="1. 尿素循环位于______")]
+    chosen=select_exam_style(Fake(),"biochemistry","fill_blank")
+    assert chosen["style_unit_ids"]==[31]
