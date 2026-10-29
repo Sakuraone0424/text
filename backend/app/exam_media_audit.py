@@ -13,6 +13,7 @@ from xml.etree import ElementTree as ET
 from zipfile import ZipFile, BadZipFile
 
 IMAGE_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+HDPHOTO_REL = "http://schemas.microsoft.com/office/2007/relationships/hdphoto"
 REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 DRAWING_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -26,7 +27,7 @@ def _image_relationships(archive):
     root = ET.fromstring(archive.read(rels_name))
     images = {}
     for relation in root.findall(f"{{{REL_NS}}}Relationship"):
-        if relation.get("Type") != IMAGE_REL:
+        if relation.get("Type") not in (IMAGE_REL, HDPHOTO_REL):
             continue
         if relation.get("TargetMode") == "External":
             raise ValueError("external_image_relationship_not_accepted")
