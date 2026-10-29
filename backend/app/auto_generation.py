@@ -1,7 +1,9 @@
 """Bounded supplementation from current AI-verified knowledge, never quota padding."""
 
 from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
-from app.source_policy import current_source_sql, FILES, pinned_source_bytes
+from app.source_policy import (
+    current_source_sql, FILES, pinned_source_bytes, pinned_science_evidence
+)
 from app.candidate_review import snapshot_unit, create_packet
 from app.question_quality import Question, AXES
 from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
@@ -10,6 +12,20 @@ from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
 
 STARTUP_RESERVE_DAYS = 2  # 60 questions/day, 120 verified candidates per user
+
+
+def eligible_verified_reserve(conn, rows):
+    """Count only actual accepted six-source science, not stale ready flags.
+
+    A ready status cannot make an unpinned question count toward the two-day
+    120-question reserve. Keep this identical to the new-paper source gate.
+    """
+    from app.auto_quality import ready
+
+    return sum(
+        bool(pinned_science_evidence(row["content"]) and ready(conn, row["id"]))
+        for row in rows
+    )
 
 
 def select_exam_style(conn, subject, kind, concept=None):
@@ -64,11 +80,10 @@ def plan(conn, uid):
         return
     for subject in SUBJECTS:
         for kind, required in COUNTS.items():
-            from app.auto_quality import ready
             # A merely "ready" state does not prove current science/answer
             # review, publication or v2 scoring compatibility.
             eligible = conn.execute(
-                "SELECT q.id FROM auto_question_states s "
+                "SELECT q.id,q.content FROM auto_question_states s "
                 "JOIN reviewed_questions q ON q.id=s.question_id "
                 "WHERE s.status='ready' AND q.status='published' "
                 "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
@@ -79,7 +94,7 @@ def plan(conn, uid):
                 "AND f.user_id=%s AND f.due<=clock_timestamp()))",
                 (subject, kind, str(POINTS[kind]), uid, uid),
             ).fetchall()
-            count = sum(bool(ready(conn, row["id"])) for row in eligible)
+            count = eligible_verified_reserve(conn, eligible)
             if count >= required * STARTUP_RESERVE_DAYS:
                 continue
             # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
