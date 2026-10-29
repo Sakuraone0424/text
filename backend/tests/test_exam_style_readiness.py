@@ -3,7 +3,7 @@
 Synthetic, rollback-only DB fixtures validate extraction; these are not the
 learner's actual past exams, and must not be counted as production inventory.
 """
-from app import sources
+from app import sources, exam_style_readiness
 from app.exam_style_readiness import report
 from test_ocr_only import material
 from test_api_v2 import LEARNER
@@ -21,7 +21,9 @@ def test_no_sources_means_all_eight_style_buckets_missing(db, client):
     assert response.json()["buckets"] == status["buckets"]
 
 
-def test_genuine_source_parsing_counts_only_real_question_starts(db, tmp_path):
+def test_genuine_source_parsing_counts_only_real_question_starts(db, tmp_path, monkeypatch):
+    # Synthetic private SQL fixture is not a real six-source byte version.
+    monkeypatch.setattr(exam_style_readiness, "pinned_source_bytes", lambda *args: True)
     path, meta = material(tmp_path, "biochemistry_exams")
     sources.import_source(db, path, meta)
     status = report(db)
@@ -37,7 +39,9 @@ def test_genuine_source_parsing_counts_only_real_question_starts(db, tmp_path):
     assert status["scope"] == "parsed_question_starts_only_not_official_answer_verification"
 
 
-def test_question_with_unreadable_figure_is_not_safe_style_anchor(db, tmp_path):
+def test_question_with_unreadable_figure_is_not_safe_style_anchor(db, tmp_path, monkeypatch):
+    # Exercise image filtering independently of the synthetic byte gate.
+    monkeypatch.setattr(exam_style_readiness, "pinned_source_bytes", lambda *args: True)
     path, meta = material(tmp_path, "cell_biology_exams", content=[
         "2025年中国科学技术大学细胞生物学真题",
         "名词解释",
@@ -85,3 +89,16 @@ def test_image_in_next_paragraph_blocks_parent_question_style_anchor():
     assert "image_dependent" in starts[0]["concerns"]
     assert "untranscribed_image" not in starts[1]["concerns"]
     assert "image_dependent" not in starts[1]["concerns"]
+
+
+def test_same_genuine_exam_drive_file_id_with_wrong_sha_never_counts_as_safe(db, tmp_path):
+    path, meta = material(tmp_path, "biochemistry_exams")
+    sources.import_source(db, path, meta)
+    status = report(db)
+    selected = next(b for b in status["buckets"]
+                    if b["subject"] == "biochemistry"
+                    and b["question_type"] == "single_choice")
+    assert selected["observed_question_starts"] == 1
+    assert selected["safe_style_anchors"] == 0
+    assert selected["blocked_by_parsing_or_images"] == 1
+    assert selected["years_with_safe_anchors"] == []
