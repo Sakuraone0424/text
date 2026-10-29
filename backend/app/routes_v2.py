@@ -159,6 +159,18 @@ def question_verification(paper_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: report(c, u, paper_id), username)
 
 
+@router.get("/quality/60q-bank-readiness")
+def sixty_question_bank_readiness(username: str = Depends(require_auth)):
+    """Authenticated learner can inspect exact verified-inventory shortages.
+
+    This is a conservative filter only; cross-answer cue screening is applied
+    again when an actual paper is atomically prepared.
+    """
+    from app.bank_readiness import report
+
+    return operation(lambda c, u: report(c, u), username)
+
+
 @router.get("/papers/{paper_id}/grading-activity")
 def grading_activity(paper_id: int, username: str = Depends(require_auth)):
     """Read-only progress for the authenticated owner; no AI task is started."""
