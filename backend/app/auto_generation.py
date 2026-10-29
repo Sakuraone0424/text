@@ -1,7 +1,7 @@
 """Bounded supplementation from current AI-verified knowledge, never quota padding."""
 
 from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
-from app.source_policy import current_source_sql, FILES
+from app.source_policy import current_source_sql, FILES, pinned_source_bytes
 from app.candidate_review import snapshot_unit, create_packet
 from app.question_quality import Question, AXES
 from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
@@ -112,6 +112,11 @@ def plan(conn, uid):
                     set(s["quality_flags"]) & {
                         "corrupt_ocr", "untranscribed_image", "image_dependent"
                     }):
+                    continue
+                if not pinned_source_bytes(s["file_id"], s["source_sha256"]):
+                    # A newer/overwritten DOCX with the same Drive ID must not
+                    # become an AI style anchor merely by being current in SQL.
+                    # Only the exact user-locked genuine-exam bytes are allowed.
                     continue
                 try:
                     book = source_bibliography(conn, u)
