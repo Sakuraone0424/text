@@ -243,7 +243,7 @@ def annual_report(conn):
                     bool(re.search("参考答案|答案[:：]|^答[：:]", r["transcription"]))
                     for r in candidates
                 ),
-                "textbook_answer_verification": "independently_checked_during_question_review",
+                "textbook_answer_verification": "not_checked_in_year_coverage_report",
                 "transcription_scientific_mapping_verified": mapped,
                 "unassigned_year_paragraphs": len(grouped[(year["subject"], None)]),
                 "source_level": "user_provided_genuine_past_exam"
