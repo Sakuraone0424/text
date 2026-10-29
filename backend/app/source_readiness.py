@@ -97,6 +97,9 @@ def audit(conn):
             "mapped_chapter_ocr_pages": 0,
             "chapter_unmapped_ocr_pages": [],
             "chapter_unmapped_ocr_page_count": 0,
+            "chapter_first_mapped_ocr_page": None,
+            "chapter_unmapped_before_body": [],
+            "chapter_unmapped_at_or_after_body": [],
             "chapter_mapping_scientifically_verified": False,
             "exam_candidate_count": 0,
             "exam_candidate_years": [],
@@ -173,6 +176,15 @@ def audit(conn):
         unclassified_pages = sorted(
             set(p["ocr_global_page"] for p in pages) - classified_pages
         ) if item["kind"] == "textbook" else []
+        first_body = min(classified_pages) if classified_pages else None
+        before_body = [
+            page for page in unclassified_pages
+            if first_body is not None and page < first_body
+        ]
+        at_or_after_body = [
+            page for page in unclassified_pages
+            if first_body is None or page >= first_body
+        ]
         rows.append({
             **base,
             "ocr_unit_count": len(units),
@@ -187,6 +199,9 @@ def audit(conn):
             "mapped_chapter_ocr_pages": len(classified_pages),
             "chapter_unmapped_ocr_pages": unclassified_pages,
             "chapter_unmapped_ocr_page_count": len(unclassified_pages),
+            "chapter_first_mapped_ocr_page": first_body,
+            "chapter_unmapped_before_body": before_body,
+            "chapter_unmapped_at_or_after_body": at_or_after_body,
             "chapter_mapping_scientifically_verified": False,
             "exam_candidate_count": len(candidates),
             "exam_candidate_years": sorted({r["year"] for r in candidates if r["year"] is not None}),
