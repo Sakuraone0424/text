@@ -251,6 +251,30 @@ def accept(conn, job):
         )
     ):
         raise ValueError("generation_source_not_in_locked_six_file_collection")
+    if p.get("question_type") == "single_choice":
+        # Do not admit a stale or modified completed job that only carries
+        # a historical stem, or stitches options from unrelated DOCX units.
+        style_units = p["style"]
+        ids = [u.get("unit_id") for u in style_units]
+        if (
+            not ids
+            or not all(type(uid) is int for uid in ids)
+            or any(uid != ids[0] + i for i, uid in enumerate(ids))
+            or any(
+                u.get("file_id") != style_units[0].get("file_id")
+                or u.get("source_sha256") != style_units[0].get("source_sha256")
+                for u in style_units
+            )
+            or complete_choice_style_unit_ids([
+                {
+                    "id": u["unit_id"],
+                    "text": u.get("text", ""),
+                    "quality_flags": u.get("quality_flags", []),
+                }
+                for u in style_units
+            ]) != ids
+        ):
+            raise ValueError("historical_single_choice_options_incomplete_or_spliced")
     q = Question.model_validate(job["result"]["response"]["question"])
     if (q.subject, q.question_type, q.max_points) != (
         p["subject"],
