@@ -147,3 +147,48 @@ def test_commit_failing_never_writes_false_success_report(tmp_path, monkeypatch)
     with pytest.raises(RuntimeError):
         seed.import_isolated([], "source_staging_test", "development", report_path)
     assert not report_path.exists()
+
+
+def test_atomic_fresh_qa_schema_migrates_before_six_source_import(
+    db, tmp_path, monkeypatch
+):
+    import migrate
+
+    root, lock = synthetic_collection(tmp_path)
+    items = seed.preflight(root, lock_path=lock)
+    calls = []
+
+    @contextmanager
+    def capture_qa(_schema, _target, **options):
+        calls.append(("database", options))
+        yield db
+
+    def capture_migrations(conn):
+        calls.append(("migrations", conn is db))
+
+    monkeypatch.setattr(seed, "isolated_db", capture_qa)
+    monkeypatch.setattr(migrate, "apply_migrations", capture_migrations)
+    result = seed.import_isolated(
+        items, "source_staging_fresh_private_qa", "staging",
+        tmp_path / "atomic-qa.json", initialize_schema=True
+    )
+    assert result["schema_initialized_in_same_transaction"] is True
+    assert result["database_integrity"]["independent_post_commit_readback_verified"]
+    assert calls == [
+        ("database", {"create": True}),
+        ("migrations", True),
+        ("database", {"readonly": True}),
+    ]
+
+
+def test_cannot_initialize_fresh_qa_on_nonstaging_cli(tmp_path):
+    with pytest.raises(SystemExit):
+        seed.main([
+            "--directory", str(tmp_path),
+            "--report", str(tmp_path / "bad.json"),
+            "--initialize-schema",
+            "--write-isolated",
+            "--schema", "source_staging_forbidden",
+            "--target", "development",
+        ])
+    assert not (tmp_path / "bad.json").exists()
