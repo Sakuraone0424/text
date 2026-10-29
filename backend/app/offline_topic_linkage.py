@@ -12,13 +12,14 @@ from collections import Counter, defaultdict
 from app.collection_seed import LOCK, preflight
 from app.source_policy import COLLECTION
 from app.sources import prepare_source
-from app.transcript_analysis import candidates
+from app.transcript_analysis import candidates, STYLE_SOURCE_BLOCKERS
+from app.exam_style_readiness import BOUNDARY_ISSUES
 from app.training_spec_v2 import SUBJECTS, COUNTS
 from app.source_intake import private_json
 
-REFUSE = {"corrupt_ocr", "untranscribed_image", "image_dependent",
-          "question_boundary_unconfirmed", "question_type_unknown",
-          "year_unassigned"}
+# A report cannot call a source style-safe if the actual generator rejects it.
+# Share the exact upstream risk classes rather than maintaining a stale copy.
+REFUSE = STYLE_SOURCE_BLOCKERS | BOUNDARY_ISSUES
 GENERIC = {"生物化学", "细胞生物学", "蛋白质", "核酸", "细胞", "生物", "基础",
            "第一章", "引言", "概论", "复习题", "习题", "研究方法", "概述"}
 
@@ -80,7 +81,6 @@ def report(directory, *, lock_path=LOCK):
                     )
     bucket = defaultdict(lambda: Counter())
     chapter_hits = defaultdict(lambda: Counter())
-    subject_stats = {}
     for source in COLLECTION["files"]:
         if source["kind"] != "exam_transcription":
             continue
