@@ -298,6 +298,16 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
     from app.archiving import enqueue
 
     enqueue(conn, user_id, paper_id)
+    if timed_out:
+        # Timeout finalization can run from the expiry worker, a draft retry
+        # or a read-only API request. It must have the same conditional grading
+        # dispatch as an explicit submit, even when the learner is offline.
+        # try_queue enforces provider/private-data authorization and never
+        # performs a paid model call in this transaction. Job keys are
+        # idempotent; a later submit retry cannot duplicate accepted grades.
+        from app.grading_activity import try_queue
+
+        try_queue(conn, user_id, paper_id)
 
 
 def expire_due(conn):
