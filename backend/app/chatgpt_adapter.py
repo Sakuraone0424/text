@@ -20,7 +20,7 @@ class TrainingAdapter:
         return response.json()
 
     def prepare(self):
-        from app.training_spec import default_blueprint
+        from app.training_spec_v2 import default_blueprint
 
         return self.request(
             "POST",
