@@ -143,7 +143,10 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     ).fetchone()
     if existing:
         if existing["blueprint"] != spec:
-            raise ValueError("Today already has a paper with a different blueprint")
+            # A pre-upgrade 28q paper must remain reachable under its own
+            # immutable rules; do not overwrite/restart it with a 60q request.
+            if not is_v2:
+                raise ValueError("Today already has a paper with a different blueprint")
         return load_paper(conn, user_id, existing["id"])
     if resume_unfinished:
         # Preparing a paper is not exposure or a running exam. A restored first
