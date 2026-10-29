@@ -59,3 +59,32 @@ def test_other_exam_documents_are_not_silently_marked_2017():
         source_sha256="a"*64)
     assert data["scope"]=="not_whitelisted"
     assert not data["candidates"]
+
+
+def test_word_native_numbered_2017_requires_no_fabricated_visible_numbers():
+    units=make_rows()
+    term_i=0
+    short_i=0
+    section=None
+    for row in units:
+        if row["text"]=="一、名词解释":
+            section="term"
+        elif row["text"]=="二、简答题":
+            section="short_answer"
+        elif row["text"].startswith("2016年"):
+            section=None
+        elif section=="term":
+            term_i+=1
+            row["section"]=f"body/{row['ordinal']}|num:51:0:decimal:{term_i}"
+        elif section=="short_answer":
+            short_i+=1
+            row["section"]=f"body/{row['ordinal']}|num:52:0:decimal:{short_i}"
+    data=review_candidates(units,ITEM,source_sha256="a"*64)
+    assert data["distinct_source_units"]==10
+    assert data["native_word_numbered"]==10
+    assert data["not_numbered_in_source"]==0
+    assert [x["original_question_number"] for x in data["candidates"]]==[
+        1,2,3,4,5,6,1,2,3,4
+    ]
+    assert all(x["number_origin"]=="docx_native_decimal_list" for x in data["candidates"])
+    assert not any(x["usable_for_generation_style"] for x in data["candidates"])
