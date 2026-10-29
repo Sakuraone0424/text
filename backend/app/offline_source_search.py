@@ -6,6 +6,7 @@ coordinates and uncertainty flags. Text stays in a private local 0600 SQLite
 file; reports contain counts only. This is NOT scientific or QA DB approval.
 """
 import argparse
+from contextlib import closing
 from collections import Counter
 from hashlib import sha256
 import json
@@ -14,6 +15,7 @@ from pathlib import Path
 import sqlite3
 
 from app.collection_seed import preflight, LOCK
+from app.source_policy import COLLECTION
 from app.sources import prepare_source
 from app.source_intake import private_json
 
@@ -57,7 +59,7 @@ def build(directory, target, *, lock_path=LOCK):
     summary = []
     total = 0
     try:
-        with sqlite3.connect(temporary) as conn:
+        with closing(sqlite3.connect(temporary)) as conn:
             conn.execute("PRAGMA foreign_keys=ON")
             _schema(conn)
             for item in items:
@@ -68,9 +70,9 @@ def build(directory, target, *, lock_path=LOCK):
                     item["exam_media_inventory"]["media_objects"]
                     if item["exam_media_inventory"] else 0
                 )
-                source = next(x for x in __import__(
-                    "app.source_policy", fromlist=["COLLECTION"]
-                ).COLLECTION["files"] if x["key"] == item["key"])
+                source = next(
+                    x for x in COLLECTION["files"] if x["key"] == item["key"]
+                )
                 conn.execute(
                     "INSERT INTO sources(source_key,source_sha256,source_kind,"
                     "subject,raw_bytes,ocr_pages,embedded_media_objects)"
@@ -105,7 +107,7 @@ def build(directory, target, *, lock_path=LOCK):
             if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite precommit integrity check failed")
             conn.commit()
-        with sqlite3.connect(f"file:{temporary}?mode=ro",uri=True) as check:
+        with closing(sqlite3.connect(f"file:{temporary}?mode=ro",uri=True)) as check:
             if check.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite postcommit integrity check failed")
             persisted = {
@@ -147,7 +149,7 @@ def search(index_path, phrase, *, limit=20):
     if not 1 <= limit <= 100:
         raise ValueError("Invalid search limit")
     phrase = phrase.strip()
-    with sqlite3.connect(f"file:{Path(index_path)}?mode=ro",uri=True) as conn:
+    with closing(sqlite3.connect(f"file:{Path(index_path)}?mode=ro",uri=True)) as conn:
         conn.row_factory = sqlite3.Row
         if len(phrase) >= 3:
             sql = (
