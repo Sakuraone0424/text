@@ -463,7 +463,7 @@ function renderProgress() {
     (v) =>
       v.text?.trim() || v.blanks?.some((x) => x.trim()) || v.image_ids?.length,
   ).length;
-  $("progress").textContent = `已答 ${done} / 28 · 剩余 ${28 - done}`;
+  $("progress").textContent = `已答 ${done} / ${paper?.count || 60} · 剩余 ${(paper?.count || 60) - done}`;
   emitUI();
 }
 function render() {
@@ -910,7 +910,7 @@ function cachedPaper(user, paperId = null) {
     if (
       !Number.isSafeInteger(p.paper_id) ||
       p.paper_id <= 0 ||
-      p.count !== 28 ||
+      ![28, 60].includes(p.count) ||
       p.max_points !== 150 ||
       p.duration_seconds !== 3600 ||
       !["not_started", "in_progress", "submitted"].includes(t?.status) ||
@@ -931,7 +931,7 @@ function cachedPaper(user, paperId = null) {
         !Number.isFinite(Date.parse(t.server_now)) ||
         !Number.isFinite(saved.offset) ||
         !Array.isArray(p.questions) ||
-        p.questions.length !== 28
+        p.questions.length !== p.count
       )
         throw new Error("本机缓存计时信息无效，请联网核验。");
       const ids = new Set();
@@ -944,7 +944,7 @@ function cachedPaper(user, paperId = null) {
           !["biochemistry", "cell_biology"].includes(q.subject) ||
           !Number.isSafeInteger(q.position) ||
           q.position < 1 ||
-          q.position > 28 ||
+          q.position > p.count ||
           !Number.isSafeInteger(q.max_points) ||
           q.max_points <= 0 ||
           !object(q.options)
@@ -1405,7 +1405,7 @@ $("history").onclick = async () => {
     for (const item of data.training) {
       const article = element(
         "article",
-        `28题 · ${item.paper_date} · ${item.score === null ? "待批改" : item.score + "分"}`,
+        `${item.mode === "reviewed_60" ? 60 : 28}题 · ${item.paper_date} · ${item.score === null ? "待批改" : item.score + "分"}`,
         $("learning"),
       );
       const button = element("button", "查看已提交结果", article);
