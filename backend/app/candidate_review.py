@@ -99,12 +99,14 @@ def create_packet(conn, payload):
         style.append(
             {
                 **u,
-                "source_level": "transcription",
-                "original_verified": False,
-                "official_answer_verified": False,
+                # Supplied DOCX is the user's genuine past-exam corpus.
+                # An extracted exam question is a style reference, not a
+                # substitute for independently evidenced textbook answers.
+                "source_level": "user_provided_genuine_past_exam",
+                "answer_source": "independent_textbook_evidence_required",
                 "year": ref.get("year"),
                 "relationship": ref["relationship"],
-                "frequency_eligible": False,
+                "frequency_eligible": bool(ref.get("year")),
             }
         )
     if not style:
