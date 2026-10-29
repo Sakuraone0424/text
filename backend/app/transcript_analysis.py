@@ -67,7 +67,7 @@ def section_heading(text):
     return None
 
 
-def candidates(units, item):
+def _raw_candidates(units, item):
     year = None
     qtype = None
     segment = None
@@ -187,3 +187,34 @@ def candidates(units, item):
                 "declared_questions": sec["declared_questions"] if sec else None,
             },
         }
+
+
+def candidates(units, item):
+    """Block style anchors whose separately extracted continuation is a figure.
+
+    DOCX can store question wording in one paragraph and its drawing in the
+    following image-only paragraph. Checking only the question-start text
+    would incorrectly admit an incomplete real question as a clean style
+    example. Do not infer image content; attach the unresolved source flags to
+    its parent candidate while retaining the exact original transcription.
+    """
+    parsed = list(_raw_candidates(units, item))
+    beginnings = {
+        row["unit_id"]: row
+        for row in parsed if row["analysis"]["role"] == "question_start"
+    }
+    for row in parsed:
+        if row["analysis"]["role"] not in (
+            "continuation", "subquestion", "option"
+        ):
+            continue
+        parent = row["analysis"]["parent_question_unit_id"]
+        if parent not in beginnings:
+            continue
+        risks = set(row["concerns"]) & {
+            "image_dependent", "untranscribed_image", "corrupt_ocr"
+        }
+        if risks:
+            original = beginnings[parent]
+            original["concerns"] = sorted(set(original["concerns"]) | risks)
+    yield from parsed
