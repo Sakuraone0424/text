@@ -110,3 +110,46 @@ def test_six_source_science_wording_and_equivalent_activation_grading():
     assert "脂酰辅酶 A 转运进入" not in carnitine["question"]
     assert "脂酰肉碱" in carnitine["notes"]
     assert carnitine["published"] is False
+
+
+@pytest.mark.parametrize("fact_id", ["cell-ub-proteasome-05", "cell-mito-fusion-06", "biou-competitive-08"])
+def test_every_scoring_checkpoint_has_source_pending_evidence(monkeypatch, fact_id):
+    fact = next(f for f in batch.source_facts() if f["id"] == fact_id)
+    base = unit()
+    base.update(
+        subject=batch.SUBJECTS[fact["source_key"]],
+        ocr_page=fact["ocr_page"],
+        text=fact["quote"],
+    )
+    exam = {
+        **base,
+        "unit_id": 101,
+        "source_kind": "exam_transcription",
+        "file_id": next(fid for fid, meta in batch.FILES.items()
+                        if meta["key"] == ("cell_biology_exams"
+                                          if fact["source_key"] == "cell"
+                                          else "biochemistry_exams")),
+    }
+    monkeypatch.setattr(batch, "snapshot_unit", lambda conn, uid: base if uid == 9 else exam)
+    monkeypatch.setattr(batch, "pinned_source_bytes", lambda *a: True)
+    monkeypatch.setattr(batch, "from_database", lambda *a: bibliography())
+
+    class Conn:
+        def execute(self, sql, params=None):
+            if sql.startswith("SELECT u.id"):
+                return type("R", (), {"fetchall": lambda self: [{"id": 9}]})()
+            if sql.startswith("SELECT status FROM reviewed_questions"):
+                return type("R", (), {"fetchone": lambda self: {"status": "draft"}})()
+            raise AssertionError("Unexpected query")
+
+    stored = []
+    report = batch.seed(
+        Conn(), facts=[fact], create=lambda conn, packet: (stored.append(packet) or 56),
+        style_lookup=lambda conn, subject, kind: {"id": 101, "year": 2024},
+    )
+    assert report["private_drafts_created_or_reused"] == 1
+    assert report["independent_scientific_approvals"] == 0
+    draft = stored[0]
+    assert len(draft["ai_analysis"]["rubric_evidence"]) == len(draft["question"]["rubric"])
+    assert all(entry["unit_ids"] == [9] for entry in draft["ai_analysis"]["rubric_evidence"])
+    assert draft["ai_analysis"]["independent_human_review"] is False
