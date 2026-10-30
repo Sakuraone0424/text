@@ -4,6 +4,7 @@ import os
 import time
 import threading
 import traceback
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 from importlib.metadata import version
@@ -47,7 +48,10 @@ def bootstrap():
         if not model:
             raise ValueError('approved_model_not_in_official_catalog')
         if not model['compatibility'].get('real_api_verified'):
-            enqueue_probe(conn,uid,'deepseek-flash','high')
+            outstanding=conn.execute("SELECT 1 FROM ai_jobs WHERE kind='compatibility' "
+                "AND state IN ('pending','running','retrying') "
+                "AND settings_snapshot->'qa_automation'->>'scope_id'=%s LIMIT 1",(SCOPE,)).fetchone()
+            if not outstanding:enqueue_probe(conn,uid,'deepseek-flash','high')
         bind_pending(conn,uid)
     return uid
 
