@@ -327,6 +327,37 @@ def plan(conn, uid):
             return
 
 
+def drop_unlisted_criterion_tags(raw_question):
+    """Remove ONLY unsupported rubric tag references; never repair science.
+
+    The original model response remains in its immutable job receipt.
+    Criterion wording, points, answers and source excerpts are unchanged.
+    Missing/invalid top-level tags or rubric syntax still fail validation.
+    """
+    if not isinstance(raw_question, dict):
+        return raw_question
+    top = raw_question.get("knowledge_tags")
+    rubric = raw_question.get("rubric")
+    if not isinstance(top, list) or not all(isinstance(x, str) for x in top):
+        return raw_question
+    if not isinstance(rubric, list):
+        return raw_question
+    allowed = set(top)
+    fixed = []
+    changed = False
+    for item in rubric:
+        if not isinstance(item, dict):
+            return raw_question
+        tags = item.get("knowledge_tags", [])
+        if not isinstance(tags, list) or not all(isinstance(x, str) for x in tags):
+            return raw_question
+        good = [tag for tag in tags if tag in allowed]
+        if good != tags:
+            changed = True
+        fixed.append({**item, "knowledge_tags": good})
+    return {**raw_question, "rubric": fixed} if changed else raw_question
+
+
 def accept(conn, job):
     if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
         raise ValueError("actual_generation_call_required")
@@ -381,6 +412,7 @@ def accept(conn, job):
     # The submitted schema is Question itself, so a direct object is canonical.
     # Retain compatibility with older explicitly wrapped generation responses.
     raw_question = response.get("question", response) if isinstance(response, dict) else response
+    raw_question = drop_unlisted_criterion_tags(raw_question)
     q = Question.model_validate(raw_question)
     if (q.subject, q.question_type, q.max_points) != (
         p["subject"],
