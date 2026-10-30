@@ -99,3 +99,22 @@ def test_out_of_range_year_cannot_launder_complete_exam_question():
     assert report["by_subject"]["biochemistry"]["complete_A_to_D_choice_examples"] == 0
     assert report["by_subject"]["biochemistry"]["blocked_before_option_check"] == 1
     assert report["unassigned_or_outside_year_choice_starts"]["biochemistry"] == 1
+
+
+def test_recent_choice_style_coverage_is_explicit_not_inferred():
+    report = inventory(
+        [exam("biochemistry", 10), exam("cell_biology", 20)],
+        lambda doc, ordinal: chunks(doc),
+    )
+    assert report["latest_complete_choice_year"] == {
+        "biochemistry": 2017, "cell_biology": 2017
+    }
+    assert report["complete_choice_2017_to_2026"] == {
+        "biochemistry": 1, "cell_biology": 1
+    }
+    for subj in ("biochemistry", "cell_biology"):
+        assert not any(
+            x["complete_A_to_D_choice_examples"]
+            for x in report["by_source_year"]
+            if x["subject"] == subj and x["year"] != 2017
+        )
