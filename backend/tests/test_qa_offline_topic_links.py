@@ -1,23 +1,27 @@
 """Synthetic evidence only. Exact text overlap is a pending search lead."""
 import pytest
 from app import qa_offline_topic_links as links
+from app.source_policy import FILES
+
+CELL_FILE_ID = next(fid for fid, item in FILES.items() if item["key"] == "cell_biology")
+EXAM_FILE_ID = next(fid for fid, item in FILES.items() if item["key"] == "cell_biology_exams")
 
 
 @pytest.fixture(autouse=True)
 def pin_sources(monkeypatch):
     monkeypatch.setattr(links, "pinned_source_bytes",
-                        lambda fid, digest: fid in {"cell_biology", "cell_biology_exams"}
+                        lambda fid, digest: fid in {CELL_FILE_ID, EXAM_FILE_ID}
                         and digest in {"a" * 64, "b" * 64})
 
 
 def book(id, chapter="细胞骨架", text="微管与微丝的比较", **kw):
-    return dict(unit_id=id, file_id="cell_biology", source_sha256="a" * 64,
+    return dict(unit_id=id, file_id=CELL_FILE_ID, source_sha256="a" * 64,
                 subject="cell_biology", chapter=chapter, text=text,
                 ocr_page=100, quality_flags=[], **kw)
 
 
 def exam(id=101, text="解释微管和微丝的动态变化。", **kw):
-    return dict(unit_id=id, file_id="cell_biology_exams",
+    return dict(unit_id=id, file_id=EXAM_FILE_ID,
                 source_sha256="b" * 64, subject="cell_biology", year=2024,
                 question_number=3, transcription=text, concerns=[],
                 quality_flags=[], **kw)
