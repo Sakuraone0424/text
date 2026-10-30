@@ -12,6 +12,7 @@ from app.source_readiness import audit as source_audit
 from app.qa_stage1_acceptance import inspect as stage1_inspect
 from app.qa_graph_provenance_gate import inspect as graph_inspect
 from app.exam_style_readiness import report as safe_style_inventory
+from app.qa_choice_style_completeness import inspect as choice_style_inventory
 from app.qa_exam_year_inventory import summarize as exam_year_summary
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
@@ -104,6 +105,7 @@ def main():
         stage1_ledger=stage1_inspect(conn, source)
         verified_graph=graph_inspect(conn)
         style_inventory=safe_style_inventory(conn)
+        choice_option_inventory=choice_style_inventory(conn)
         g=conn.execute(
             "SELECT count(*) AS nodes,"
             "count(*) FILTER(WHERE scientific_review_state <> 'pending') AS approved "
@@ -169,6 +171,17 @@ def main():
             style_inventory["ready_for_same_type_style"]
         ),
         "safe_starts_do_not_approve_question_options_or_science": True,
+        "fully_recovered_A_to_D_style_examples": {
+            subject: counts["complete_A_to_D_choice_examples"]
+            for subject, counts in choice_option_inventory["by_subject"].items()
+        },
+        "parser_safe_choice_starts_with_incomplete_options": {
+            subject: counts["incomplete_or_unreadable_options"]
+            for subject, counts in choice_option_inventory["by_subject"].items()
+        },
+        "both_subjects_have_complete_A_to_D_style_example": (
+            choice_option_inventory["both_subjects_have_complete_choice_style_examples"]
+        ),
     })
     data["stage_2"].update({
         "all_original_unit_and_lexical_facet_provenance_checked": (
