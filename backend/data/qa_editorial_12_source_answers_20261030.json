@@ -31,7 +31,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "cell-arp23-02",
@@ -51,7 +57,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "cell-srp-03",
@@ -71,7 +83,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "cell-na-pump-04",
@@ -91,7 +109,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "cell-ub-proteasome-05",
@@ -111,7 +135,21 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "指出该途径涉及错误折叠或不稳定蛋白的识别与降解",
+          "points": 2
+        },
+        {
+          "description": "指出其蛋白质质量监控功能",
+          "points": 1
+        },
+        {
+          "description": "说明细胞周期或信号调控中的一个应用",
+          "points": 1
+        }
+      ]
     },
     {
       "id": "cell-mito-fusion-06",
@@ -131,7 +169,21 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "说明融合和分裂共同影响线粒体形态",
+          "points": 3
+        },
+        {
+          "description": "说明动态平衡维持线粒体数目和体积稳定",
+          "points": 3
+        },
+        {
+          "description": "说明线粒体融合分裂有助于不同区域的分布与运输需求",
+          "points": 3
+        }
+      ]
     },
     {
       "id": "biou-activation-07",
@@ -147,7 +199,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "biou-competitive-08",
@@ -163,7 +221,21 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "明确抑制剂与底物竞争酶的催化位点",
+          "points": 2
+        },
+        {
+          "description": "说明形成 EI 复合物减少可用催化酶",
+          "points": 1
+        },
+        {
+          "description": "指出从而抑制底物结合或催化",
+          "points": 1
+        }
+      ]
     },
     {
       "id": "biol-ppp-09",
@@ -183,7 +255,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "biol-carnitine-10",
@@ -199,7 +277,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "cell-nls-11",
@@ -219,7 +303,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     },
     {
       "id": "cell-mito-26-12",
@@ -239,7 +329,13 @@
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
-      "published": false
+      "published": false,
+      "rubric_points": [
+        {
+          "description": "答案与已定位教材中的直接事实一致，术语和适用条件正确",
+          "points": 2
+        }
+      ]
     }
   ]
 }
