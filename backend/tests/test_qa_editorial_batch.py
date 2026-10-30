@@ -89,7 +89,7 @@ def test_duplicate_source_units_fail_closed_without_write(monkeypatch):
             return type("R",(),{"fetchall":lambda self:[{"id":1},{"id":2}]})()
     result=batch.seed(Conn(),facts=[fact],create=lambda conn,p:pytest.fail("write should be blocked"))
     assert result["private_drafts_created_or_reused"]==0
-    assert result["blocked_reasons"]=={"source_not_unique_or_risky":1}
+    assert result["blocked_reasons"]=={"source_not_unique_or_missing":1}
 
 
 def test_six_source_science_wording_and_equivalent_activation_grading():
@@ -156,3 +156,55 @@ def test_every_scoring_checkpoint_has_source_pending_evidence(monkeypatch, fact_
     assert len(draft["ai_analysis"]["rubric_evidence"]) == len(draft["question"]["rubric"])
     assert all(entry["unit_ids"] == [9] for entry in draft["ai_analysis"]["rubric_evidence"])
     assert draft["ai_analysis"]["independent_human_review"] is False
+
+
+def test_source_quality_flags_allow_only_pending_private_draft_not_fake_science():
+    flags = ["scientific_notation_requires_source_review", "image_dependent"]
+    assert batch.private_draft_source_flags(flags) == sorted(flags)
+    for name in ("corrupt_ocr", "untranscribed_image", "ocr_uncertain",
+                 "transcription_gap_reported"):
+        assert batch.private_draft_source_flags([name]) is None
+    with pytest.raises(ValueError, match="flags_invalid"):
+        batch.private_draft_source_flags(["image_dependent", 42])
+
+
+def test_source_risky_but_unique_quote_is_private_pending_with_flag_record(monkeypatch):
+    fact = next(f for f in batch.source_facts() if f["id"] == "cell-mt-gtp-01")
+    body = {**unit(), "text": fact["quote"],
+            "quality_flags": ["scientific_notation_requires_source_review"]}
+    exam = {
+        **body,
+        "unit_id": 101,
+        "source_kind": "exam_transcription",
+        "file_id": next(fid for fid, meta in batch.FILES.items()
+                        if meta["key"] == "cell_biology_exams"),
+        "quality_flags": [],
+    }
+    monkeypatch.setattr(batch, "snapshot_unit", lambda conn, uid: body if uid == 9 else exam)
+    monkeypatch.setattr(batch, "pinned_source_bytes", lambda *a: True)
+    monkeypatch.setattr(batch, "from_database", lambda *a: bibliography())
+
+    class Conn:
+        def execute(self, sql, params=None):
+            if sql.startswith("SELECT u.id"):
+                assert "u.quality_flags='[]'" not in sql
+                return type("R", (), {"fetchall": lambda self: [{"id": 9}]})()
+            if sql.startswith("SELECT status FROM reviewed_questions"):
+                return type("R", (), {"fetchone": lambda self: {"status": "draft"}})()
+            raise AssertionError(sql)
+
+    created = []
+    out = batch.seed(Conn(), facts=[fact],
+                     create=lambda conn, payload: (created.append(payload) or 57),
+                     style_lookup=lambda conn, subject, kind: {"id": 101, "year": 2024})
+    assert out["private_drafts_created_or_reused"] == 1
+    assert out["private_drafts_pending_ocr_uncertainty"] == 1
+    assert out["published_count"] == 0
+    assert out["independent_scientific_approvals"] == 0
+    assert out["model_calls"] == 0
+    assert "scientific_notation_requires_source_review" in created[0]["ai_analysis"]["uncertainties"][-1]
+    assert created[0]["ai_analysis"]["independent_human_review"] is False
+
+
+def test_arbitrary_risky_flag_does_not_hide_risk_when_creating_private_draft():
+    assert batch.private_draft_source_flags(["some_new_future_flag"]) == ["some_new_future_flag"]
