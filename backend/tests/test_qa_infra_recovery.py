@@ -43,6 +43,9 @@ class FakeConn:
     def fetchall(self):
         return self.rows
 
+    def fetchone(self):
+        return None
+
 
 def test_single_source_safe_replay_keeps_original(monkeypatch, tmp_path):
     item = dict(unit_id=5, unit_sha256="abc", file_id="known", source_sha256="sha")
