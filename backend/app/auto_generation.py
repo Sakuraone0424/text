@@ -150,105 +150,134 @@ def select_exam_style(conn, subject, kind, concept=None):
     return None
 
 
+def balanced_generation_buckets(attempts):
+    """Fairly cover eight quota buckets, without weakening evidence admission.
+
+    An unsuccessful generation still consumes a model request and must count
+    toward balancing; it never counts as a scientifically approved question.
+    """
+    entries = [
+        (subject, kind, needed)
+        for subject in SUBJECTS for kind, needed in COUNTS.items()
+    ]
+    return sorted(
+        entries,
+        key=lambda b: (
+            attempts.get((b[0], b[1]), 0) / (b[2] * STARTUP_RESERVE_DAYS),
+            attempts.get((b[0], b[1]), 0),
+            SUBJECTS.index(b[0]),
+            list(COUNTS).index(b[1]),
+        ),
+    )
+
+
 def plan(conn, uid):
     existing = conn.execute(
         "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND state IN ('pending','running','retrying')"
     ).fetchone()["n"]
     if existing >= 2:
         return
-    for subject in SUBJECTS:
-        for kind, required in COUNTS.items():
-            # A merely "ready" state does not prove current science/answer
-            # review, publication or v2 scoring compatibility.
-            eligible = conn.execute(
-                "SELECT q.id,q.content FROM auto_question_states s "
-                "JOIN reviewed_questions q ON q.id=s.question_id "
-                "WHERE s.status='ready' AND q.status='published' "
-                "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
-                "AND q.content->>'max_points'=%s AND "
-                "(NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
-                "WHERE i.question_id=q.id AND p.user_id=%s) "
-                "OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id "
-                "AND f.user_id=%s AND f.due<=clock_timestamp()))",
-                (subject, kind, str(POINTS[kind]), uid, uid),
-            ).fetchall()
-            count = eligible_verified_reserve(conn, eligible)
-            if count >= required * STARTUP_RESERVE_DAYS:
+    rows = conn.execute(
+        "SELECT payload->>'subject' AS subject,"
+        "payload->>'question_type' AS question_type,count(*) AS n "
+        "FROM ai_jobs WHERE user_id=%s AND kind='generation' "
+        "GROUP BY 1,2", (uid,),
+    ).fetchall()
+    attempts = {
+        (r["subject"], r["question_type"]): r["n"] for r in rows
+    }
+    for subject, kind, required in balanced_generation_buckets(attempts):
+        # A merely "ready" state does not prove current science/answer
+        # review, publication or v2 scoring compatibility.
+        eligible = conn.execute(
+            "SELECT q.id,q.content FROM auto_question_states s "
+            "JOIN reviewed_questions q ON q.id=s.question_id "
+            "WHERE s.status='ready' AND q.status='published' "
+            "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
+            "AND q.content->>'max_points'=%s AND "
+            "(NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
+            "WHERE i.question_id=q.id AND p.user_id=%s) "
+            "OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id "
+            "AND f.user_id=%s AND f.due<=clock_timestamp()))",
+            (subject, kind, str(POINTS[kind]), uid, uid),
+        ).fetchall()
+        count = eligible_verified_reserve(conn, eligible)
+        if count >= required * STARTUP_RESERVE_DAYS:
+            continue
+        # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
+        concepts = conn.execute(
+            "SELECT k.* FROM auto_knowledge_events k JOIN source_units u ON u.id=k.unit_id JOIN source_documents d ON d.id=u.document_id WHERE "
+            + current_source_sql()
+            + " AND k.status='ready' AND k.relation->>'subject'=%s AND NOT EXISTS(SELECT 1 FROM ai_jobs j WHERE j.job_key='supplement:'||%s||':'||%s||':'||k.unit_id::text||':'||k.unit_sha256) ORDER BY k.id LIMIT 30",
+            (subject, subject, kind),
+        ).fetchall()
+        for concept in concepts:
+            try:
+                u = snapshot_unit(conn, concept["unit_id"])
+            except ValueError:
                 continue
-            # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
-            concepts = conn.execute(
-                "SELECT k.* FROM auto_knowledge_events k JOIN source_units u ON u.id=k.unit_id JOIN source_documents d ON d.id=u.document_id WHERE "
-                + current_source_sql()
-                + " AND k.status='ready' AND k.relation->>'subject'=%s AND NOT EXISTS(SELECT 1 FROM ai_jobs j WHERE j.job_key='supplement:'||%s||':'||%s||':'||k.unit_id::text||':'||k.unit_sha256) ORDER BY k.id LIMIT 30",
-                (subject, subject, kind),
-            ).fetchall()
-            for concept in concepts:
-                try:
-                    u = snapshot_unit(conn, concept["unit_id"])
-                except ValueError:
-                    continue
-                if (
-                    u["unit_sha256"] != concept["unit_sha256"]
-                    or u["source_kind"] != "textbook"
-                    or u["subject"] != subject
-                    or not pinned_source_bytes(u["file_id"], u["source_sha256"])
-                ):
-                    # Validate scientific evidence BEFORE an authorized,
-                    # possibly billable model task is enqueued. A genuine-exam
-                    # DOCX is style only, never scientific answer evidence.
-                    continue
-                key = f"supplement:{subject}:{kind}:{concept['unit_id']}:{concept['unit_sha256']}"
-                if conn.execute(
-                    "SELECT 1 FROM ai_jobs WHERE job_key=%s", (key,)
-                ).fetchone():
-                    continue
-                # Bootstrap directly from the user's genuine past-exam
-                # transcript, rather than requiring an earlier hand-created
-                # candidate packet. Question boundaries must be recognized and
-                # text/image risks resolved before using an item as style.
-                style = select_exam_style(conn, subject, kind, concept)
-                if not style:
-                    continue
-                style_units = [snapshot_unit(conn, sid) for sid in style["style_unit_ids"]]
-                if any(
-                    st["source_kind"] != "exam_transcription"
-                    or st["subject"] != subject
-                    or set(st["quality_flags"]) & STYLE_SOURCE_BLOCKERS
-                    or not pinned_source_bytes(st["file_id"], st["source_sha256"])
-                    for st in style_units
-                ):
-                    continue
-                s = style_units[0]
-                if not pinned_source_bytes(s["file_id"], s["source_sha256"]):
-                    # A newer/overwritten DOCX with the same Drive ID must not
-                    # become an AI style anchor merely by being current in SQL.
-                    # Only the exact user-locked genuine-exam bytes are allowed.
-                    continue
-                try:
-                    book = source_bibliography(conn, u)
-                except ValueError:
-                    # Unknown author/edition or a changed source checksum must
-                    # never be replaced by an invented bibliographic label.
-                    continue
-                enqueue(
-                    conn,
-                    uid,
-                    key,
-                    "generation",
-                    dict(
-                        subject=subject,
-                        question_type=kind,
-                        max_points=POINTS[kind],
-                        evidence=[u],
-                        style=style_units,
-                        style_year=style["year"],
-                        style_overlap=style["lexical_topic_overlap"],
-                        source_bibliography=book,
-                        schema=Question.model_json_schema(),
-                        instructions=exam_instructions(kind, POINTS[kind]),
-                    ),
-                )
-                return
+            if (
+                u["unit_sha256"] != concept["unit_sha256"]
+                or u["source_kind"] != "textbook"
+                or u["subject"] != subject
+                or not pinned_source_bytes(u["file_id"], u["source_sha256"])
+            ):
+                # Validate scientific evidence BEFORE an authorized,
+                # possibly billable model task is enqueued. A genuine-exam
+                # DOCX is style only, never scientific answer evidence.
+                continue
+            key = f"supplement:{subject}:{kind}:{concept['unit_id']}:{concept['unit_sha256']}"
+            if conn.execute(
+                "SELECT 1 FROM ai_jobs WHERE job_key=%s", (key,)
+            ).fetchone():
+                continue
+            # Bootstrap directly from the user's genuine past-exam
+            # transcript, rather than requiring an earlier hand-created
+            # candidate packet. Question boundaries must be recognized and
+            # text/image risks resolved before using an item as style.
+            style = select_exam_style(conn, subject, kind, concept)
+            if not style:
+                continue
+            style_units = [snapshot_unit(conn, sid) for sid in style["style_unit_ids"]]
+            if any(
+                st["source_kind"] != "exam_transcription"
+                or st["subject"] != subject
+                or set(st["quality_flags"]) & STYLE_SOURCE_BLOCKERS
+                or not pinned_source_bytes(st["file_id"], st["source_sha256"])
+                for st in style_units
+            ):
+                continue
+            s = style_units[0]
+            if not pinned_source_bytes(s["file_id"], s["source_sha256"]):
+                # A newer/overwritten DOCX with the same Drive ID must not
+                # become an AI style anchor merely by being current in SQL.
+                # Only the exact user-locked genuine-exam bytes are allowed.
+                continue
+            try:
+                book = source_bibliography(conn, u)
+            except ValueError:
+                # Unknown author/edition or a changed source checksum must
+                # never be replaced by an invented bibliographic label.
+                continue
+            enqueue(
+                conn,
+                uid,
+                key,
+                "generation",
+                dict(
+                    subject=subject,
+                    question_type=kind,
+                    max_points=POINTS[kind],
+                    evidence=[u],
+                    style=style_units,
+                    style_year=style["year"],
+                    style_overlap=style["lexical_topic_overlap"],
+                    source_bibliography=book,
+                    schema=Question.model_json_schema(),
+                    instructions=exam_instructions(kind, POINTS[kind]),
+                ),
+            )
+            return
 
 
 def accept(conn, job):
