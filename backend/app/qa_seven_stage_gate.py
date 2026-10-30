@@ -11,6 +11,7 @@ from app.source_intake import SCHEMA, isolated_db
 from app.source_readiness import audit as source_audit
 from app.qa_stage1_acceptance import inspect as stage1_inspect
 from app.qa_graph_provenance_gate import inspect as graph_inspect
+from app.exam_style_readiness import report as safe_style_inventory
 from app.qa_exam_year_inventory import summarize as exam_year_summary
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
@@ -102,6 +103,7 @@ def main():
         source=source_audit(conn)
         stage1_ledger=stage1_inspect(conn, source)
         verified_graph=graph_inspect(conn)
+        style_inventory=safe_style_inventory(conn)
         g=conn.execute(
             "SELECT count(*) AS nodes,"
             "count(*) FILTER(WHERE scientific_review_state <> 'pending') AS approved "
@@ -153,6 +155,21 @@ def main():
                     "chapters":chapters,"facets":facets},
             risk,chapter,years,q,papers,accepted_buckets=accepted_buckets
         )
+    data["stage_3"].update({
+        "past_exam_provenance": "user_provided_genuine_past_exams",
+        "eight_source_style_bucket_candidates": {
+            f"{bucket['subject']}:{bucket['question_type']}": {
+                "observed_question_starts": bucket["observed_question_starts"],
+                "parser_safe_style_starts": bucket["safe_style_anchors"],
+                "parsing_or_image_blocked": bucket["blocked_by_parsing_or_images"],
+            }
+            for bucket in style_inventory["buckets"]
+        },
+        "all_eight_types_have_parser_safe_starts": (
+            style_inventory["ready_for_same_type_style"]
+        ),
+        "safe_starts_do_not_approve_question_options_or_science": True,
+    })
     data["stage_2"].update({
         "all_original_unit_and_lexical_facet_provenance_checked": (
             verified_graph["all_nodes_source_exact"]
