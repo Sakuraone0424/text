@@ -121,3 +121,14 @@ def test_relay_persists_raw_bytes_without_headers_even_on_interruption(monkeypat
     for path in (tmp_path / "receipt").iterdir():
         assert b"synthetic-credential-local-only" not in path.read_bytes()
         assert b"x-api-key" not in path.read_bytes()
+
+
+def test_container_layout_does_not_make_entire_filesystem_the_checkout(tmp_path, monkeypatch):
+    from app import harness_gateway
+    code = tmp_path / "image" / "app"
+    monkeypatch.setattr(harness_gateway, "__file__", str(code / "app" / "harness_gateway.py"))
+    private = tmp_path / "private-outside-image"
+    assert harness_gateway.prepare_private_home(private, "9-attempt-1").is_dir()
+    with pytest.raises(ValueError, match="outside_checkout"):
+        harness_gateway.prepare_private_home(code / "private", 9)
+    assert harness_gateway.prepare_private_home(private, "9-attempt-2").is_dir()

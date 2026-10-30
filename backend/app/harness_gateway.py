@@ -12,7 +12,11 @@ from app.model_router import authorized
 def prepare_private_home(root, job_id):
     """Never place response/session evidence in the public source checkout."""
     root = Path(root).resolve()
-    checkout = Path(__file__).resolve().parents[2]
+    code_root = Path(__file__).resolve().parents[1]
+    # Source checkout: repo/backend/app. Container: /app/app. Never treat
+    # filesystem / as the checkout just because the image is shallow.
+    checkout = next((p for p in (code_root, *code_root.parents)
+                     if (p / ".git").exists()), code_root)
     if root.is_relative_to(checkout):
         raise ValueError("private_evidence_outside_checkout_required")
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -32,7 +36,7 @@ def execute(job):
     execution_guard(job)  # Require the approved frozen scope before launching SDK.
     home = prepare_private_home(
         os.environ.get("AI_PRIVATE_HOME", "/tmp/ustc-harness-private"),
-        job["id"],
+        str(job["id"]) + "-attempt-" + str(job["attempts"]),
     )
     allowed = (
         "PATH",
