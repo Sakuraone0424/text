@@ -89,3 +89,24 @@ def test_duplicate_source_units_fail_closed_without_write(monkeypatch):
     result=batch.seed(Conn(),facts=[fact],create=lambda conn,p:pytest.fail("write should be blocked"))
     assert result["private_drafts_created_or_reused"]==0
     assert result["blocked_reasons"]=={"source_not_unique_or_risky":1}
+
+
+def test_six_source_science_wording_and_equivalent_activation_grading():
+    facts = {fact["id"]: fact for fact in batch.source_facts()}
+    activation = facts["biou-activation-07"]
+    assert activation["answer"] == "活化能"
+    u = unit()
+    u["subject"] = "biochemistry"
+    u["ocr_page"] = activation["ocr_page"]
+    u["text"] = activation["quote"]
+    q = batch.make_question(activation, u, bibliography(), 101)
+    assert {"活化能", "活化自由能", "活化自由能（ΔG‡）", "ΔG‡"}.issubset(
+        set(q["accepted_answers"])
+    )
+    assert "反应的____" in q["stem"]
+
+    carnitine = facts["biol-carnitine-10"]
+    assert "脂酰基跨线粒体内膜" in carnitine["question"]
+    assert "脂酰辅酶 A 转运进入" not in carnitine["question"]
+    assert "脂酰肉碱" in carnitine["notes"]
+    assert carnitine["published"] is False
