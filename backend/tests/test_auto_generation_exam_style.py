@@ -134,3 +134,16 @@ def test_critical_following_docx_table_blocks_parent_style_question(db, tmp_path
     assert candidate is not None
     assert "Self-contained" in candidate["transcription"]
     assert "Interpret" not in candidate["transcription"]
+
+
+def test_generated_v2_prompt_explicitly_binds_scoring_and_evidence():
+    from app.exam_authoring import instructions
+    for kind, points in (("single_choice", 2), ("fill_blank", 2),
+                         ("term", 4), ("short_answer", 9)):
+        prompt = instructions(kind, points)
+        assert f"EXACTLY {points} points" in prompt
+        assert "verbatim continuous substring" in prompt
+        assert "source_sha256" in prompt
+        assert "JSON integer" in prompt
+        assert "sum is exactly max_points" in prompt
+        assert "single unwrapped JSON" in prompt
