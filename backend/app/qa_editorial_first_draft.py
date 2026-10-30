@@ -101,7 +101,7 @@ def prepare(conn):
             "relationship": "Same subject and fill-blank type in real owner transcription; topic similarity and original authentication not certified",
         }],
         "ai_analysis": {
-            "status": "AI-assisted / pending human review",
+            "status": "Offline editorial / pending independent science and answer review",
             "independent_human_review": False,
             "axes": {
                 axis: "First-pass source-located draft; scientific/answer/style acceptance still missing"
