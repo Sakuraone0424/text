@@ -19,6 +19,7 @@ from app.qa_exam_year_inventory import summarize as summarize_exam_years
 from app.qa_stage1_acceptance import inspect as stage1_provenance
 from app.qa_graph_provenance_gate import inspect as graph_provenance
 from app.qa_graph_worklist_seed import ensure as seed_science_pending
+from app.qa_chapter_neighbor_proposals import seed as seed_chapter_neighbors
 
 FORBIDDEN_ON = (
     "DEEPSEEK_API_AUTHORIZED",
@@ -51,6 +52,7 @@ def cycle():
         linked = seed_topic_links(conn)
         formula = seed_formula_triage(conn)
         science_jobs = seed_science_pending(conn)
+        chapter_hints = seed_chapter_neighbors(conn)
         review = review_priorities(conn)
         source_gate = stage1_provenance(conn, state)
         graph_gate = graph_provenance(conn)
@@ -70,6 +72,7 @@ def cycle():
             "exam_textbook_lexical_review": linked,
             "formula_visual_review": formula,
             "pending_science_review_worklist": science_jobs,
+            "chapter_navigation_review": chapter_hints,
             "source_ledger_provenance": source_gate["issue_provenance_and_states_accepted"],
             "textbook_graph_source_exact": graph_gate["all_nodes_source_exact"],
             "textbook_graph_facet_exact": graph_gate["all_lexical_facets_source_exact"],
