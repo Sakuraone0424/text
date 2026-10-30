@@ -13,6 +13,7 @@ from app.qa_stage1_acceptance import inspect as stage1_inspect
 from app.qa_graph_provenance_gate import inspect as graph_inspect
 from app.exam_style_readiness import report as safe_style_inventory
 from app.qa_choice_style_completeness import inspect as choice_style_inventory
+from app.qa_review_worklist import inspect as science_review_worklist
 from app.qa_exam_year_inventory import summarize as exam_year_summary
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
@@ -106,6 +107,7 @@ def main():
         verified_graph=graph_inspect(conn)
         style_inventory=safe_style_inventory(conn)
         choice_option_inventory=choice_style_inventory(conn)
+        science_review_priorities=science_review_worklist(conn)
         g=conn.execute(
             "SELECT count(*) AS nodes,"
             "count(*) FILTER(WHERE scientific_review_state <> 'pending') AS approved "
@@ -201,6 +203,9 @@ def main():
         "provenance_evidence_node_count": verified_graph["evidence_nodes"],
         "provenance_lexical_facet_count": verified_graph["lexical_facet_candidates"],
         "concept_science_review_still_required": True,
+        "chapter_located_text_units_without_ocr_risk_flags_not_science_approved": (
+            science_review_priorities["textbook_units_also_outside_unmapped_chapter_pages"]
+        ),
     })
     data["stage_1"].update({
         "all_unresolved_source_issues_have_traceable_states": (
@@ -214,6 +219,11 @@ def main():
         "chapter_tracking_states": stage1_ledger["chapter_by_state"],
         # Completeness of a review ledger is not a scientific or visual pass.
         "science_and_media_acceptance_still_required": True,
+        "pending_review_by_risk_priority": (
+            science_review_priorities["metadata_only_priority_counts"]
+        ),
+        "review_issues_by_source": science_review_priorities["by_source"],
+        "reviewed_risks_scientifically_approved_by_triage": 0,
     })
     print("QA_SEVEN_STAGE_HARD_GATE="+json.dumps(
         data,ensure_ascii=False,separators=(",",":"),sort_keys=True
