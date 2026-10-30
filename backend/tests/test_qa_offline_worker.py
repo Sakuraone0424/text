@@ -86,6 +86,12 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "years_missing": [],
         "years": [{"source_key": "cell_biology_exams", "year": 2024, "candidate_type_counts": {"term": 1}}],
     })
+    monkeypatch.setattr(worker, "seed_editorial_batch", lambda conn: {
+        "reviewed_source_fact_count": 12,
+        "private_drafts_created_or_reused": 9,
+        "published_count": 0,
+        "model_calls": 0,
+    })
     monkeypatch.setattr(worker, "review_priorities", lambda conn: {
         "metadata_only_priority_counts": {"P0_visual_or_content_loss_candidate": 2},
         "source_issues_total": 2,
@@ -99,6 +105,7 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["pending_science_review_worklist"]["new_pending_tasks"] == 12
     assert result["chapter_navigation_review"]["unmapped_pages_with_navigation_records"] == 72
     assert result["first_source_grounded_editorial_draft"]["published"] is False
+    assert result["twelve_source_reviewed_private_drafts"]["reviewed_source_fact_count"] == 12
     assert result["exam_years_with_transcription"] == 52
     assert result["source_risk_items_tracked"] == 2
     assert result["unmarked_ocr_pages"] == 0
