@@ -57,3 +57,9 @@ def test_nine_point_mechanism_uses_same_book_clean_neighbor_evidence(monkeypatch
     assert [x["unit_id"] for x in result] == [1, 2, 4]
     assert generation.bounded_textbook_evidence(None, primary, "fill_blank") == [primary]
     assert generation.bounded_textbook_evidence(None, primary, "single_choice") == [primary]
+
+
+def test_oversized_evidence_packets_do_not_starve_generation():
+    from app.auto_generation import generation_payload_within_limit
+    assert generation_payload_within_limit({"evidence": "x" * 1000})
+    assert not generation_payload_within_limit({"evidence": "x" * 25000})
