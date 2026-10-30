@@ -1,5 +1,7 @@
 """Bounded supplementation from current AI-verified knowledge, never quota padding."""
 
+import json
+
 from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
 from app.source_policy import (
     current_source_sql, FILES, pinned_source_bytes, pinned_science_evidence
@@ -148,6 +150,11 @@ def select_exam_style(conn, subject, kind, concept=None):
             chosen["scope"] = "past_exam_style_not_textbook_answer_evidence"
             return chosen
     return None
+
+
+def generation_payload_within_limit(payload):
+    """Skip overlarge genuine-source packets rather than starve every plan tick."""
+    return len(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()) <= 24000
 
 
 def bounded_textbook_evidence(conn, primary, kind):
@@ -299,24 +306,24 @@ def plan(conn, uid):
                 # Unknown author/edition or a changed source checksum must
                 # never be replaced by an invented bibliographic label.
                 continue
-            enqueue(
-                conn,
-                uid,
-                key,
-                "generation",
-                dict(
-                    subject=subject,
-                    question_type=kind,
-                    max_points=POINTS[kind],
-                    evidence=bounded_textbook_evidence(conn, u, kind),
-                    style=style_units,
-                    style_year=style["year"],
-                    style_overlap=style["lexical_topic_overlap"],
-                    source_bibliography=book,
-                    schema=Question.model_json_schema(),
-                    instructions=exam_instructions(kind, POINTS[kind]),
-                ),
+            payload = dict(
+                subject=subject,
+                question_type=kind,
+                max_points=POINTS[kind],
+                evidence=bounded_textbook_evidence(conn, u, kind),
+                style=style_units,
+                style_year=style["year"],
+                style_overlap=style["lexical_topic_overlap"],
+                source_bibliography=book,
+                schema=Question.model_json_schema(),
+                instructions=exam_instructions(kind, POINTS[kind]),
             )
+            # A source/style packet can exceed the job admission limit.
+            # Skip it and try another genuine evidence unit rather than
+            # retrying the same ValueError on every 10-second planner tick.
+            if not generation_payload_within_limit(payload):
+                continue
+            enqueue(conn, uid, key, "generation", payload)
             return
 
 
