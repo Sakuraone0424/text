@@ -64,3 +64,21 @@ def test_continuous_reviews_use_explicit_latest_contract_without_rewriting_legac
     assert 'answer' not in new['question'] and 'rubric' not in new['question']
     assert job_contract_version({'settings_snapshot':{'qa_automation':{}},'payload':new})==7
     assert job_contract_version({'settings_snapshot':{'qa_automation':{}},'payload':old})==1
+
+
+def test_only_generation_can_be_signed_or_executed_even_with_valid_hmac(job):
+    from app import qa_automation as q
+    assert q.POLICY["tasks"] == ["generation"]
+    assert "unlimited" not in q.POLICY["money_limit"]
+    for forbidden in ("science_review", "answer_review", "exam_analysis",
+                      "textbook_analysis", "knowledge_extraction",
+                      "compatibility", "grading", "explanation",
+                      "repair", "study_plan"):
+        revised = {**job, "kind": forbidden, "settings_snapshot": {
+            **job["settings_snapshot"],
+        }}
+        revised["settings_snapshot"]["qa_automation"] = {
+            "scope_id": q.SCOPE, "signature": q.signature(revised)
+        }
+        with pytest.raises(ValueError, match="invalid"):
+            q.check_job(revised)
