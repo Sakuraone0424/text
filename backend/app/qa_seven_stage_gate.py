@@ -14,6 +14,17 @@ from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
 
 def analyze(source,graph,risk,chapter,years,questions,papers,accepted_buckets=None):
+    expected = {
+        f"{subject}:{kind}": count * STARTUP_RESERVE_DAYS
+        for subject in SUBJECTS for kind, count in COUNTS.items()
+    }
+    if accepted_buckets is None:
+        accepted_buckets = {key: 0 for key in expected}
+    if set(accepted_buckets) != set(expected) or any(
+        type(n) is not int or n < 0 for n in accepted_buckets.values()
+    ):
+        raise ValueError("QA verified reserve buckets missing or invalid")
+
     source_six=(
         source["imported_files"]==6
         and source["integrity_passed_files"]==6
@@ -29,16 +40,6 @@ def analyze(source,graph,risk,chapter,years,questions,papers,accepted_buckets=No
     # evidence are checked by eligible_verified_reserve before calling here.
     # No rows (or no attached validator) means zero rather than fabricated
     # reserve. Keep all eight type/subject quotas independent.
-    expected = {
-        f"{subject}:{kind}": count * STARTUP_RESERVE_DAYS
-        for subject in SUBJECTS for kind, count in COUNTS.items()
-    }
-    if accepted_buckets is None:
-        accepted_buckets = {key: 0 for key in expected}
-    if set(accepted_buckets) != set(expected) or any(
-        type(n) is not int or n < 0 for n in accepted_buckets.values()
-    ):
-        raise ValueError("QA verified reserve buckets missing or invalid")
     reserve_verified = sum(accepted_buckets.values())
     reserve_ready = all(accepted_buckets[key] >= n
                         for key, n in expected.items())
