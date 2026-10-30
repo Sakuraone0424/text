@@ -29,38 +29,60 @@ def eligible_verified_reserve(conn, rows):
 
 
 def complete_choice_style_unit_ids(rows):
-    """Retain real A-D option paragraphs; refuse stem-only choice examples.
+    """Only accept a genuine exam stem with consecutive nonempty A/B/C/D choices.
 
-    DOCX often stores its single-choice stem and A-D options in DIFFERENT
-    source units. Never use another question's options to complete a stem.
-    Historical answer correctness is not inferred by this shape check.
+    Word DOCX may split four options across multiple paragraphs. Count neither
+    an A-D label list nor a later question's choices as a complete style anchor.
+    This validates *structure*, never a historical question's answer/science.
     """
     import re
 
-    if not rows or set(rows[0].get("quality_flags") or []) & STYLE_SOURCE_BLOCKERS:
+    if not rows or len(rows) > 8:
         return None
-    pattern = re.compile(r"(?<![A-Za-z0-9])([ABCD])[.、．):：]\s*")
-    ids = [rows[0]["id"]]
-    found = set(pattern.findall(rows[0]["text"]))
-    if found == set("ABCD"):
-        return ids
-    for row in rows[1:]:
-        if set(row.get("quality_flags") or []) & STYLE_SOURCE_BLOCKERS:
+    option = re.compile(r"(?<![A-Za-z0-9])([ABCD])[.、．)）:：]\\s*")
+    new_numbered_question = re.compile(r"^\\s*\\d{1,3}[.、．)）]\\s*\\S")
+    next_letter = "ABCD"
+    seen = 0
+    unit_ids = []
+    for index, row in enumerate(rows):
+        text = str(row.get("text") or "")
+        if (not text.strip()
+            or not isinstance(row.get("id"), int)
+            or set(row.get("quality_flags") or []) & STYLE_SOURCE_BLOCKERS):
             return None
-        markers = set(pattern.findall(row["text"]))
-        # After the stem, only option-bearing units may extend the same
-        # question. A new stem/section cannot provide a missing option.
-        if not markers or not any(
-            re.match(r"^\s*" + letter + r"[.、．):：]", row["text"])
-            for letter in markers
+        # Any new numbered question, year, section or answer ends the scope.
+        # The first row, being the stem, may itself have a question number.
+        if index and (
+            new_numbered_question.match(text)
+            or re.match(r"^\\s*(?:参考答案|答案(?:及解析)?|解答|解析)\\s*[:：]?", text)
+            or re.match(r"^\\s*(?:19|20)\\d{2}\\s*年", text)
+            or re.match(r"^\\s*(?:单项选择题|单选题|填空题|名词解释|简答题|论述题)", text)
         ):
             return None
-        ids.append(row["id"])
-        found |= markers
-        if found == set("ABCD"):
-            return ids
-        if len(ids) >= 7:
+        markers = list(option.finditer(text))
+        if not markers:
+            if index == 0:
+                unit_ids.append(row["id"])
+                continue  # A separate option paragraph may follow the stem.
             return None
+        preamble = text[:markers[0].start()].strip()
+        if index == 0:
+            if not preamble:  # An option list without a question is not a stem.
+                return None
+        elif preamble:  # Later rows must *start* with their next option.
+            return None
+
+        for pos, match in enumerate(markers):
+            if seen == 4 or match.group(1) != next_letter[seen]:
+                return None
+            end = markers[pos + 1].start() if pos + 1 < len(markers) else len(text)
+            # A, B, C and D must each have actual text, not four bare labels.
+            if not text[match.end():end].strip():
+                return None
+            seen += 1
+        unit_ids.append(row["id"])
+        if seen == 4:
+            return unit_ids
     return None
 
 
