@@ -44,7 +44,7 @@ def prepare(conn):
     ):
         return None, "literal_textbook_anchor_not_source_locked"
     styles = conn.execute(
-        "SELECT t.unit_id,t.year,t.concerns,u.quality_flags "
+        "SELECT t.unit_id,t.year,t.concerns,u.quality_flags,d.sha256 AS source_sha256 "
         "FROM exam_transcript_candidates t "
         "JOIN source_documents d ON d.id=t.document_id "
         "JOIN source_units u ON u.id=t.unit_id "
@@ -56,7 +56,7 @@ def prepare(conn):
     ).fetchall()
     allowed_risks = set(STYLE_SOURCE_BLOCKERS) | set(BOUNDARY_ISSUES)
     style = next(
-        (s for s in styles if s["year"] is not None and not (set(s["concerns"] or []) & allowed_risks)),
+        (s for s in styles if s["year"] is not None and pinned_source_bytes(EXAM_ID, s["source_sha256"]) and not (set(s["concerns"] or []) & allowed_risks)),
         None,
     )
     if style is None:
