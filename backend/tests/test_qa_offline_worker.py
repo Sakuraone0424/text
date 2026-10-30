@@ -67,6 +67,16 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "unmapped_pages_with_navigation_records": 72,
         "chapter_repairs_applied": 0,
     })
+    monkeypatch.setattr(worker, "seed_chapter_ocr_navigation", lambda conn: {
+        "exact_six_source_navigation_proposals": 72,
+        "by_category": {
+            "unnumbered_scientific_intro": 17,
+            "part_transition_science_context": 3,
+            "frontmatter_or_contents": 52,
+        },
+        "verified_scientific_chapter_repairs": 0,
+        "original_visual_approvals": 0,
+    })
     monkeypatch.setattr(worker, "seed_editorial_first_draft", lambda conn: {
         "status": "pending_independent_science_and_answer_review",
         "draft_question_id": 91,
@@ -104,6 +114,8 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["formula_visual_review"]["pending_visual_candidates"] == 4
     assert result["pending_science_review_worklist"]["new_pending_tasks"] == 12
     assert result["chapter_navigation_review"]["unmapped_pages_with_navigation_records"] == 72
+    assert result["chapter_ocr_navigation"]["exact_six_source_navigation_proposals"] == 72
+    assert result["chapter_ocr_navigation"]["verified_scientific_chapter_repairs"] == 0
     assert result["first_source_grounded_editorial_draft"]["published"] is False
     assert result["twelve_source_reviewed_private_drafts"]["reviewed_source_fact_count"] == 12
     assert result["exam_years_with_transcription"] == 52
