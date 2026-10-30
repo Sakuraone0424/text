@@ -82,3 +82,38 @@ def test_only_generation_can_be_signed_or_executed_even_with_valid_hmac(job):
         }
         with pytest.raises(ValueError, match="invalid"):
             q.check_job(revised)
+
+
+def test_deepseek_requires_owner_bounded_cny_budget_not_model_scope_alone():
+    from app.qa_automation import require_explicit_cny_budget
+    from decimal import Decimal
+    allowed = dict(
+        task_limit_enabled=True, daily_limit_enabled=True,
+        monthly_limit_enabled=True, task_cny=Decimal("2"),
+        daily_cny=Decimal("5"), monthly_cny=Decimal("20"),
+    )
+    assert require_explicit_cny_budget(allowed)
+    for k in ("task_limit_enabled","daily_limit_enabled","monthly_limit_enabled"):
+        with pytest.raises(PermissionError, match="explicit_bounded"):
+            require_explicit_cny_budget({**allowed,k:False})
+    for k in ("task_cny","daily_cny","monthly_cny"):
+        with pytest.raises(PermissionError, match="explicit_bounded"):
+            require_explicit_cny_budget({**allowed,k:Decimal("0")})
+    for bad in (None, {}, {"task_limit_enabled":True}):
+        with pytest.raises(PermissionError):
+            require_explicit_cny_budget(bad)
+
+
+def test_qa_generation_budget_is_checked_at_claim_not_only_at_bootstrap(monkeypatch,job):
+    from app import qa_automation as q
+    class Conn:
+        def execute(self,sql,params=None):
+            if "FROM ai_settings" in sql:
+                return type("C",(),{"fetchone":lambda self:{
+                    "task_limit_enabled":True,"daily_limit_enabled":False,
+                    "monthly_limit_enabled":True,"task_cny":2,
+                    "daily_cny":5,"monthly_cny":20}})()
+            if "FROM qa_automation_grants" in sql:
+                pytest.fail("A disabled daily cap cannot reach the durable grant")
+            raise AssertionError(sql)
+    assert q.claim_reason(Conn(),job) == "daily_generation_explicit_cny_budget_missing"
