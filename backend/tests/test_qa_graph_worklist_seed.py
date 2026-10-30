@@ -30,15 +30,17 @@ def test_science_tasks_are_pending_only(monkeypatch):
 
 def test_bounded_idempotent_science_worklist(monkeypatch):
     monkeypatch.setattr(seed, "pinned_source_bytes", lambda a,b: True)
+    stored = {"already"}
     class Conn:
         def execute(self,query,args):
             assert "SELECT work_key" in query
             return self
         def fetchall(self):
-            return [{"work_key":"already"}]
+            return [{"work_key": key} for key in stored]
     saved=[]
     def persist(_conn, tasks):
         saved.extend(tasks)
+        stored.update(x["work_key"] for x in tasks)
         return len(tasks)
     tasks=[work("already"),work("risk",priority=90),work("clean",priority=20)]
     result=seed.ensure(Conn(),builder=lambda conn:{"work":tasks},
@@ -48,6 +50,7 @@ def test_bounded_idempotent_science_worklist(monkeypatch):
     assert result["new_pending_tasks"] == 1
     assert result["remaining_unseeded"] == 1
     assert result["scientifically_approved_nodes"] == 0
+    assert result["all_pending_reviews_persisted"] is False
 
 
 def test_duplicate_fingerprint_is_refused(monkeypatch):
@@ -59,3 +62,34 @@ def test_duplicate_fingerprint_is_refused(monkeypatch):
 def test_invalid_unbounded_job_rejected():
     with pytest.raises(ValueError,match="limit"):
         seed.ensure(None,limit=999999)
+
+
+def test_complete_source_review_queue_has_exact_readback(monkeypatch):
+    monkeypatch.setattr(seed, "pinned_source_bytes", lambda a, b: True)
+    tasks = [work("one"), work("two"), work("three")]
+    storage = {"one"}
+    class Conn:
+        def execute(self, query, args):
+            assert "SELECT work_key" in query
+            return self
+        def fetchall(self):
+            return [{"work_key": key} for key in storage]
+    def persister(_conn, pending):
+        storage.update(item["work_key"] for item in pending)
+        return len(pending)
+    report=seed.ensure(Conn(),builder=lambda _conn:{"work":tasks},persister=persister)
+    assert report["new_pending_tasks"] == 2
+    assert report["remaining_unseeded"] == 0
+    assert report["all_pending_reviews_persisted"] is True
+
+
+def test_incomplete_write_is_not_reported_as_complete(monkeypatch):
+    monkeypatch.setattr(seed,"pinned_source_bytes",lambda a,b:True)
+    class Conn:
+        def execute(self,query,args):
+            return self
+        def fetchall(self):
+            return []
+    with pytest.raises(ValueError, match="postwrite_count"):
+        seed.ensure(Conn(),builder=lambda conn:{"work":[work("one")]},
+                    persister=lambda conn,tasks:1)
