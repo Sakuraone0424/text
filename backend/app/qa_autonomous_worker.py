@@ -31,6 +31,14 @@ def bootstrap():
         apply_migrations(conn)
         if not audit(conn)['all_six_byte_integrity_checks_passed']:
             raise PermissionError('six_source_integrity_failed')
+        # Restore genuine-exam *pending only* work when an OCR-only QA import
+        # was performed without the historical review-worklist builder.
+        from app.qa_exam_worklist_seed import ensure as seed_exam_pending
+        try:
+            work = seed_exam_pending(conn)
+            print("QA_EXAM_WORKLIST="+json.dumps(work,separators=(',',':')),flush=True)
+        except ValueError:
+            print("QA_EXAM_WORKLIST_REQUIRES_SOURCE_REVIEW",flush=True)
         uid = ensure_user(conn, 'xiaohan')
         model_router.settings(conn, uid)
         conn.execute('INSERT INTO qa_automation_grants(scope_id,user_id,policy) '
