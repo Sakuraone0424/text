@@ -112,7 +112,7 @@ def db_health():
             "schema": "dynamic-v1",
             "migration_count": len(applied),
             "formal_training": {
-                "questions": 28,
+                "questions": (60 if os.environ.get("QUIZ_DAILY_SPECIFICATION") == "xiaohan-60q-150pt-v2" else 28),
                 "points": 150,
                 "duration_seconds": 3600,
             },

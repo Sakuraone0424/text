@@ -25,6 +25,7 @@ def priority(flag):
     if any(word in token for word in (
         "corrupt", "untranscribed", "missing", "unreadable", "truncat",
         "image", "figure", "structure", "formula", "equation", "chemical",
+        "unverified_embedded_media",
     )):
         return "P0_visual_or_content_loss_candidate"
     if any(word in token for word in (
