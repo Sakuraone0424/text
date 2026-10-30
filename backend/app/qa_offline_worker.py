@@ -12,6 +12,8 @@ import time
 from app.qa_harness_tick import qa_db, pinned_worker
 from app.source_readiness import audit as source_audit
 from app.qa_exam_worklist_seed import ensure as seed_exam_pending
+from app.qa_offline_topic_links import seed as seed_topic_links
+from app.qa_review_worklist import inspect as review_priorities
 
 FORBIDDEN_ON = (
     "DEEPSEEK_API_AUTHORIZED",
@@ -41,11 +43,19 @@ def cycle():
         ):
             raise PermissionError("offline_worker_six_source_integrity_failed")
         result = seed_exam_pending(conn)
+        linked = seed_topic_links(conn)
+        review = review_priorities(conn)
         return {
             "source_files": 6,
             "algorithm": result["algorithm"],
             "pending_exam_work_added": result["new"],
             "existing_exam_review_work": result["already_present"],
+            "exam_textbook_lexical_review": linked,
+            "source_review_priorities": review["metadata_only_priority_counts"],
+            "source_risk_items_tracked": review["source_issues_total"],
+            "chapter_mapping_items_tracked": review["chapter_mapping_issues"],
+            "unmarked_ocr_pages": sum(len(d["missing_ocr_page_markers"]) for d in state["files"]),
+            "blank_ocr_page_markers": sum(len(d["blank_ocr_pages"]) for d in state["files"]),
             "model_calls": 0,
             "scientific_approvals": 0,
         }
