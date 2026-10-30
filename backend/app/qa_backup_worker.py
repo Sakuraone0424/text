@@ -81,6 +81,12 @@ def restore_once(directory,index,info,target_system_id):
     receipt=ROOT/'independent-restore-receipt.json'
     if receipt.exists():
         previous=json.loads(receipt.read_text())
+        # Cluster identity must be rejected BEFORE touching any snapshot index:
+        # a stale proof cannot be replayed against a newly provisioned target.
+        if previous.get('target_system_id') != target_system_id:
+            raise PermissionError('restore_proof_belongs_to_different_cluster')
+        if not isinstance(index.get('sha256'), str):
+            raise ValueError('current_snapshot_sha_required')
         return historical_restore_status(previous,index['sha256'],target_system_id)
     target=os.environ['QA_RESTORE_DATABASE_URL']
     with psycopg.connect(target,row_factory=dict_row) as c:
