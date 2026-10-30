@@ -21,6 +21,7 @@ from app.qa_graph_provenance_gate import inspect as graph_provenance
 from app.qa_graph_worklist_seed import ensure as seed_science_pending
 from app.qa_chapter_neighbor_proposals import seed as seed_chapter_neighbors
 from app.qa_editorial_first_draft import seed as seed_editorial_first_draft
+from app.qa_ocr_scope_guard import inspect as inspect_ocr_scope
 
 FORBIDDEN_ON = (
     "DEEPSEEK_API_AUTHORIZED",
@@ -41,6 +42,7 @@ def offline_authorized(env=None):
 def cycle():
     """Make real, idempotent pending-only progress without billable APIs."""
     offline_authorized()
+    locked_scope = inspect_ocr_scope()
     from migrate import apply_migrations
     with qa_db() as conn:
         apply_migrations(conn)
@@ -68,6 +70,7 @@ def cycle():
         years = summarize_exam_years(exam_rows)
         return {
             "source_files": 6,
+            "only_six_ocr_sources": locked_scope,
             "algorithm": result["algorithm"],
             "pending_exam_work_added": result["new"],
             "existing_exam_review_work": result["already_present"],
