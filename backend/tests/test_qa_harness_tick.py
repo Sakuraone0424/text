@@ -1,9 +1,14 @@
 """Installing the real SDK is not permission to spend or leak private material."""
-from app.qa_harness_tick import plan, SDK_VERSION
+import pytest
+from app.qa_harness_tick import plan, SDK_VERSION, QA_HARNESS_SERVICE
+from app.deployment_target import QA_TARGET
 
 
 def env():
     return {
+        "RAILWAY_PROJECT_ID": QA_TARGET["PROJECT"],
+        "RAILWAY_ENVIRONMENT_ID": QA_TARGET["ENVIRONMENT"],
+        "RAILWAY_SERVICE_ID": QA_HARNESS_SERVICE,
         "RAILWAY_ENVIRONMENT_NAME": "qa",
         "QA_IMPORT_SCHEMA": "source_staging_ocr_20261030",
         "QUIZ_DB_SCHEMA": "source_staging_ocr_20261030",
@@ -71,3 +76,16 @@ def test_unapproved_trial_has_independent_scope_not_campaign_fallback():
     assert not plan(base, SDK_VERSION)["ready_to_execute_one_budgeted_campaign_job"]
     base["DEEPSEEK_TRIAL_SCOPE_ID"] = "b" * 64
     assert plan(base, SDK_VERSION)["ready_to_execute_one_budgeted_campaign_job"]
+
+
+@pytest.mark.parametrize("key", ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_ID"])
+def test_same_display_name_cannot_authorize_other_platform_identity(key):
+    base = env()
+    base[key] = "00000000-0000-4000-8000-999999999999"
+    assert not plan(base, SDK_VERSION)["ready_to_execute_one_budgeted_campaign_job"]
+
+
+def test_harness_rejects_unpinned_schema_even_when_worker_matches():
+    base = env()
+    base["QUIZ_DB_SCHEMA"] = base["QA_IMPORT_SCHEMA"] = "source_staging_other"
+    assert not plan(base, SDK_VERSION)["ready_to_execute_one_budgeted_campaign_job"]

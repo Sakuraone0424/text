@@ -17,11 +17,23 @@ import re
 from app.qa_ai_authorization_check import inspect as authorization
 from app.source_intake import SCHEMA, isolated_db
 from app.source_readiness import audit as source_audit
+from app.deployment_target import QA_TARGET, QA_SOURCE_SCHEMA
 
 SDK_VERSION = "0.2.1rc2"
 SDK_DISTRIBUTION = "deepseek-harness-sdk"
 REVIEW_SCOPE = re.compile(r"[0-9a-f]{64}\Z")
 ALLOWED_SCOPE_KINDS = frozenset(("limited_trial", "review_campaign"))
+QA_HARNESS_SERVICE = "1ea7310e-f515-4721-b1f5-63f65d626f8a"
+
+
+def pinned_worker(env):
+    return (
+        env.get("RAILWAY_PROJECT_ID") == QA_TARGET["PROJECT"]
+        and env.get("RAILWAY_ENVIRONMENT_ID") == QA_TARGET["ENVIRONMENT"]
+        and env.get("RAILWAY_SERVICE_ID") == QA_HARNESS_SERVICE
+        and env.get("QA_IMPORT_SCHEMA") == QA_SOURCE_SCHEMA
+        and env.get("QUIZ_DB_SCHEMA") == QA_SOURCE_SCHEMA
+    )
 
 
 def plan(env, installed_sdk_version=None):
@@ -40,6 +52,7 @@ def plan(env, installed_sdk_version=None):
     scope = env.get(scoped_key, "") if scoped_key else ""
     execution = (
         installed
+        and pinned_worker(env)
         and env.get("QA_HARNESS_EXECUTION_ENABLED") == "1"
         and permission["ready_for_safe_model_worker_start"]
         and kind in ALLOWED_SCOPE_KINDS
@@ -52,6 +65,7 @@ def plan(env, installed_sdk_version=None):
         "harness_sdk_installed_and_version_pinned": installed,
         "harness_sdk_expected_version": SDK_VERSION,
         "qa_environment_isolated": checks["qa_environment_confirmed"],
+        "qa_worker_platform_identity_pinned": pinned_worker(env),
         "qa_source_schema_and_worker_schema_identical": checks[
             "worker_uses_exact_QA_source_schema"
         ],
@@ -80,10 +94,16 @@ def plan(env, installed_sdk_version=None):
 
 @contextmanager
 def qa_db():
+    from app.deployment_target import verify_database_url, verify_database_connection
+
+    if not pinned_worker(os.environ):
+        raise PermissionError("qa_harness_platform_identity_mismatch")
     schema = os.environ.get("QA_IMPORT_SCHEMA", "")
     if not SCHEMA.fullmatch(schema):
         raise PermissionError("qa_harness_invalid_schema")
+    verify_database_url(os.environ.get("SOURCE_STAGING_DATABASE_URL", ""))
     with isolated_db(schema, "staging") as conn:
+        verify_database_connection(conn)
         yield conn
 
 
