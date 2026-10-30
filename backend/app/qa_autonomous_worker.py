@@ -43,11 +43,14 @@ def bootstrap():
         conn.execute('INSERT INTO qa_automation_grants(scope_id,user_id,policy) '
                      'VALUES(%s,%s,%s) ON CONFLICT DO NOTHING', (SCOPE,uid,Jsonb(POLICY)))
         # A grant by itself must not clear an operator pause.
+        # Preserve the owner's separately configured CNY budgets. Never
+        # disable per-task, daily, or monthly ceilings during bootstrap.
         conn.execute("UPDATE ai_settings SET model_id='deepseek-flash',effort='high',"
                      "token_limit=32768,retry_limit=2,max_concurrency=2,"
-                     "task_limit_enabled=false,daily_limit_enabled=false,"
-                     "monthly_limit_enabled=false,trial_active=false,auto_upgrade=false "
+                     "trial_active=false,auto_upgrade=false "
                      "WHERE user_id=%s", (uid,))
+        from app.qa_automation import assert_live_cny_budget
+        assert_live_cny_budget(conn, uid)
         print("QA_AUTOMATION_BOOTSTRAP=catalog",flush=True)
         model_router.refresh(conn)
         print("QA_AUTOMATION_BOOTSTRAP=official_cny_prices",flush=True)
