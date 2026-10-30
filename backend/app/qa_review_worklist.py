@@ -36,7 +36,7 @@ def priority(flag):
 
 
 def summarize(risks, chapters, nodes, *, expected_risks=5094,
-              expected_chapters=72, expected_nodes=9655):
+              expected_chapters=72, expected_nodes=9655, expected_media=31):
     """Fail closed if the triage inventory omits or misattributes QA records."""
     if (len(risks), len(chapters), len(nodes)) != (
         expected_risks, expected_chapters, expected_nodes
@@ -47,6 +47,7 @@ def summarize(risks, chapters, nodes, *, expected_risks=5094,
     by_flag = Counter()
     by_priority = Counter()
     risk_per_unit = Counter()
+    textbook_risk_ids = set()
     states = Counter()
     for row in risks:
         key, source, flag, state = (
@@ -71,8 +72,10 @@ def summarize(risks, chapters, nodes, *, expected_risks=5094,
             if type(uid) is not int or uid < 1:
                 raise ValueError("qa_review_invalid_text_unit")
             risk_per_unit[uid] += 1
+            if source in BOOKS:
+                textbook_risk_ids.add(uid)
             by_source[source]["text_risks"] += 1
-    if sum(by_source[s]["media"] for s in SOURCE_KEYS) != 31:
+    if sum(by_source[s]["media"] for s in SOURCE_KEYS) != expected_media:
         raise ValueError("qa_review_original_media_count_mismatch")
 
     chapter_ids = set()
@@ -112,9 +115,9 @@ def summarize(risks, chapters, nodes, *, expected_risks=5094,
             ocr_unflagged_with_mapped_chapter += 1
             if (row["source_key"], row["ocr_page"]) not in chapter_pages:
                 ocr_unflagged_and_chapter_location_traced += 1
-    # Missing graph nodes cannot be smuggled in as harmless OCR evidence.
-    if any(uid in node_ids for uid in risk_per_unit if risk_per_unit[uid] < 0):
-        raise ValueError("qa_review_invalid_risk_count")
+    # Every flagged textbook unit must appear in the canonical graph.
+    if textbook_risk_ids - node_ids:
+        raise ValueError("qa_review_textbook_risk_missing_graph_node")
 
     return {
         "status": "qa_source_review_priorities_grounded_in_real_issue_ledgers",
