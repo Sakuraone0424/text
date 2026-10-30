@@ -14,6 +14,10 @@ from app.source_readiness import audit as source_audit
 from app.qa_exam_worklist_seed import ensure as seed_exam_pending
 from app.qa_offline_topic_links import seed as seed_topic_links
 from app.qa_review_worklist import inspect as review_priorities
+from app.qa_offline_formula_triage import seed as seed_formula_triage
+from app.qa_exam_year_inventory import summarize as summarize_exam_years
+from app.qa_stage1_acceptance import inspect as stage1_provenance
+from app.qa_graph_provenance_gate import inspect as graph_provenance
 
 FORBIDDEN_ON = (
     "DEEPSEEK_API_AUTHORIZED",
@@ -44,13 +48,36 @@ def cycle():
             raise PermissionError("offline_worker_six_source_integrity_failed")
         result = seed_exam_pending(conn)
         linked = seed_topic_links(conn)
+        formula = seed_formula_triage(conn)
         review = review_priorities(conn)
+        source_gate = stage1_provenance(conn, state)
+        graph_gate = graph_provenance(conn)
+        exam_rows = conn.execute(
+            "SELECT d.file_id,d.sha256 AS source_sha256,"
+            "t.year,t.question_type,t.question_number,t.concerns,u.quality_flags "
+            "FROM exam_transcript_candidates t "
+            "JOIN source_documents d ON d.id=t.document_id "
+            "JOIN source_units u ON u.id=t.unit_id"
+        ).fetchall()
+        years = summarize_exam_years(exam_rows)
         return {
             "source_files": 6,
             "algorithm": result["algorithm"],
             "pending_exam_work_added": result["new"],
             "existing_exam_review_work": result["already_present"],
             "exam_textbook_lexical_review": linked,
+            "formula_visual_review": formula,
+            "source_ledger_provenance": source_gate["issue_provenance_and_states_accepted"],
+            "textbook_graph_source_exact": graph_gate["all_nodes_source_exact"],
+            "textbook_graph_facet_exact": graph_gate["all_lexical_facets_source_exact"],
+            "exam_years_with_transcription": years["years_with_transcription"],
+            "exam_parsed_question_starts": years["candidate_numbered_starts"],
+            "exam_years_missing": years["years_missing"],
+            "exam_question_type_candidates_by_year": [
+                {"subject_source": row["source_key"], "year": row["year"],
+                 "counts": row["candidate_type_counts"]}
+                for row in years["years"]
+            ],
             "source_review_priorities": review["metadata_only_priority_counts"],
             "source_risk_items_tracked": review["source_issues_total"],
             "chapter_mapping_items_tracked": review["chapter_mapping_issues"],
