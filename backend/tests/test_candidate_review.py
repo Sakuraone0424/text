@@ -507,3 +507,32 @@ def test_password_verification_and_rate_limit(monkeypatch):
             ).status_code
             == 429
         )
+
+
+
+def test_offline_editorial_packet_remains_pending_without_ai_claim(db, packet):
+    """OCR-only editorial draft must not silently count as model-verified."""
+    prepared = deepcopy(packet)
+    prepared["candidate_key"] = "synthetic-editorial-pending-v1"
+    prepared["ai_analysis"]["status"] = (
+        "Offline editorial / pending independent science and answer review"
+    )
+    created = svc.create_packet(db, prepared)
+    row = db.execute(
+        "SELECT status FROM reviewed_questions WHERE id=%s", (created,)
+    ).fetchone()
+    assert row["status"] == "draft"
+    stored = db.execute(
+        "SELECT ai_analysis FROM candidate_review_packets WHERE question_id=%s",
+        (created,),
+    ).fetchone()["ai_analysis"]
+    assert stored["independent_human_review"] is False
+    assert stored["status"] == prepared["ai_analysis"]["status"]
+
+
+def test_unknown_editorial_verdict_cannot_skip_independent_review(db, packet):
+    prepared = deepcopy(packet)
+    prepared["candidate_key"] = "synthetic-editorial-unknown-v1"
+    prepared["ai_analysis"]["status"] = "Scientifically approved, no review needed"
+    with pytest.raises(ValueError, match="Explicit pending AI analysis"):
+        svc.create_packet(db, prepared)
