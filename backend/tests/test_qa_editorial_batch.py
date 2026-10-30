@@ -317,3 +317,34 @@ def test_science_wording_correction_supersedes_old_draft_append_only(monkeypatch
     assert captured[0]["supersedes"].endswith("-v1")
     assert captured[0]["question"]["answer"]==fact["answer"]
     assert captured[0]["ai_analysis"]["independent_human_review"] is False
+
+
+def test_mito_9point_science_firstpass_cannot_assert_speculative_hypotheses_as_facts(monkeypatch):
+    fact=next(f for f in batch.source_facts() if f["id"]=="cell-mito-fusion-06")
+    assert "通常认为" in fact["answer"] and "可能" in fact["answer"]
+    assert "尚不完全清楚" in fact["answer"]
+    assert sum(r["points"] for r in fact["rubric_points"]) == 9
+    assert any("不能" in r["description"] for r in fact["rubric_points"])
+    src={**unit(),"text":fact["quote"],"ocr_page":fact["ocr_page"],"subject":"cell_biology"}
+    exam={**src,"unit_id":101,"source_kind":"exam_transcription",
+        "file_id":next(fid for fid,x in batch.FILES.items() if x["key"]=="cell_biology_exams")}
+    monkeypatch.setattr(batch,"snapshot_unit",lambda conn,uid:src if uid==9 else exam)
+    monkeypatch.setattr(batch,"pinned_source_bytes",lambda *args:True)
+    monkeypatch.setattr(batch,"from_database",lambda *args:bibliography())
+    class Conn:
+        def execute(self,sql,params=None):
+            if sql.startswith("SELECT u.id"):
+                return type("R",(),{"fetchall":lambda self:[{"id":9}]})()
+            if sql.startswith("SELECT candidate_key FROM candidate_review_packets"):
+                return type("R",(),{"fetchone":lambda self:{"candidate_key":params[0]}})()
+            if sql.startswith("SELECT status FROM reviewed_questions"):
+                return type("R",(),{"fetchone":lambda self:{"status":"draft"}})()
+            raise AssertionError(sql)
+    got=[]
+    status=batch.seed(Conn(),facts=[fact],create=lambda conn,p:(got.append(p) or 777),
+        style_lookup=lambda *args:{"id":101,"year":2024})
+    assert status["private_drafts_created_or_reused"]==1
+    assert got[0]["candidate_key"].endswith("-v3")
+    assert got[0]["supersedes"].endswith("-v2")
+    assert got[0]["question"]["max_points"]==9
+    assert got[0]["ai_analysis"]["independent_human_review"] is False
