@@ -150,6 +150,46 @@ def select_exam_style(conn, subject, kind, concept=None):
     return None
 
 
+def bounded_textbook_evidence(conn, primary, kind):
+    """Expand a 9-point mechanism question only with same-book clean units.
+
+    Metadata/byte integrity is checked again during scientific review;
+    proximity is contextual evidence, never scientific approval.
+    """
+    if kind != "short_answer" or primary["chapter"] in ("", "unclassified", "contents"):
+        return [primary]
+    candidates = conn.execute(
+        "SELECT u.id FROM source_units u "
+        "JOIN source_units anchor ON anchor.id=%s "
+        "WHERE u.document_id=anchor.document_id AND u.chapter=anchor.chapter "
+        "AND u.id<>anchor.id AND u.quality_flags='[]'::jsonb "
+        "AND length(u.text) BETWEEN 80 AND 4000 "
+        "ORDER BY abs(u.ordinal-anchor.ordinal),u.ordinal,u.id LIMIT 4",
+        (primary["unit_id"],),
+    ).fetchall()
+    snapshots = [primary]
+    for item in candidates:
+        try:
+            other = snapshot_unit(conn, item["id"])
+        except ValueError:
+            continue
+        if (
+            other["file_id"] != primary["file_id"]
+            or other["source_sha256"] != primary["source_sha256"]
+            or other["chapter"] != primary["chapter"]
+            or other["source_kind"] != "textbook"
+            or other["quality_flags"]
+            or not pinned_source_bytes(other["file_id"], other["source_sha256"])
+        ):
+            continue
+        if sum(len(v["text"]) for v in snapshots) + len(other["text"]) > 7000:
+            continue
+        snapshots.append(other)
+        if len(snapshots) >= 3:
+            break
+    return snapshots
+
+
 def balanced_generation_buckets(attempts):
     """Fairly cover eight quota buckets, without weakening evidence admission.
 
@@ -268,7 +308,7 @@ def plan(conn, uid):
                     subject=subject,
                     question_type=kind,
                     max_points=POINTS[kind],
-                    evidence=[u],
+                    evidence=bounded_textbook_evidence(conn, u, kind),
                     style=style_units,
                     style_year=style["year"],
                     style_overlap=style["lexical_topic_overlap"],
