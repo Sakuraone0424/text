@@ -80,7 +80,7 @@ def schedule(conn, uid, unit_id):
             phase="extract",
             evidence=u,
             schema=Extraction.model_json_schema(),
-            instructions="Extract only explicitly evidenced concepts and relationships. Return ONLY the Extraction schema object with concepts and uncertain, never echo the input packet. Copy each excerpt character-for-character from evidence.text, including punctuation, letter case and whitespace; do not normalize or paraphrase a quote. Each rationale must meet the schema minimum length. Names that look similar are not synonyms unless the text supports identity. Use relation types "
+            instructions="Extract only explicitly evidenced concepts and relationships. Return ONLY the Extraction schema object with concepts and uncertain, never echo the input packet. Copy each excerpt character-for-character from evidence.text, including punctuation, letter case and whitespace; do not normalize or paraphrase a quote. Each Concept must have name length >=2, excerpt length >=5 copied exactly from the supplied unit, and rationale length >=20 with a meaningful source-grounded explanation. The list must have at most 20 objects. If a valid scientific name or quote cannot satisfy these invariants, omit the concept rather than pad or invent it. Each rationale must meet the schema minimum length. Names that look similar are not synonyms unless the text supports identity. Use relation types "
             + ",".join(RELATIONS)
             + ". No outside sources. Mark uncertain rather than guessing missing formulas or image content.",
         ),
