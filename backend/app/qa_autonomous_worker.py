@@ -124,9 +124,36 @@ def status():
         failures = conn.execute("SELECT id,kind,state,error_code,result->'diagnostic' AS diagnostic,result->'dispatch_failure' AS dispatch_failure,result->'execution_failure' AS execution_failure "
                                 "FROM ai_jobs WHERE error_code IS NOT NULL ORDER BY id DESC LIMIT 8").fetchall()
         calls = conn.execute("SELECT outcome,count(*) AS n FROM ai_call_events GROUP BY outcome").fetchall()
+        # All of the following are QA-only counters: no source excerpts,
+        # answers, credentials, file paths, or private content leave the DB.
+        source_risks = conn.execute(
+            "SELECT review_state,count(*) AS n FROM qa_source_risk_progress "
+            "GROUP BY review_state ORDER BY review_state"
+        ).fetchall()
+        chapters = conn.execute(
+            "SELECT review_state,count(*) AS n FROM qa_chapter_mapping_progress "
+            "GROUP BY review_state ORDER BY review_state"
+        ).fetchall()
+        graph = conn.execute(
+            "SELECT scientific_review_state,count(*) AS n "
+            "FROM qa_textbook_evidence_nodes GROUP BY scientific_review_state "
+            "ORDER BY scientific_review_state"
+        ).fetchall()
+        subjects = conn.execute(
+            "SELECT content->>'subject' AS subject,"
+            "content->>'question_type' AS question_type,"
+            "status,count(*) AS n FROM reviewed_questions "
+            "GROUP BY 1,2,3 ORDER BY 1,2,3"
+        ).fetchall()
+        papers = conn.execute("SELECT count(*) AS n FROM papers_v2").fetchone()["n"]
     disk=shutil.disk_usage("/private-evidence" if Path("/private-evidence").is_dir() else "/tmp")
-    return dict(jobs=jobs,knowledge=knowledge,bank=bank,failures=failures,calls=calls,disk_free_bytes=disk.free,
-                complete_scientific_acceptance_claimed=False)
+    return dict(
+        jobs=jobs,knowledge=knowledge,bank=bank,failures=failures,calls=calls,
+        qa_source_risk_states=source_risks,qa_chapter_mapping_states=chapters,
+        qa_graph_science_states=graph,qa_question_buckets=subjects,
+        qa_papers_v2=papers,disk_free_bytes=disk.free,
+        complete_scientific_acceptance_claimed=False
+    )
 
 
 def serve_health():
