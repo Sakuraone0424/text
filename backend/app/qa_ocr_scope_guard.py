@@ -1,9 +1,11 @@
 """Fail-closed source policy for the isolated, no-model QA workflow.
 
 Only the owner's four corrected OCR textbook/note files (.txt) and two
-genuine-exam transcriptions (.docx) may supply new content. No PDF fetch,
-original-image lookup, external search, replacement book, or model provider
-is required or permitted by this offline workflow.
+genuine-exam transcriptions (.docx) may enter the canonical training source
+corpus. Reviewing a matching original PDF/image READ ONLY for OCR verification
+does NOT introduce a seventh source and is allowed. Supplemental originals
+must not silently become answer evidence or replace a locked revision.
+Only daily question-generation may separately authorize the DeepSeek API.
 """
 from collections import Counter
 
@@ -39,6 +41,8 @@ def inspect():
         "ocr_textbooks_and_notes": 4,
         "genuine_exam_transcriptions": 2,
         "additional_pdf_sources_allowed": False,
+        "original_pdf_visual_review_allowed": True,
+        "original_pdf_never_training_source_without_explicit_reimport": True,
         "external_model_calls_allowed": False,
         "source_manifest_valid": True,
     }
