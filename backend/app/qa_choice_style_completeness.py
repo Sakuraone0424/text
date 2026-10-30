@@ -49,7 +49,7 @@ def inventory(rows, load_continuation):
             # Retain these in the subject-level blocked count for reconciliation.
             missing_year[subject] += 1
         risks = set(row["concerns"] or []) | set(row["quality_flags"] or [])
-        if not row["year"] or risks & (STYLE_SOURCE_BLOCKERS | BOUNDARY_ISSUES):
+        if slot is None or risks & (STYLE_SOURCE_BLOCKERS | BOUNDARY_ISSUES):
             results[subject]["blocked_before_option_check"] += 1
             if slot is not None:
                 slot["blocked_before_option_check"] += 1
