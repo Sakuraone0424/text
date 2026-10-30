@@ -19,6 +19,7 @@ from app.qa_exam_year_inventory import summarize as summarize_exam_years
 from app.qa_stage1_acceptance import inspect as stage1_provenance
 from app.qa_graph_provenance_gate import inspect as graph_provenance
 from app.qa_graph_worklist_seed import ensure as seed_science_pending
+from app.qa_science_substantive_firstpass import seed as seed_substantive_science_firstpass
 from app.qa_chapter_neighbor_proposals import seed as seed_chapter_neighbors
 from app.qa_chapter_ocr_navigation_72 import seed as seed_chapter_ocr_navigation
 from app.qa_editorial_first_draft import seed as seed_editorial_first_draft
@@ -73,6 +74,7 @@ def cycle():
         linked = step("exam_textbook_lexical", seed_topic_links, conn)
         formula = step("formula_triage", seed_formula_triage, conn)
         science_jobs = step("science_pending", seed_science_pending, conn)
+        substantive_review = step("substantive_science_firstpass", seed_substantive_science_firstpass, conn)
         chapter_hints = step("chapter_neighbors", seed_chapter_neighbors, conn)
         chapter_ocr_navigation = step("chapter_ocr_navigation", seed_chapter_ocr_navigation, conn)
         first_draft = step("first_editorial_draft", seed_editorial_first_draft, conn)
@@ -97,6 +99,7 @@ def cycle():
             "exam_textbook_lexical_review": linked,
             "formula_visual_review": formula,
             "pending_science_review_worklist": science_jobs,
+            "source_locked_science_content_firstpass": substantive_review,
             "chapter_navigation_review": chapter_hints,
             "chapter_ocr_navigation": chapter_ocr_navigation,
             "first_source_grounded_editorial_draft": first_draft,
