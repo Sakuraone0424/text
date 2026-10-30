@@ -76,6 +76,22 @@ def inventory(rows, load_continuation):
             for (subject, year), counts in sorted(by_year.items())
         ],
         "by_source_year_is_52_real_source_slots": len(by_year) == 52,
+        "latest_complete_choice_year": {
+            subject: max(
+                (year for (subj, year), counts in by_year.items()
+                 if subj == subject and counts["complete_A_to_D_choice_examples"] > 0),
+                default=None,
+            )
+            for subject in SUBJECTS
+        },
+        "complete_choice_2017_to_2026": {
+            subject: sum(
+                counts["complete_A_to_D_choice_examples"]
+                for (subj, year), counts in by_year.items()
+                if subj == subject and 2017 <= year <= 2026
+            )
+            for subject in SUBJECTS
+        },
         "both_subjects_have_complete_choice_style_examples": all(
             item["complete_A_to_D_choice_examples"] > 0
             for item in results.values()
