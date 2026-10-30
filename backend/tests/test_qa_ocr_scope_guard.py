@@ -12,6 +12,8 @@ def test_exact_six_locked_user_sources_are_allowed():
     assert result["ocr_textbooks_and_notes"] == 4
     assert result["genuine_exam_transcriptions"] == 2
     assert result["additional_pdf_sources_allowed"] is False
+    assert result["original_pdf_visual_review_allowed"] is True
+    assert result["original_pdf_never_training_source_without_explicit_reimport"] is True
     assert result["external_model_calls_allowed"] is False
 
 
