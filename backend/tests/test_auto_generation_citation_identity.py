@@ -5,7 +5,6 @@ Synthetic fixtures only; never certify real textbook text or exam answers.
 from copy import deepcopy
 
 from app.auto_generation import repair_source_identity_from_locked_units
-from app.auto_quality import evidence as _independent_science_gate
 
 
 def _unit(**changes):
