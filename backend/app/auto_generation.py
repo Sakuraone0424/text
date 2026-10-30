@@ -152,6 +152,25 @@ def select_exam_style(conn, subject, kind, concept=None):
     return None
 
 
+def verified_literal_anchor(concept, unit):
+    """Extract only a dual-checked exact literal quote from the same locked unit."""
+    relation = concept.get("relation")
+    if not isinstance(relation, dict):
+        return None
+    quote = relation.get("review_excerpt")
+    if (
+        not isinstance(quote, str)
+        or not 5 <= len(quote) <= 2000
+        or quote not in unit["text"]
+        or relation.get("file_id") != unit["file_id"]
+        or relation.get("file_sha256") != unit["source_sha256"]
+        or relation.get("chapter") != unit["chapter"]
+        or relation.get("subject") != unit["subject"]
+    ):
+        return None
+    return quote
+
+
 def generation_payload_within_limit(payload):
     """Skip overlarge genuine-source packets rather than starve every plan tick."""
     return len(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()) <= 24000
@@ -273,6 +292,9 @@ def plan(conn, uid):
                 # possibly billable model task is enqueued. A genuine-exam
                 # DOCX is style only, never scientific answer evidence.
                 continue
+            anchor_quote = verified_literal_anchor(concept, u)
+            if anchor_quote is None:
+                continue
             key = f"supplement:{subject}:{kind}:{concept['unit_id']}:{concept['unit_sha256']}"
             if conn.execute(
                 "SELECT 1 FROM ai_jobs WHERE job_key=%s", (key,)
@@ -311,12 +333,19 @@ def plan(conn, uid):
                 question_type=kind,
                 max_points=POINTS[kind],
                 evidence=bounded_textbook_evidence(conn, u, kind),
+                anchor_exact_excerpt=anchor_quote,
                 style=style_units,
                 style_year=style["year"],
                 style_overlap=style["lexical_topic_overlap"],
                 source_bibliography=book,
                 schema=Question.model_json_schema(),
-                instructions=exam_instructions(kind, POINTS[kind]),
+                instructions=exam_instructions(kind, POINTS[kind])
+                + " For at least one citation, copy anchor_exact_excerpt EXACTLY "
+                "into its evidence.excerpt field with identical characters, "
+                "punctuation and spacing; do not paraphrase or retype it. "
+                "Other excerpt strings, if present, must be literal substrings "
+                "of their matching evidence unit. Never use this anchor as "
+                "proof for any answer or rubric claim it does not support.",
             )
             # A source/style packet can exceed the job admission limit.
             # Skip it and try another genuine evidence unit rather than
