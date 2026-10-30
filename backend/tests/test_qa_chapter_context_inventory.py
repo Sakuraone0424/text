@@ -14,12 +14,17 @@ def example_rows():
     ]
 
 
-def test_all_72_ocr_chapter_gaps_are_frontmatter_only_pending(monkeypatch):
+def test_unmapped_ocr_has_substantive_unnumbered_science_not_only_frontmatter(monkeypatch):
     monkeypatch.setattr(chapter, "pinned_source_bytes", lambda fid, digest: True)
     value = chapter.summarize(example_rows())
     assert value["unmapped_chapter_pages_total"] == 72
     assert value["unmapped_before_first_recognized_body_chapter"] == 72
     assert value["unmapped_at_or_after_body"] == 0
+    assert value["unmapped_unnumbered_science_or_intro_pages"] == 17
+    assert value["unmapped_part_transition_pages_with_science_context"] == 3
+    assert value["unmapped_probable_frontmatter_or_contents_pages"] == 52
+    assert value["all_72_frontmatter_only_claim_rejected"] is True
+    assert value["all_current_72_are_before_first_body"] is False
     assert value["actual_missing_content_ruled_out"] is False
     assert value["original_page_science_approvals"] == 0
 
