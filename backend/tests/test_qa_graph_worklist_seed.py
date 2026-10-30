@@ -2,6 +2,11 @@
 import pytest
 from app import qa_graph_worklist_seed as seed
 
+CELL_FILE_ID = next(
+    file_id for file_id, item in seed.FILES.items()
+    if item["key"] == "cell_biology"
+)
+
 
 def work(key, kind="unit_review", *, role="textbook", priority=50):
     return dict(
@@ -9,7 +14,7 @@ def work(key, kind="unit_review", *, role="textbook", priority=50):
         subject="cell_biology",source_unit_ids=[11],
         evidence={
             "source_role":role,
-            "reference":{"file_id":"cell_biology","source_sha256":"a"*64}
+            "reference":{"file_id":CELL_FILE_ID,"source_sha256":"a"*64}
         },
         work_key=key,priority=priority,
     )
