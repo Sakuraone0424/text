@@ -14,6 +14,7 @@ from app.qa_graph_provenance_gate import inspect as graph_inspect
 from app.exam_style_readiness import report as safe_style_inventory
 from app.qa_choice_style_completeness import inspect as choice_style_inventory
 from app.qa_review_worklist import inspect as science_review_worklist
+from app.qa_real_60q_readback import inspect as real_training_readback
 from app.qa_exam_year_inventory import summarize as exam_year_summary
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
@@ -108,6 +109,7 @@ def main():
         style_inventory=safe_style_inventory(conn)
         choice_option_inventory=choice_style_inventory(conn)
         science_review_priorities=science_review_worklist(conn)
+        real_training_proof=real_training_readback(conn)
         g=conn.execute(
             "SELECT count(*) AS nodes,"
             "count(*) FILTER(WHERE scientific_review_state <> 'pending') AS approved "
@@ -159,6 +161,17 @@ def main():
                     "chapters":chapters,"facets":facets},
             risk,chapter,years,q,papers,accepted_buckets=accepted_buckets
         )
+    data["stage_6"].update({
+        "v2_real_papers_inspected": real_training_proof["v2_papers_inspected"],
+        "real_qualified_60_question_end_to_end_completed": (
+            real_training_proof["real_qualified_60_question_end_to_end_completed"]
+        ),
+        "verified_full_60q_real_attempts": (
+            real_training_proof["real_60q_end_to_end_verification_count"]
+        ),
+        "real_paper_failures_by_reason": real_training_proof["rejected_real_papers_by_reason"],
+        "artificial_test_papers_cannot_count": True,
+    })
     data["stage_3"].update({
         "past_exam_provenance": "user_provided_genuine_past_exams",
         "eight_source_style_bucket_candidates": {
