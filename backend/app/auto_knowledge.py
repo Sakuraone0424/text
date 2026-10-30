@@ -80,7 +80,7 @@ def schedule(conn, uid, unit_id):
             phase="extract",
             evidence=u,
             schema=Extraction.model_json_schema(),
-            instructions="Extract only explicitly evidenced concepts and relationships. Names that look similar are not synonyms unless the text supports identity. Use relation types "
+            instructions="Extract only explicitly evidenced concepts and relationships. Return ONLY the Extraction schema object with concepts and uncertain, never echo the input packet. Copy each excerpt character-for-character from evidence.text, including punctuation, letter case and whitespace; do not normalize or paraphrase a quote. Each rationale must meet the schema minimum length. Names that look similar are not synonyms unless the text supports identity. Use relation types "
             + ",".join(RELATIONS)
             + ". No outside sources. Mark uncertain rather than guessing missing formulas or image content.",
         ),
@@ -186,7 +186,7 @@ def plan_small_batch(conn, uid):
     rows = conn.execute(
         "SELECT u.id FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE "
         + current_source_sql()
-        + " AND d.metadata->>'source_kind'='textbook' AND u.chapter NOT IN ('unclassified','','contents') AND u.quality_flags='[]'::jsonb AND NOT EXISTS(SELECT 1 FROM auto_knowledge_events k WHERE k.unit_id=u.id) AND NOT EXISTS(SELECT 1 FROM ai_jobs j WHERE j.payload->>'knowledge_unit_id'=u.id::text) ORDER BY (SELECT count(*) FROM ai_jobs j WHERE j.payload->'evidence'->>'chapter'=u.chapter),u.ordinal LIMIT 2"
+        + " AND d.metadata->>'source_kind'='textbook' AND u.chapter NOT IN ('unclassified','','contents') AND u.quality_flags='[]'::jsonb AND length(u.text)>=100 AND NOT EXISTS(SELECT 1 FROM auto_knowledge_events k WHERE k.unit_id=u.id) AND NOT EXISTS(SELECT 1 FROM ai_jobs j WHERE j.payload->>'knowledge_unit_id'=u.id::text) ORDER BY (SELECT count(*) FROM ai_jobs j WHERE j.payload->'evidence'->>'chapter'=u.chapter),u.ordinal LIMIT 2"
     ).fetchall()
     for r in rows:
         schedule(conn, uid, r["id"])

@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import signal
+import shutil
 from app.model_router import authorized
 
 
@@ -27,6 +28,20 @@ def prepare_private_home(root, job_id):
     home.mkdir(mode=0o700, exist_ok=True)
     home.chmod(0o700)
     return home
+
+
+def prune_runtime_cache(home):
+    """Remove reproducible SDK workspace/cache; preserve raw provider receipts."""
+    home = Path(home)
+    if home.is_symlink() or not home.is_dir():
+        return
+    for child in home.iterdir():
+        if child.name in ("provider-receipt", "task-audit.json"):
+            continue
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
 
 
 def execute(job):
@@ -61,26 +76,32 @@ def execute(job):
         PYTHONPATH=str(Path(__file__).resolve().parents[1]),
         OTEL_SDK_DISABLED="true",
     )
-    with subprocess.Popen(
-        [sys.executable, "-m", "app.harness_runner"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-        cwd=home,
-        start_new_session=True,
-    ) as process:
+    try:
+        with subprocess.Popen(
+            [sys.executable, "-m", "app.harness_runner"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            cwd=home,
+            start_new_session=True,
+        ) as process:
+            try:
+                out, _ = process.communicate(
+                    json.dumps(job, default=str),
+                    timeout=420 if ("review_campaign" in job["settings_snapshot"] or "qa_automation" in job["settings_snapshot"]) else 150,
+                )
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+                raise
+            returncode = process.returncode
+    finally:
         try:
-            out, _ = process.communicate(
-                json.dumps(job, default=str),
-                timeout=420 if ("review_campaign" in job["settings_snapshot"] or "qa_automation" in job["settings_snapshot"]) else 150,
-            )
-        except subprocess.TimeoutExpired:
-            os.killpg(process.pid, signal.SIGKILL)
-            process.communicate()
-            raise
-        returncode = process.returncode
+            prune_runtime_cache(home)
+        except OSError:
+            pass  # Never lose a completed provider result to cache housekeeping.
     if returncode:
         raise RuntimeError("harness_task_failed")
     if len(out.encode()) > (1048576 if ("review_campaign" in job["settings_snapshot"] or "qa_automation" in job["settings_snapshot"]) else 131072):

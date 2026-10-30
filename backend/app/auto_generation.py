@@ -301,7 +301,11 @@ def accept(conn, job):
             ]) != ids
         ):
             raise ValueError("historical_single_choice_options_incomplete_or_spliced")
-    q = Question.model_validate(job["result"]["response"]["question"])
+    response = job["result"]["response"]
+    # The submitted schema is Question itself, so a direct object is canonical.
+    # Retain compatibility with older explicitly wrapped generation responses.
+    raw_question = response.get("question", response) if isinstance(response, dict) else response
+    q = Question.model_validate(raw_question)
     if (q.subject, q.question_type, q.max_points) != (
         p["subject"],
         p["question_type"],

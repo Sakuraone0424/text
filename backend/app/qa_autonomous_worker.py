@@ -4,6 +4,8 @@ import os
 import time
 import threading
 import traceback
+import signal
+import shutil
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
@@ -53,6 +55,13 @@ def bootstrap():
                 "AND settings_snapshot->'qa_automation'->>'scope_id'=%s LIMIT 1",(SCOPE,)).fetchone()
             if not outstanding:enqueue_probe(conn,uid,'deepseek-flash','high')
         bind_pending(conn,uid)
+        # A completed attempt's SDK workspace is reproducible. Keep its raw
+        # provider receipt; never prune a currently leased/running job.
+        from app.harness_gateway import prune_runtime_cache
+        private_root=Path(os.environ.get('AI_PRIVATE_HOME','/tmp/ustc-harness-private'))
+        for row in conn.execute("SELECT id,attempts FROM ai_jobs WHERE state<>'running'").fetchall():
+            for attempt in range(1,row['attempts']+1):
+                prune_runtime_cache(private_root/f"job-{row['id']}-attempt-{attempt}")
     return uid
 
 
@@ -88,10 +97,11 @@ def status():
                                  'GROUP BY status ORDER BY status').fetchall()
         bank = conn.execute('SELECT status,count(*) AS n FROM reviewed_questions '
                             'GROUP BY status ORDER BY status').fetchall()
-        failures = conn.execute("SELECT id,kind,state,error_code,result->'diagnostic' AS diagnostic "
+        failures = conn.execute("SELECT id,kind,state,error_code,result->'diagnostic' AS diagnostic,result->'dispatch_failure' AS dispatch_failure,result->'execution_failure' AS execution_failure "
                                 "FROM ai_jobs WHERE error_code IS NOT NULL ORDER BY id DESC LIMIT 8").fetchall()
         calls = conn.execute("SELECT outcome,count(*) AS n FROM ai_call_events GROUP BY outcome").fetchall()
-    return dict(jobs=jobs,knowledge=knowledge,bank=bank,failures=failures,calls=calls,
+    disk=shutil.disk_usage("/private-evidence" if Path("/private-evidence").is_dir() else "/tmp")
+    return dict(jobs=jobs,knowledge=knowledge,bank=bank,failures=failures,calls=calls,disk_free_bytes=disk.free,
                 complete_scientific_acceptance_claimed=False)
 
 
@@ -114,11 +124,14 @@ def serve_health():
 
 def main():
     serve_health()
+    stop=threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
     uid = None
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = []
         next_plan = next_status = next_bootstrap = next_refresh = 0
-        while True:
+        while not stop.is_set():
             try:
                 now = time.monotonic()
                 if uid is None:

@@ -233,7 +233,9 @@ def run_once(get_db, executor, scope_id=None, scope_kind="limited_trial"):
         result = executor(job)
     except Exception as exc:
         with get_db() as c:
-            finish(c, job, error=exc)
+            metadata = ({"execution_failure": {"type": type(exc).__name__, "errno": exc.errno}}
+                        if isinstance(exc, OSError) else None)
+            finish(c, job, result=metadata, error=exc)
     else:
         with get_db() as c:
             finish(c, job, result=result)

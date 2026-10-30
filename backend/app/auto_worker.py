@@ -59,7 +59,17 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                     auto_insights.accept(conn, job)
                 else:
                     raise ValueError("unsupported_dispatch_kind")
-        except (ValueError, KeyError, LookupError):
+        except (ValueError, KeyError, LookupError) as exc:
+            if "qa_automation" in job["settings_snapshot"]:
+                from pydantic import ValidationError
+                import re
+                detail = ({"code": "output_schema_violation", "errors": [
+                    {"type": e["type"], "field": str(e["loc"][0]) if e["loc"] else "root"}
+                    for e in exc.errors(include_input=False, include_context=False)[:10]
+                ]} if isinstance(exc, ValidationError) else
+                    {"code": str(exc) if re.fullmatch(r"[a-z_]{1,100}", str(exc)) else "invalid_result"})
+                conn.execute("UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),"
+                             "'{dispatch_failure}',%s) WHERE id=%s", (ai_jobs.Jsonb(detail),job["id"]))
             conn.execute(
                 "UPDATE ai_jobs SET state='blocked',error_code='invalid_or_uncertain_result' WHERE id=%s",
                 (job["id"],),

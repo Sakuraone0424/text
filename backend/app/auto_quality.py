@@ -295,6 +295,8 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
 
 
 def job_contract_version(job):
+    if "qa_automation" in job["settings_snapshot"]:
+        return 7 if "Output contract:" in job["payload"].get("instructions", "") else 1
     policy = job["settings_snapshot"].get("review_campaign", {}).get("policy", {})
     return policy.get("contract_version", 1)
 
@@ -309,7 +311,9 @@ def schedule_checks(conn, uid, qid):
     for phase, kind in [("science", "science_review"), ("answer", "answer_review")]:
         # Freshly retrieved data each round. Science gets no expected answer/rubric/AI conclusions.
         q, refs, style = evidence(conn, qid)
-        payload = review_payload(phase, qid, checksum, q, refs, style)
+        import os
+        contract = 7 if os.environ.get("QA_AUTOMATION_ENABLED") == "1" else 1
+        payload = review_payload(phase, qid, checksum, q, refs, style, contract)
         jobs.append(
             enqueue(conn, uid, f"quality:{qid}:{checksum}:{phase}", kind, payload)
         )

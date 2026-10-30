@@ -53,3 +53,14 @@ def test_missing_billing_calendar_keeps_unknown_period_instead_of_losing_receipt
     calendar=cny_billing.calendar_2026()
     assert calendar == {}
     assert cny_billing.period(datetime.now(timezone.utc),calendar) == 'unknown'
+
+
+def test_continuous_reviews_use_explicit_latest_contract_without_rewriting_legacy():
+    from app.auto_quality import review_payload,job_contract_version
+    from test_prelive_quality import fixture
+    q,u,_=fixture()
+    old=review_payload('science',1,'c'*64,q,[u],[])
+    new=review_payload('science',1,'c'*64,q,[u],[],7)
+    assert 'answer' not in new['question'] and 'rubric' not in new['question']
+    assert job_contract_version({'settings_snapshot':{'qa_automation':{}},'payload':new})==7
+    assert job_contract_version({'settings_snapshot':{'qa_automation':{}},'payload':old})==1
