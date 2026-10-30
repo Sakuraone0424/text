@@ -67,6 +67,12 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "unmapped_pages_with_navigation_records": 72,
         "chapter_repairs_applied": 0,
     })
+    monkeypatch.setattr(worker, "seed_editorial_first_draft", lambda conn: {
+        "status": "pending_independent_science_and_answer_review",
+        "draft_question_id": 91,
+        "published": False,
+        "independent_science_approved": False,
+    })
     monkeypatch.setattr(worker, "stage1_provenance", lambda conn, state: {
         "issue_provenance_and_states_accepted": True,
     })
@@ -92,6 +98,7 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["formula_visual_review"]["pending_visual_candidates"] == 4
     assert result["pending_science_review_worklist"]["new_pending_tasks"] == 12
     assert result["chapter_navigation_review"]["unmapped_pages_with_navigation_records"] == 72
+    assert result["first_source_grounded_editorial_draft"]["published"] is False
     assert result["exam_years_with_transcription"] == 52
     assert result["source_risk_items_tracked"] == 2
     assert result["unmarked_ocr_pages"] == 0
