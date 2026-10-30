@@ -78,6 +78,10 @@ def test_private_editorial_draft_persists_without_model_or_publication(monkeypat
     assert result["model_calls"]==0
     assert stored[0]["question"]["answer"]=="GDP"
     assert stored[0]["ai_analysis"]["independent_human_review"] is False
+    assert stored[0]["style_sources"][0]["relationship"] == (
+        "Located past-exam type of same subject; not official answer or recent style proof"
+    )
+    assert result["private_drafts_pending_exam_style_uncertainty"] == 0
 
 
 def test_duplicate_source_units_fail_closed_without_write(monkeypatch):
