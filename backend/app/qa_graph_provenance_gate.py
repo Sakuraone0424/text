@@ -18,7 +18,8 @@ NODE_KEYS = (
 )
 
 
-def reconcile(expected_nodes, expected_facets, actual_nodes, actual_facets):
+def reconcile(expected_nodes, expected_facets, actual_nodes, actual_facets, *,
+              required_nodes=9655, required_facets=12896):
     expected = {row[0]: tuple(row) for row in expected_nodes}
     if len(expected) != len(expected_nodes):
         raise ValueError("qa_duplicate_expected_textbook_units")
@@ -49,7 +50,7 @@ def reconcile(expected_nodes, expected_facets, actual_nodes, actual_facets):
         actual_pairs.add(pair)
     if expected_pairs != actual_pairs:
         raise ValueError("qa_graph_facet_source_coverage_mismatch")
-    if len(expected) != 9655 or len(expected_pairs) != 12896:
+    if len(expected) != required_nodes or len(expected_pairs) != required_facets:
         raise ValueError("qa_original_textbook_graph_inventory_changed")
     return {
         "status": "textbook_graph_all_units_page_chapter_hash_facet_provenance_verified",
