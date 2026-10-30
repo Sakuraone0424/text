@@ -20,6 +20,7 @@ from app.qa_stage1_acceptance import inspect as stage1_provenance
 from app.qa_graph_provenance_gate import inspect as graph_provenance
 from app.qa_graph_worklist_seed import ensure as seed_science_pending
 from app.qa_chapter_neighbor_proposals import seed as seed_chapter_neighbors
+from app.qa_chapter_ocr_navigation_72 import seed as seed_chapter_ocr_navigation
 from app.qa_editorial_first_draft import seed as seed_editorial_first_draft
 from app.qa_editorial_batch import seed as seed_editorial_batch
 from app.qa_ocr_scope_guard import inspect as inspect_ocr_scope
@@ -73,6 +74,7 @@ def cycle():
         formula = step("formula_triage", seed_formula_triage, conn)
         science_jobs = step("science_pending", seed_science_pending, conn)
         chapter_hints = step("chapter_neighbors", seed_chapter_neighbors, conn)
+        chapter_ocr_navigation = step("chapter_ocr_navigation", seed_chapter_ocr_navigation, conn)
         first_draft = step("first_editorial_draft", seed_editorial_first_draft, conn)
         curated_drafts = step("twelve_editorial_drafts", seed_editorial_batch, conn)
         review = step("priority_review", review_priorities, conn)
@@ -96,6 +98,7 @@ def cycle():
             "formula_visual_review": formula,
             "pending_science_review_worklist": science_jobs,
             "chapter_navigation_review": chapter_hints,
+            "chapter_ocr_navigation": chapter_ocr_navigation,
             "first_source_grounded_editorial_draft": first_draft,
             "twelve_source_reviewed_private_drafts": curated_drafts,
             "source_ledger_provenance": source_gate["issue_provenance_and_states_accepted"],
