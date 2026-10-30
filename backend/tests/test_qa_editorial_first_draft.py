@@ -76,13 +76,12 @@ def test_bad_exam_boundary_refuses_stylistic_claim(monkeypatch):
 def test_pending_draft_persisted_and_reused_without_publication(monkeypatch):
     calls = []
     fake = FixtureConnection()
-    monkeypatch.setattr(editorial, "prepare", lambda conn: (
-        {"candidate_key": "case", "question": {"answer": "GDP"}}, None
-    ))
     def fake_persist(conn, packet):
         calls.append(packet["candidate_key"])
         return 18
-    result = editorial.seed(fake, persister=fake_persist)
+    result = editorial.seed(fake, packet_builder=lambda conn: (
+        {"candidate_key": "case", "question": {"answer": "GDP"}}, None
+    ), persister=fake_persist)
     assert calls == ["case"]
     assert result["draft_question_id"] == 18
     assert result["published"] is False
@@ -95,6 +94,6 @@ def test_unexpected_published_record_rejected(monkeypatch):
             if "SELECT status FROM reviewed_questions" in statement:
                 return type("R", (), {"fetchone":lambda s:{"status":"published"}})()
             return super().execute(statement,params)
-    monkeypatch.setattr(editorial,"prepare",lambda conn:({"question":{}},None))
     with pytest.raises(ValueError,match="unexpectedly_published"):
-        editorial.seed(Published(),persister=lambda conn,p:19)
+        editorial.seed(Published(),packet_builder=lambda conn:({"question":{}},None),
+                       persister=lambda conn,p:19)
