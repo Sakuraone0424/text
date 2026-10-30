@@ -12,6 +12,8 @@ COPY backend/requirements.txt backend/requirements-harness.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -r requirements-harness.txt
 
 COPY backend/app ./app
+# First-pass editorial fact ledger; only this inspected JSON enters the image.
+COPY backend/data/qa_editorial_12_source_answers_20261030.json ./data/qa_editorial_12_source_answers_20261030.json
 COPY backend/config/china-calendar-2026.json ./config/china-calendar-2026.json
 COPY backend/harness ./harness
 COPY backend/sql ./sql
