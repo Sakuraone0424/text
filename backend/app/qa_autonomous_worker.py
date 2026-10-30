@@ -83,7 +83,10 @@ def status():
                                  'GROUP BY status ORDER BY status').fetchall()
         bank = conn.execute('SELECT status,count(*) AS n FROM reviewed_questions '
                             'GROUP BY status ORDER BY status').fetchall()
-    return dict(jobs=jobs,knowledge=knowledge,bank=bank,
+        failures = conn.execute("SELECT id,kind,state,error_code,result->'diagnostic' AS diagnostic "
+                                "FROM ai_jobs WHERE error_code IS NOT NULL ORDER BY id DESC LIMIT 8").fetchall()
+        calls = conn.execute("SELECT outcome,count(*) AS n FROM ai_call_events GROUP BY outcome").fetchall()
+    return dict(jobs=jobs,knowledge=knowledge,bank=bank,failures=failures,calls=calls,
                 complete_scientific_acceptance_claimed=False)
 
 

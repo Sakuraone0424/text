@@ -186,7 +186,7 @@ def plan_small_batch(conn, uid):
     rows = conn.execute(
         "SELECT u.id FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE "
         + current_source_sql()
-        + " AND d.metadata->>'source_kind'='textbook' AND NOT EXISTS(SELECT 1 FROM auto_knowledge_events k WHERE k.unit_id=u.id) AND NOT EXISTS(SELECT 1 FROM ai_jobs j WHERE j.payload->>'knowledge_unit_id'=u.id::text) ORDER BY (SELECT count(*) FROM ai_jobs j WHERE j.payload->'evidence'->>'chapter'=u.chapter),u.ordinal LIMIT 2"
+        + " AND d.metadata->>'source_kind'='textbook' AND u.chapter NOT IN ('unclassified','','contents') AND u.quality_flags='[]'::jsonb AND NOT EXISTS(SELECT 1 FROM auto_knowledge_events k WHERE k.unit_id=u.id) AND NOT EXISTS(SELECT 1 FROM ai_jobs j WHERE j.payload->>'knowledge_unit_id'=u.id::text) ORDER BY (SELECT count(*) FROM ai_jobs j WHERE j.payload->'evidence'->>'chapter'=u.chapter),u.ordinal LIMIT 2"
     ).fetchall()
     for r in rows:
         schedule(conn, uid, r["id"])
