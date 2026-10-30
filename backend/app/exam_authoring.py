@@ -63,6 +63,37 @@ _COMMON = (
     "Independent science and answer reviews will still be required."
 )
 
+
+# These are Pydantic model invariants that a JSON schema alone cannot express.
+# The generator must satisfy them, not the dispatcher silently repair them.
+_SCHEMA_CONTRACT = (
+    " STRICT Question validator requirements: return a single unwrapped JSON "
+    "object with the exact Question schema keys and no additional properties. "
+    "Copy subject, question_type and max_points EXACTLY from the input payload. "
+    "The rubric must be a nonempty list of criterion objects with integer points "
+    "whose sum is exactly max_points, not an example or an estimate. All criterion "
+    "knowledge_tags must be subsets of the top-level knowledge_tags; use [] for "
+    "both when reliable tagging is unavailable. Each evidence object MUST have "
+    "textbook, authors, edition, chapter, locator, excerpt and exact provided "
+    "file_id, source_sha256, ocr_page, paragraph_id, source_unit_id; excerpt must "
+    "be a verbatim continuous substring of that same supplied evidence.text. "
+    "Use the supplied source_bibliography for textbook, authors and edition; "
+    "do not guess ISBN or printed pages. Set isbn to null when not supplied. "
+    "For single_choice use options with EXACTLY A,B,C,D unique nonempty values, "
+    "answer exactly one of A/B/C/D, accepted_answers=[], blanks=[], and rubric "
+    "points summing to 2. For fill_blank use options={}, stem containing exactly "
+    "one literal ____ placeholder, canonical answer included verbatim in a "
+    "nonempty accepted_answers list, blanks=[], and rubric points summing to 2. "
+    "For term use options={}, accepted_answers=[], blanks=[], a complete answer "
+    "of meaningful length, and at least two independently gradable rubric items "
+    "with points summing to 4. For short_answer use the same empty options, "
+    "accepted_answers and blanks, and at least two independent rubric items "
+    "with points summing to 9. Every points value must be a JSON integer, not "
+    "a string or decimal. Do not write comments, markdown, or wrapper keys. "
+    "If evidence does not support the question, mark uncertainty by declining "
+    "rather than fabricate missing claims; a declined response is rejected. "
+)
+
 _UNANSWERABLE = re.compile(
     r"待补充|答案待定|暂无答案|无法核实|TODO|PLACEHOLDER|示例题目|测试题目",
     re.IGNORECASE,
@@ -79,7 +110,7 @@ def instructions(kind, points):
         raise ValueError("unsupported_generation_type")
     if type(points) is not int or points <= 0:
         raise ValueError("invalid_generation_points")
-    return _COMMON + " " + TYPE_GUIDANCE[kind] + (
+    return _COMMON + " " + _SCHEMA_CONTRACT + " " + TYPE_GUIDANCE[kind] + (
         f" This question has EXACTLY {points} points; rubric criterion points "
         "must add up to that amount."
     )
