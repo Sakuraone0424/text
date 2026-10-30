@@ -173,10 +173,16 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
             original_style["source_kind"] != "exam_transcription"
             or original_style["subject"] != subject
             or not pinned_source_bytes(original_style["file_id"], original_style["source_sha256"])
-            or original_style["quality_flags"]
+            # A historical QUESTION STYLE UNIT may contain scientific
+            # notation. Such a unit can inform a PRIVATE editorial draft but
+            # cannot be described as source-clean or scientifically reviewed.
+            # Never allow corrupted, image-untranscribed, uncertain or
+            # missing-text style units to enter even a private packet.
+            or private_draft_source_flags(original_style["quality_flags"]) is None
         ):
             results.append({"id":item["id"],"status":"historical_exam_style_not_source_locked"})
             continue
+        pending_style_flags = private_draft_source_flags(original_style["quality_flags"])
         bibliography = from_database(conn, unit)
         question = make_question(item, unit, bibliography, style_id)
         # Changed scientific wording must not silently reuse an older first-pass draft.
@@ -192,7 +198,11 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
             "question":question,
             "style_sources":[{
                 "unit_id":style_id,"year":style["year"],
-                "relationship":"Located past-exam type of same subject; not official answer or recent style proof",
+                "relationship":(
+                    "Located past-exam type of same subject; not official answer "
+                    "or recent style proof; original transcription risk flags: "
+                    + ", ".join(pending_style_flags)
+                ),
             }],
             "ai_analysis":{
                 "status":"Offline editorial / pending independent science and answer review",
@@ -204,7 +214,10 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
                 ] + ([
                     "Unresolved original OCR source flags: " + ", ".join(pending_source_flags)
                     + "; private drafting only, no text/science/visual verification or publication"
-                ] if pending_source_flags else []),
+                ] if pending_source_flags else []) + ([
+                    "Unresolved historical exam style OCR flags: " + ", ".join(pending_style_flags)
+                    + "; source-locking is NOT scientific or option-completeness approval"
+                ] if pending_style_flags else []),
                 "rubric_evidence":[{
                     "unit_ids":[unit["unit_id"]],
                     "explanation":(
@@ -222,11 +235,16 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
         results.append({
             "id":item["id"],"status":"draft_created_or_reused","qid":qid,
             "unresolved_source_flags":pending_source_flags,
+            "unresolved_exam_style_flags":pending_style_flags,
         })
     by_state=Counter(r["status"] for r in results)
     return {
         "reviewed_source_fact_count":len(facts),
         "private_drafts_created_or_reused":by_state["draft_created_or_reused"],
+        "private_drafts_pending_exam_style_uncertainty":sum(
+            r["status"] == "draft_created_or_reused" and bool(r["unresolved_exam_style_flags"])
+            for r in results
+        ),
         "private_drafts_pending_ocr_uncertainty":sum(
             r["status"] == "draft_created_or_reused" and bool(r["unresolved_source_flags"])
             for r in results
