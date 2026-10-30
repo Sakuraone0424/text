@@ -171,15 +171,15 @@
       "kind": "fill_blank",
       "question": "戊糖磷酸途径的重要功能包括产生____和核糖-5-磷酸。",
       "answer": "NADPH",
-      "quote": "戊糖磷酸途径使葡萄糖氧化产生NADPH和核糖-5-磷酸",
+      "quote": "主要产生戊糖磷酸（包括核酮糖-5-磷酸和核糖-5-磷酸）和 NADPH",
       "exam": {
         "year": 2017,
         "doc": "2004~2026年中国科学技术大学生物化学与分子生物学真题.docx",
         "matched_question_fragment": "葡萄糖-6-磷酸受哪些因素的调节进入糖酵解和戊糖磷酸途径？"
       },
-      "notes": "不能把核糖-5-磷酸说成是氧化阶段的直接唯一产物。",
+      "notes": "不能把核糖-5-磷酸说成是氧化阶段的直接唯一产物。；已由目录证据改为第17章正文页证据。",
       "source_key": "biol",
-      "ocr_page": 15,
+      "ocr_page": 166,
       "reference_excerpt_verified": true,
       "original_pdf_visual_check": false,
       "review_status": "assistant_source_and_answer_first_pass_checked_not_independent_or_official",
