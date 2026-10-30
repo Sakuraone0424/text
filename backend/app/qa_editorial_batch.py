@@ -145,7 +145,7 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
         bibliography = from_database(conn, unit)
         question = make_question(item, unit, bibliography, style_id)
         # Changed scientific wording must not silently reuse an older first-pass draft.
-        revision = "v2" if item["id"] in {"biou-activation-07", "biol-carnitine-10"} else "v1"
+        revision = "v2" if item["id"] in {"biou-activation-07", "biol-carnitine-10", "cell-arp23-02"} else "v1"
         candidate_key=f"qa-ocr-curated-{item['id']}-{unit['unit_id']}-{style_id}-{revision}"
         packet = {
             "candidate_key": candidate_key,
