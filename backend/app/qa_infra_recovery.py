@@ -89,6 +89,8 @@ def replay_enospc(conn, user_id, private_root, limit=2):
                 or not evidence_is_current(conn, job)):
             continue
         new_key = job["job_key"] + RECOVERY_SUFFIX
+        if conn.execute("SELECT 1 FROM ai_jobs WHERE job_key=%s", (new_key,)).fetchone():
+            continue
         # A deterministic new key permits one replay, and enqueue() checks
         # payload/kind/owner identity on conflicting retries.
         enqueue(conn, user_id, new_key, job["kind"], job["payload"])
