@@ -58,6 +58,11 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "pending_visual_candidates": 4,
         "actual_formula_correctness_certified": False,
     })
+    monkeypatch.setattr(worker, "seed_science_pending", lambda conn: {
+        "source_bound_science_review_tasks": 9655,
+        "new_pending_tasks": 12,
+        "scientifically_approved_nodes": 0,
+    })
     monkeypatch.setattr(worker, "stage1_provenance", lambda conn, state: {
         "issue_provenance_and_states_accepted": True,
     })
@@ -81,6 +86,7 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["pending_exam_work_added"] == 7
     assert result["exam_textbook_lexical_review"]["candidate_links"] == 9
     assert result["formula_visual_review"]["pending_visual_candidates"] == 4
+    assert result["pending_science_review_worklist"]["new_pending_tasks"] == 12
     assert result["exam_years_with_transcription"] == 52
     assert result["source_risk_items_tracked"] == 2
     assert result["unmarked_ocr_pages"] == 0
