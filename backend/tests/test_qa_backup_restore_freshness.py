@@ -42,3 +42,15 @@ def test_stale_or_unproved_receipt_cannot_approve_restore():
 def test_receipt_for_wrong_cluster_refused():
     with pytest.raises(PermissionError, match="different_cluster"):
         historical_restore_status(_receipt(), "a" * 64, "unknown-target")
+
+
+def test_wrong_restore_cluster_rejected_before_untrusted_or_missing_snapshot_index(tmp_path,monkeypatch):
+    import json
+    from app import qa_backup_worker as worker
+
+    monkeypatch.setattr(worker, "ROOT", tmp_path)
+    (tmp_path/"independent-restore-receipt.json").write_text(
+        json.dumps({"target_system_id":"old-cluster","backup_sha256":"a"*64})
+    )
+    with pytest.raises(PermissionError, match="different_cluster"):
+        worker.restore_once(tmp_path, {}, {}, "new-cluster")
