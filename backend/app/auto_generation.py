@@ -39,8 +39,8 @@ def complete_choice_style_unit_ids(rows):
 
     if not rows or len(rows) > 8:
         return None
-    option = re.compile(r"(?<![A-Za-z0-9])([ABCD])[.、．)）:：]\\s*")
-    new_numbered_question = re.compile(r"^\\s*\\d{1,3}[.、．)）]\\s*\\S")
+    option = re.compile(r"(?<![A-Za-z0-9])([ABCD])[.、．)）:：]\s*")
+    new_numbered_question = re.compile(r"^\s*\d{1,3}[.、．)）]\s*\S")
     next_letter = "ABCD"
     seen = 0
     unit_ids = []
@@ -54,9 +54,9 @@ def complete_choice_style_unit_ids(rows):
         # The first row, being the stem, may itself have a question number.
         if index and (
             new_numbered_question.match(text)
-            or re.match(r"^\\s*(?:参考答案|答案(?:及解析)?|解答|解析)\\s*[:：]?", text)
-            or re.match(r"^\\s*(?:19|20)\\d{2}\\s*年", text)
-            or re.match(r"^\\s*(?:单项选择题|单选题|填空题|名词解释|简答题|论述题)", text)
+            or re.match(r"^\s*(?:参考答案|答案(?:及解析)?|解答|解析)\s*[:：]?", text)
+            or re.match(r"^\s*(?:19|20)\d{2}\s*年", text)
+            or re.match(r"^\s*(?:单项选择题|单选题|填空题|名词解释|简答题|论述题)", text)
         ):
             return None
         markers = list(option.finditer(text))
