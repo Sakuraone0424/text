@@ -93,6 +93,9 @@ def test_complete_synthetic_shape_proves_predicate_only_not_any_real_qa_database
     lambda a: a[4].clear(),
     lambda a: a[0].update(finalized_at=None),
     lambda a: a[0].update(deadline=a[0]["started_at"] + timedelta(minutes=61)),
+    lambda a: a[0].update(attempt_submitted_at=a[0]["started_at"] - timedelta(minutes=1)),
+    lambda a: a[0].update(session_submitted_at=a[0]["started_at"] + timedelta(minutes=51)),
+    lambda a: a[0].update(finalized_at=a[0]["started_at"] + timedelta(minutes=30)),
     lambda a: a[0]["blueprint"].update(duration_seconds=1800),
 ])
 def test_fail_closed_on_missing_real_grade_fsrs_score_source_or_time(mutate):
