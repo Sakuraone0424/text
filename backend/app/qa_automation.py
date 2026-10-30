@@ -16,11 +16,11 @@ POLICY = {
     'version': 'qa-autonomy/1', 'model': 'deepseek-flash', 'sdk': '0.2.1rc2',
     'system_sha256': SYSTEM_SHA, 'effort': 'high', 'token_limit': 32768,
     'retry_limit': 2, 'max_concurrency': 2,
-    'tasks': ['compatibility', 'textbook_analysis', 'knowledge_extraction',
-              'exam_analysis', 'generation', 'science_review', 'answer_review',
-              'repair', 'grading', 'explanation', 'study_plan'],
+    # Old broad-scope QA model authorizations must never survive this change.
+    # The owner permits DeepSeek ONLY for new DAILY question generation.
+    'tasks': ['generation'],
     'data': 'minimum_locked_six_source_excerpts_and_owner_answers',
-    'tools': False, 'money_limit': 'owner_explicitly_unlimited',
+    'tools': False, 'money_limit': 'requires_separate_owner_authorized_daily_budget',
     'target_project': '0ff7ff18-e746-42db-8eb2-b515306fa473',
     'target_schema': 'source_staging_ocr_20261030',
 }
@@ -71,7 +71,7 @@ def bind_pending(conn, uid):
     if not grant or grant['policy'] != POLICY:
         raise PermissionError('durable_qa_automation_grant_required')
     rows = conn.execute("SELECT * FROM ai_jobs WHERE user_id=%s AND state IN ('pending','retrying') "
-                        "AND NOT(settings_snapshot ? 'qa_automation') "
+                        "AND kind='generation' AND NOT(settings_snapshot ? 'qa_automation') "
                         "AND NOT(settings_snapshot ? 'limited_trial') "
                         "AND NOT(settings_snapshot ? 'review_campaign') "
                         "ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED", (uid,)).fetchall()
