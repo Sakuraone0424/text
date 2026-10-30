@@ -98,8 +98,8 @@ def reconcile(source, expected_risks, actual_risks, expected_chapters, actual_ch
     }
 
 
-def inspect(conn):
-    source = source_audit(conn)
+def inspect(conn, source=None):
+    source = source if source is not None else source_audit(conn)
     by_id = {item["file_id"]: item for item in COLLECTION["files"]}
     source_rows = conn.execute(
         "SELECT d.file_id,d.sha256 AS source_sha256,"
