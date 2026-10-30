@@ -16,7 +16,7 @@ class FixtureConnection:
             ]})()
         if "SELECT t.unit_id,t.year" in statement:
             return type("R", (), {"fetchall": lambda s: [{
-                "unit_id": 101, "year": 2024,
+                "unit_id": 101, "year": 2024, "source_sha256": "a"*64,
                 "quality_flags": [], "concerns": (
                     ["question_boundary_unconfirmed"] if self.unverified_style else []
                 ),
@@ -97,3 +97,15 @@ def test_unexpected_published_record_rejected(monkeypatch):
     with pytest.raises(ValueError,match="unexpectedly_published"):
         editorial.seed(Published(),packet_builder=lambda conn:({"question":{}},None),
                        persister=lambda conn,p:19)
+
+
+
+def test_unpinned_exam_revision_cannot_be_used_as_style(monkeypatch):
+    monkeypatch.setattr(editorial, "snapshot_unit", _snapshot)
+    monkeypatch.setattr(
+        editorial, "pinned_source_bytes",
+        lambda file_id, sha: file_id == editorial.BOOK_ID,
+    )
+    draft, reason = editorial.prepare(FixtureConnection())
+    assert draft is None
+    assert reason == "verified_exam_transcription_style_not_available"
