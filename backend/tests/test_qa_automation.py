@@ -42,3 +42,14 @@ def test_wire_rejects_unapproved_tool(job):
 def test_money_consent_never_approves_different_scope(job,monkeypatch):
     monkeypatch.setenv('DEEPSEEK_AUTOMATION_SCOPE_ID','0'*64)
     with pytest.raises(PermissionError):q.check_job(job)
+
+
+def test_missing_billing_calendar_keeps_unknown_period_instead_of_losing_receipt(monkeypatch):
+    from pathlib import Path
+    from app import cny_billing
+    from datetime import datetime, timezone
+    def unavailable(*args, **kwargs):raise FileNotFoundError('synthetic missing calendar')
+    monkeypatch.setattr(Path,'read_text',unavailable)
+    calendar=cny_billing.calendar_2026()
+    assert calendar == {}
+    assert cny_billing.period(datetime.now(timezone.utc),calendar) == 'unknown'
