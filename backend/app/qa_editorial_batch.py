@@ -189,7 +189,7 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
         revision = "v2" if item["id"] in {
             "biou-activation-07", "biol-carnitine-10", "cell-arp23-02",
             "cell-srp-03", "cell-na-pump-04",
-        } else ("v3" if item["id"] == "cell-mito-26-12" else (
+        } else ("v3" if item["id"] in {"cell-mito-26-12", "biou-competitive-08"} else (
             "v2" if item["id"] == "cell-mito-fusion-06" else "v1"))
         candidate_key=f"qa-ocr-curated-{item['id']}-{unit['unit_id']}-{style_id}-{revision}"
         packet = {
