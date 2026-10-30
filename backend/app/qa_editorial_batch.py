@@ -190,7 +190,8 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
             "biou-activation-07", "biol-carnitine-10", "cell-arp23-02",
             "cell-srp-03", "cell-na-pump-04",
         } else ("v3" if item["id"] in {"cell-mito-26-12", "biou-competitive-08"} else (
-            "v2" if item["id"] == "cell-mito-fusion-06" else "v1"))
+            "v2" if item["id"] in {"cell-mito-fusion-06", "cell-ub-proteasome-05"}
+            else "v1"))
         candidate_key=f"qa-ocr-curated-{item['id']}-{unit['unit_id']}-{style_id}-{revision}"
         packet = {
             "candidate_key": candidate_key,
@@ -230,6 +231,20 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
                 } for point in item["rubric_points"]],
             },
         }
+        # New wording/scoring drafts must supersede the matching OLD draft
+        # through an append-only link, not mutate or silently republish it.
+        # Only these first-pass substantive-science revisions are new here;
+        # unrelated historical editorial drafts remain untouched.
+        if item["id"] in {"cell-ub-proteasome-05", "biou-competitive-08"}:
+            previous_key = (
+                f"qa-ocr-curated-{item['id']}-{unit['unit_id']}-{style_id}-v1"
+            )
+            previous = conn.execute(
+                "SELECT candidate_key FROM candidate_review_packets WHERE candidate_key=%s",
+                (previous_key,),
+            ).fetchone()
+            if previous:
+                packet["supersedes"] = previous_key
         qid=create(conn, packet)
         row=conn.execute("SELECT status FROM reviewed_questions WHERE id=%s",(qid,)).fetchone()
         if not row or row["status"]!="draft":
