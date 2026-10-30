@@ -120,7 +120,11 @@ def prepare(conn):
     }, None
 
 
-def seed(conn, packet_builder=prepare, persister=create_packet):
+def seed(conn, packet_builder=None, persister=None):
+    # Resolve defaults when called, so QA fixtures and future pipeline edits
+    # cannot silently keep a stale function object captured at import time.
+    packet_builder = prepare if packet_builder is None else packet_builder
+    persister = create_packet if persister is None else persister
     packet, reason = packet_builder(conn)
     if packet is None:
         return {
