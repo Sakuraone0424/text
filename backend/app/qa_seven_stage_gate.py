@@ -10,6 +10,7 @@ import os
 from app.source_intake import SCHEMA, isolated_db
 from app.source_readiness import audit as source_audit
 from app.qa_stage1_acceptance import inspect as stage1_inspect
+from app.qa_graph_provenance_gate import inspect as graph_inspect
 from app.qa_exam_year_inventory import summarize as exam_year_summary
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
@@ -100,6 +101,7 @@ def main():
     with isolated_db(schema,"staging",readonly=True) as conn:
         source=source_audit(conn)
         stage1_ledger=stage1_inspect(conn, source)
+        verified_graph=graph_inspect(conn)
         g=conn.execute(
             "SELECT count(*) AS nodes,"
             "count(*) FILTER(WHERE scientific_review_state <> 'pending') AS approved "
@@ -151,6 +153,15 @@ def main():
                     "chapters":chapters,"facets":facets},
             risk,chapter,years,q,papers,accepted_buckets=accepted_buckets
         )
+    data["stage_2"].update({
+        "all_original_unit_and_lexical_facet_provenance_checked": (
+            verified_graph["all_nodes_source_exact"]
+            and verified_graph["all_lexical_facets_source_exact"]
+        ),
+        "provenance_evidence_node_count": verified_graph["evidence_nodes"],
+        "provenance_lexical_facet_count": verified_graph["lexical_facet_candidates"],
+        "concept_science_review_still_required": True,
+    })
     data["stage_1"].update({
         "all_unresolved_source_issues_have_traceable_states": (
             stage1_ledger["issue_provenance_and_states_accepted"]
