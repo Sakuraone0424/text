@@ -35,7 +35,7 @@ def eligible(work):
     )
 
 
-def ensure(conn, builder=build, persister=persist, limit=12000):
+def ensure(conn, builder=build, persister=persist, limit=20000):
     """Idempotent bounded worklist, not a scientific review or publication."""
     if type(limit) is not int or not 1 <= limit <= 20000:
         raise ValueError("science_pending_work_limit_invalid")
@@ -56,6 +56,19 @@ def ensure(conn, builder=build, persister=persist, limit=12000):
     pending.sort(key=lambda w: (-w["priority"], w["work_key"]))
     selected = pending[:limit]
     created = persister(conn, selected) if selected else 0
+    # Verify by source fingerprint after insertion. A successful write count
+    # alone is not evidence that every pending item was persisted.
+    expected_keys = set(keys)
+    observed_keys = {
+        row["work_key"] for row in conn.execute(
+            "SELECT work_key FROM evidence_review_work WHERE algorithm=%s "
+            "AND kind=ANY(%s)",
+            (VERSION, sorted(KINDS)),
+        ).fetchall()
+    }
+    missing = expected_keys - observed_keys
+    if len(missing) != max(0, len(pending) - created):
+        raise ValueError("science_review_postwrite_count_mismatch")
     kinds = Counter(w["kind"] for w in tasks)
     return {
         "version": VERSION,
@@ -63,6 +76,7 @@ def ensure(conn, builder=build, persister=persist, limit=12000):
         "tasks_by_kind": dict(sorted(kinds.items())),
         "existing_tasks": len(existing & set(keys)),
         "new_pending_tasks": created,
-        "remaining_unseeded": len(pending) - created,
+        "remaining_unseeded": len(missing),
+        "all_pending_reviews_persisted": not missing,
         "scientifically_approved_nodes": 0,
     }
