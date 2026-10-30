@@ -3,6 +3,7 @@ import json
 import os
 import time
 import threading
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from concurrent.futures import ThreadPoolExecutor
 from importlib.metadata import version
@@ -140,7 +141,8 @@ def main():
                     print('QA_AUTOMATION_STATUS='+json.dumps(status(),default=str,separators=(',',':')),flush=True)
                     next_status = now+60
             except Exception as exc:
-                print('QA_AUTOMATION_CYCLE_FAILED='+type(exc).__name__,flush=True)
+                frames=[dict(file=Path(f.filename).name,line=f.lineno,function=f.name) for f in traceback.extract_tb(exc.__traceback__)]
+                print('QA_AUTOMATION_CYCLE_FAILED='+json.dumps(dict(error=type(exc).__name__,frames=frames)),flush=True)
                 time.sleep(5)
             time.sleep(2)
 
