@@ -114,7 +114,7 @@ def prepare(conn):
             ],
             "rubric_evidence": [{
                 "unit_ids": [unit["unit_id"]],
-                "explanation": "Literal source supports the GDP answer; independent original-page and answer audit still required",
+                "explanation": "Locked OCR passage directly contains the GDP fact; independent six-file science and answer review still required",
             }],
         },
     }, None
