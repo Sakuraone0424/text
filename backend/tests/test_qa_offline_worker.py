@@ -42,15 +42,28 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     monkeypatch.setattr(worker, "source_audit", lambda conn: {
         "imported_files": 6,
         "all_six_byte_integrity_checks_passed": True,
+        "files": [{"missing_ocr_page_markers": [], "blank_ocr_pages": []}],
     })
     monkeypatch.setattr(worker, "seed_exam_pending", lambda conn: {
         "algorithm": "evidence-work/1.7",
         "new": 7,
         "already_present": 0,
     })
+    monkeypatch.setattr(worker, "seed_topic_links", lambda conn: {
+        "candidate_links": 9,
+        "scientifically_verified_links": 0,
+    })
+    monkeypatch.setattr(worker, "review_priorities", lambda conn: {
+        "metadata_only_priority_counts": {"P0_visual_or_content_loss_candidate": 2},
+        "source_issues_total": 2,
+        "chapter_mapping_issues": 1,
+    })
     result = worker.cycle()
     assert calls == ["db", "migrate"]
     assert result["pending_exam_work_added"] == 7
+    assert result["exam_textbook_lexical_review"]["candidate_links"] == 9
+    assert result["source_risk_items_tracked"] == 2
+    assert result["unmarked_ocr_pages"] == 0
     assert result["model_calls"] == 0
     assert result["scientific_approvals"] == 0
 
