@@ -17,6 +17,7 @@ from app.qa_review_worklist import inspect as science_review_worklist
 from app.qa_real_60q_readback import inspect as real_training_readback
 from app.qa_exam_year_inventory import summarize as exam_year_summary
 from app.qa_exam_paper_variants import summary as exam_variant_summary
+from app.qa_chapter_context_inventory import inspect as chapter_context_inspect
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
 
@@ -110,6 +111,7 @@ def main():
         style_inventory=safe_style_inventory(conn)
         choice_option_inventory=choice_style_inventory(conn)
         science_review_priorities=science_review_worklist(conn)
+        chapter_context=chapter_context_inspect(conn)
         real_training_proof=real_training_readback(conn)
         g=conn.execute(
             "SELECT count(*) AS nodes,"
@@ -222,6 +224,7 @@ def main():
             science_review_priorities["textbook_units_also_outside_unmapped_chapter_pages"]
         ),
     })
+    data["stage_1"].update(chapter_context)
     data["stage_1"].update({
         "all_unresolved_source_issues_have_traceable_states": (
             stage1_ledger["issue_provenance_and_states_accepted"]
