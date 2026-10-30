@@ -35,6 +35,35 @@ def authorized(env=None):
         raise PermissionError('qa_automation_grant_required')
 
 
+def require_explicit_cny_budget(limits):
+    """Fail closed until the owner separately authorizes positive CNY ceilings.
+
+    This is a real admission prerequisite, not a permission granted by
+    choosing the generation-only DeepSeek model. All THREE independent
+    money limits must remain enabled. Never infer 'unlimited' from a task.
+    """
+    from app.cny_billing import money
+    if not isinstance(limits, dict):
+        raise PermissionError("daily_generation_cny_budget_missing")
+    for enabled, amount in (
+        ("task_limit_enabled", "task_cny"),
+        ("daily_limit_enabled", "daily_cny"),
+        ("monthly_limit_enabled", "monthly_cny"),
+    ):
+        if limits.get(enabled) is not True or money(limits.get(amount, 0)) <= 0:
+            raise PermissionError("daily_generation_explicit_bounded_cny_budget_required")
+    return True
+
+
+def assert_live_cny_budget(conn, uid):
+    row = conn.execute(
+        "SELECT task_limit_enabled,daily_limit_enabled,monthly_limit_enabled,"
+        "task_cny,daily_cny,monthly_cny FROM ai_settings WHERE user_id=%s",
+        (uid,),
+    ).fetchone()
+    return require_explicit_cny_budget(dict(row) if row else None)
+
+
 def envelope(job):
     s = job['settings_snapshot']
     return dict(scope_id=SCOPE, job_id=job['id'], user_id=job['user_id'],
@@ -66,6 +95,7 @@ def check_job(job):
 
 def bind_pending(conn, uid):
     authorized()
+    assert_live_cny_budget(conn, uid)
     grant = conn.execute('SELECT policy FROM qa_automation_grants WHERE scope_id=%s AND user_id=%s',
                          (SCOPE, uid)).fetchone()
     if not grant or grant['policy'] != POLICY:
@@ -89,6 +119,10 @@ def claim_reason(conn, job):
         check_job(job)
     except (ValueError, PermissionError, KeyError):
         return 'invalid_qa_automation_grant'
+    try:
+        assert_live_cny_budget(conn, job['user_id'])
+    except (PermissionError, ValueError):
+        return 'daily_generation_explicit_cny_budget_missing'
     row = conn.execute('SELECT policy FROM qa_automation_grants WHERE scope_id=%s AND user_id=%s',
                        (SCOPE, job['user_id'])).fetchone()
     if not row or row['policy'] != POLICY:
