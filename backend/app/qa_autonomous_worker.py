@@ -95,7 +95,8 @@ def plan_tick(uid):
             return
         # Only retry proven ENOSPC without confirmed request, surviving
         # provider receipt, or stale private-source evidence.
-        from app.qa_infra_recovery import replay_enospc
+        from app.qa_infra_recovery import replay_enospc, requeue_owner_paused
+        requeue_owner_paused(conn,uid,SCOPE)
         replay_enospc(conn,uid,Path(os.environ.get('AI_PRIVATE_HOME','/tmp/ustc-harness-private')))
         m = conn.execute("SELECT compatibility FROM ai_model_catalog WHERE model_id='deepseek-flash' AND available").fetchone()
         if m and m['compatibility'].get('real_api_verified'):
