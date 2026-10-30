@@ -55,6 +55,12 @@ def assess_attempt(paper, rows, *, qualified_ids, fsrs_failure_keys,
         return failed("actual_session_or_finalized_submission_missing")
     if (paper["deadline"] - paper["started_at"]).total_seconds() != 3600:
         return failed("session_does_not_last_exactly_3600_seconds")
+    if not (
+        paper["started_at"] <= paper["attempt_submitted_at"] <= paper["deadline"]
+        and paper["session_submitted_at"] == paper["attempt_submitted_at"]
+        and paper["finalized_at"] >= paper["attempt_submitted_at"]
+    ):
+        return failed("attempt_submission_outside_server_clock_window")
     if len(rows) != TOTAL_QUESTIONS:
         return failed("not_exactly_60_persisted_question_answers")
     positions = [r["position"] for r in rows]
@@ -161,6 +167,7 @@ def inspect(conn):
             fsrs_keys = {r["event_key"] for r in recorded}
         verified_ai_grade_ids = set()
         if paper["attempt_id"] is not None:
+            from app.ai_jobs import content_sha
             for item in rows:
                 snapshot = item["snapshot"]
                 if snapshot["question_type"] not in ("term", "short_answer"):
@@ -169,14 +176,26 @@ def inspect(conn):
                 if not isinstance(feedback, dict) or not feedback.get("ai_job_id"):
                     continue
                 job = conn.execute(
-                    "SELECT state,result,payload FROM ai_jobs WHERE id=%s",
+                    "SELECT state,kind,result,payload,settings_snapshot "
+                    "FROM ai_jobs WHERE id=%s",
                     (feedback["ai_job_id"],),
                 ).fetchone()
-                if (job and job["state"] == "succeeded"
+                try:
+                    current_answer_sha = content_sha(
+                        json.loads(item["answer"])
+                        if isinstance(item["answer"], str) else item["answer"]
+                    )
+                except (TypeError, ValueError):
+                    current_answer_sha = None
+                if (job and job["kind"] == "grading"
+                    and job["state"] == "succeeded"
                     and job["result"].get("real_api") is True
                     and job["payload"].get("paper_id") == paper["id"]
                     and job["payload"].get("attempt_id") == paper["attempt_id"]
-                    and job["payload"].get("question_id") == item["question_id"]):
+                    and job["payload"].get("question_id") == item["question_id"]
+                    and job["payload"].get("answer_sha256") == current_answer_sha
+                    and job["payload"].get("question") == snapshot
+                    and job["settings_snapshot"].get("model_id") == feedback.get("model_id")):
                     verified_ai_grade_ids.add(item["question_id"])
         result = assess_attempt(
             paper, rows, qualified_ids=verified_ids, fsrs_failure_keys=fsrs_keys,
