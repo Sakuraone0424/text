@@ -108,10 +108,20 @@ def prepare(conn):
                 for axis in AXES
             },
             "uncertainties": [
-                "The source is a corrected OCR transcript, not a visual original",
+                "The locked source is OCR text; this one passage was separately compared to an original PDF page, not independently science-approved",
                 "No independent science/answer reviewers have approved this candidate",
                 "Historical exemplar is same subject/type only; recent matching style not proven",
             ],
+            "original_visual_comparison": {
+                "status": "single_pass_original_page_checked_not_independent_review",
+                "document": "细胞生物学_第五版_第01部分_P0001-0192.pdf",
+                "original_pdf_sha256": "8c7d2069979c12ccdb0189ce248d2359463a4666adf11ce5bfc6ba2dd19db0bb",
+                "file_page": 174,
+                "printed_page": 158,
+                "observed_fact": "β-tubulin bound GTP is hydrolyzed to GDP",
+                "all_original_pages_reviewed": False,
+                "independent_scientific_review_completed": False,
+            },
             "rubric_evidence": [{
                 "unit_ids": [unit["unit_id"]],
                 "explanation": "Literal source supports the GDP answer; independent original-page and answer audit still required",
