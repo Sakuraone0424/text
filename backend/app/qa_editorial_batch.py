@@ -165,8 +165,12 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
                 ],
                 "rubric_evidence":[{
                     "unit_ids":[unit["unit_id"]],
-                    "explanation":"Direct textbook excerpt identifies the first-pass answer; original exam style is separately located; additional correctness review pending",
-                }],
+                    "explanation":(
+                        "Source-located first-pass citation for this scoring criterion: "
+                        + point["description"]
+                        + "; independently verify that the full OCR unit supports this criterion before approval"
+                    ),
+                } for point in item["rubric_points"]],
             },
         }
         qid=create(conn, packet)
