@@ -39,3 +39,28 @@ def test_all_explicit_guards_are_required_and_do_not_start_any_jobs():
     assert not data["qualified_120_bank_can_be_claimed"]
     env["RAILWAY_ENVIRONMENT_NAME"]="production"
     assert not inspect(env)["ready_for_safe_model_worker_start"]
+
+
+def test_paid_worker_must_use_exact_same_QA_schema_not_prefix_or_other_schema():
+    env={
+        "RAILWAY_ENVIRONMENT_NAME":"qa",
+        "QA_IMPORT_SCHEMA":"source_staging_ocr_20261030",
+        "QA_IMPORT_ENABLED":"0",
+        "DEEPSEEK_API_AUTHORIZED":"1",
+        "DEEPSEEK_PRIVATE_DATA_AUTHORIZED":"1",
+        "DEEPSEEK_API_KEY":"secret_not_printed",
+        "AI_AUTOMATION_ENABLED":"1",
+        "QUIZ_DB_SCHEMA":"source_staging_other",
+    }
+    result=inspect(env)
+    assert result["preflight"]["qa_isolated_schema_selected"]
+    assert result["preflight"]["isolated_worker_target_configured"]
+    assert not result["preflight"]["worker_uses_exact_QA_source_schema"]
+    assert not result["ready_for_safe_model_worker_start"]
+    env["QUIZ_DB_SCHEMA"]="source_staging_ocr_20261030;DROP TABLE sources"
+    assert not inspect(env)["preflight"]["isolated_worker_target_configured"]
+    env["QUIZ_DB_SCHEMA"]="source_staging_ocr_20261030"
+    env["QA_IMPORT_SCHEMA"]="source_staging_ocr_20261030;public"
+    assert not inspect(env)["preflight"]["qa_isolated_schema_selected"]
+    assert not inspect(env)["ready_for_safe_model_worker_start"]
+    assert "secret_not_printed" not in str(inspect(env))
