@@ -182,6 +182,11 @@ def main():
         "both_subjects_have_complete_A_to_D_style_example": (
             choice_option_inventory["both_subjects_have_complete_choice_style_examples"]
         ),
+        "real_subject_year_choice_style_coverage": choice_option_inventory["by_source_year"],
+        "real_subject_year_slots": len(choice_option_inventory["by_source_year"]),
+        "unassigned_or_outside_range_choice_starts": (
+            choice_option_inventory["unassigned_or_outside_year_choice_starts"]
+        ),
     })
     data["stage_2"].update({
         "all_original_unit_and_lexical_facet_provenance_checked": (
