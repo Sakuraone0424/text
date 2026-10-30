@@ -107,7 +107,14 @@ def make_question(fact, unit, bibliography, style_id):
             "points": item["points"],
             "knowledge_tags": [fact["id"]],
         } for item in fact["rubric_points"]],
-        "knowledge_tags": [fact["id"]],
+        # These two differently worded, differently typed questions assess
+        # the same source-local mitochondrial fusion/fission concept.
+        # The exclusive tag makes them mutually ineligible in ONE paper.
+        "knowledge_tags": [fact["id"]] + (
+            ["exclusive:cell/mitochondria_fusion_fission"]
+            if fact["id"] in {"cell-mito-fusion-06", "cell-mito-26-12"}
+            else []
+        ),
         "difficulty": "core" if kind == "fill_blank" else "mechanism",
         "style_reference_ids": [style_id],
         "evidence": [{
@@ -175,8 +182,9 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
         # Changed scientific wording must not silently reuse an older first-pass draft.
         revision = "v2" if item["id"] in {
             "biou-activation-07", "biol-carnitine-10", "cell-arp23-02",
-            "cell-srp-03", "cell-mito-26-12", "cell-na-pump-04",
-        } else "v1"
+            "cell-srp-03", "cell-na-pump-04",
+        } else ("v3" if item["id"] == "cell-mito-26-12" else (
+            "v2" if item["id"] == "cell-mito-fusion-06" else "v1"))
         candidate_key=f"qa-ocr-curated-{item['id']}-{unit['unit_id']}-{style_id}-{revision}"
         packet = {
             "candidate_key": candidate_key,
