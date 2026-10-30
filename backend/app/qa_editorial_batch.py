@@ -75,8 +75,11 @@ def make_question(fact, unit, bibliography, style_id):
         "accepted_answers": accepted,
         "blanks": blanks,
         "max_points": max_points,
-        "rubric": [{"description": "核对当前教材原文证据对应的答案；机制简答需逐点判断",
-                    "points": max_points, "knowledge_tags": [fact["id"]]}],
+        "rubric": [{
+            "description": item["description"],
+            "points": item["points"],
+            "knowledge_tags": [fact["id"]],
+        } for item in fact["rubric_points"]],
         "knowledge_tags": [fact["id"]],
         "difficulty": "core" if kind == "fill_blank" else "mechanism",
         "style_reference_ids": [style_id],
@@ -175,4 +178,5 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
         "all_source_facts_accounted_for":len(results)==len(facts),
         "published_count":0,"independent_scientific_approvals":0,
         "model_calls":0,
+        "per_question_status":results,
     }
