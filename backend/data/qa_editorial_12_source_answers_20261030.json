@@ -43,7 +43,7 @@
       "id": "cell-arp23-02",
       "book": "cell",
       "kind": "fill_blank",
-      "question": "Arp2/3 复合物的两种标志性肌动蛋白相关亚基是____和____。",
+      "question": "Arp2/3 复合物的两种标志性肌动蛋白相关亚基，按编号由小到大依次为____和____。",
       "answer": "Arp2、Arp3",
       "quote": "该复合物由 Arp2、Arp3 及其他 5 种蛋白质组成",
       "exam": {
@@ -51,7 +51,7 @@
         "doc": "1998-2026年中国科学技术大学细胞生物学真题.docx",
         "matched_question_fragment": "Arp 2/3复合物"
       },
-      "notes": "负责微丝成核；不能把它称为微管成核的 γ-TuRC。",
+      "notes": "负责微丝成核；不能把它称为微管成核的 γ-TuRC。 由于两亚基填空设置了编号顺序要求，按空独立评分不会误判倒序的正确性；未要求顺序则应允许两种排列。",
       "source_key": "cell",
       "ocr_page": 162,
       "reference_excerpt_verified": true,
