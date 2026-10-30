@@ -202,6 +202,8 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
                     "Located past-exam type of same subject; not official answer "
                     "or recent style proof; original transcription risk flags: "
                     + ", ".join(pending_style_flags)
+                    if pending_style_flags else
+                    "Located past-exam type of same subject; not official answer or recent style proof"
                 ),
             }],
             "ai_analysis":{
