@@ -59,9 +59,28 @@ def bootstrap():
         # provider receipt; never prune a currently leased/running job.
         from app.harness_gateway import prune_runtime_cache
         private_root=Path(os.environ.get('AI_PRIVATE_HOME','/tmp/ustc-harness-private'))
+        if private_root.is_symlink():
+            raise PermissionError('qa_private_evidence_symlink_rejected')
+        private_root.mkdir(parents=True,exist_ok=True)
         for row in conn.execute("SELECT id,attempts FROM ai_jobs WHERE state<>'running'").fetchall():
             for attempt in range(1,row['attempts']+1):
                 prune_runtime_cache(private_root/f"job-{row['id']}-attempt-{attempt}")
+        # Keep the human pause latched until the precise owner continuation is
+        # consumed once, *after* integrity and disk cleanup. A future pause is
+        # never overridden by a restarted deployment with the same env flag.
+        if shutil.disk_usage(private_root).free < 160 * 1024 * 1024:
+            raise OSError('qa_private_evidence_insufficient_free_space')
+        approval = os.environ.get('QA_AUTOMATION_RESUME_APPROVAL_ID')
+        if approval == '2026-10-30-explicit-owner-continue-v1':
+            row = conn.execute(
+                "INSERT INTO qa_automation_resume_consumptions(approval_id,scope_id,user_id) "
+                "VALUES(%s,%s,%s) ON CONFLICT DO NOTHING RETURNING approval_id",
+                (approval,SCOPE,uid),
+            ).fetchone()
+            if row:
+                conn.execute("UPDATE ai_settings SET stopped=false,updated_at=clock_timestamp() "
+                             "WHERE user_id=%s", (uid,))
+                print('QA_OWNER_RESUME_CONSUMED_ONCE',flush=True)
     return uid
 
 
@@ -74,6 +93,10 @@ def plan_tick(uid):
         dispatch_completed(conn, scope_id=SCOPE, scope_kind='qa_automation')
         if conn.execute("SELECT stopped FROM ai_settings WHERE user_id=%s", (uid,)).fetchone()["stopped"]:
             return
+        # Only retry proven ENOSPC without confirmed request, surviving
+        # provider receipt, or stale private-source evidence.
+        from app.qa_infra_recovery import replay_enospc
+        replay_enospc(conn,uid,Path(os.environ.get('AI_PRIVATE_HOME','/tmp/ustc-harness-private')))
         m = conn.execute("SELECT compatibility FROM ai_model_catalog WHERE model_id='deepseek-flash' AND available").fetchone()
         if m and m['compatibility'].get('real_api_verified'):
             for fn in (plan, auto_knowledge.plan_small_batch, auto_generation.plan, auto_exams.plan):
