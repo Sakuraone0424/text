@@ -63,6 +63,13 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "new_pending_tasks": 12,
         "scientifically_approved_nodes": 0,
     })
+    monkeypatch.setattr(worker, "seed_substantive_science_firstpass", lambda conn: {
+        "substantive_science_corrections_source_attested": 10,
+        "distinct_original_science_units": 9,
+        "scientific_double_approvals": 0,
+        "published_questions": 0,
+        "model_calls": 0,
+    })
     monkeypatch.setattr(worker, "seed_chapter_neighbors", lambda conn: {
         "unmapped_pages_with_navigation_records": 72,
         "chapter_repairs_applied": 0,
@@ -113,6 +120,8 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["exam_textbook_lexical_review"]["candidate_links"] == 9
     assert result["formula_visual_review"]["pending_visual_candidates"] == 4
     assert result["pending_science_review_worklist"]["new_pending_tasks"] == 12
+    assert result["source_locked_science_content_firstpass"]["substantive_science_corrections_source_attested"] == 10
+    assert result["source_locked_science_content_firstpass"]["scientific_double_approvals"] == 0
     assert result["chapter_navigation_review"]["unmapped_pages_with_navigation_records"] == 72
     assert result["chapter_ocr_navigation"]["exact_six_source_navigation_proposals"] == 72
     assert result["chapter_ocr_navigation"]["verified_scientific_chapter_repairs"] == 0
