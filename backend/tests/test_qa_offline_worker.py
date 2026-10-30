@@ -30,7 +30,8 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
 
     monkeypatch.setattr(worker, "offline_authorized", lambda: None)
     calls = []
-    fake_conn = object()
+    from types import SimpleNamespace
+    fake_conn = SimpleNamespace(execute=lambda query: SimpleNamespace(fetchall=lambda: []))
 
     @contextmanager
     def fake_db():
@@ -53,6 +54,23 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "candidate_links": 9,
         "scientifically_verified_links": 0,
     })
+    monkeypatch.setattr(worker, "seed_formula_triage", lambda conn: {
+        "pending_visual_candidates": 4,
+        "actual_formula_correctness_certified": False,
+    })
+    monkeypatch.setattr(worker, "stage1_provenance", lambda conn, state: {
+        "issue_provenance_and_states_accepted": True,
+    })
+    monkeypatch.setattr(worker, "graph_provenance", lambda conn: {
+        "all_nodes_source_exact": True,
+        "all_lexical_facets_source_exact": True,
+    })
+    monkeypatch.setattr(worker, "summarize_exam_years", lambda rows: {
+        "years_with_transcription": 52,
+        "candidate_numbered_starts": 1921,
+        "years_missing": [],
+        "years": [{"source_key": "cell_biology_exams", "year": 2024, "candidate_type_counts": {"term": 1}}],
+    })
     monkeypatch.setattr(worker, "review_priorities", lambda conn: {
         "metadata_only_priority_counts": {"P0_visual_or_content_loss_candidate": 2},
         "source_issues_total": 2,
@@ -62,6 +80,8 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert calls == ["db", "migrate"]
     assert result["pending_exam_work_added"] == 7
     assert result["exam_textbook_lexical_review"]["candidate_links"] == 9
+    assert result["formula_visual_review"]["pending_visual_candidates"] == 4
+    assert result["exam_years_with_transcription"] == 52
     assert result["source_risk_items_tracked"] == 2
     assert result["unmarked_ocr_pages"] == 0
     assert result["model_calls"] == 0
