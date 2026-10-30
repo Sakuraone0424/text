@@ -48,13 +48,40 @@ def validate_runtime():
     return info,row['id']
 
 
+def historical_restore_status(previous, current_backup_sha, target_system_id):
+    """Never treat a previous cluster restore as a new independent restore.
+
+    In particular, a daily snapshot with a new SHA remains unverified until
+    restored into a separately approved, EMPTY target; populated targets are
+    never wiped or overwritten.
+    """
+    if previous.get('target_system_id') != target_system_id:
+        raise PermissionError('restore_proof_belongs_to_different_cluster')
+    prior_proven = bool(previous.get('restore_executed')
+                        and previous.get('independent_readback'))
+    same_snapshot = previous.get('backup_sha256') == current_backup_sha
+    return {
+        'status': ('prior_restore_matches_current_snapshot'
+                   if prior_proven and same_snapshot
+                   else 'historic_restore_only_latest_snapshot_unverified'),
+        'historic_restore_proof': prior_proven,
+        'current_snapshot_sha256': current_backup_sha,
+        'prior_verified_backup_sha256': previous.get('backup_sha256'),
+        'independently_restored_current_snapshot': prior_proven and same_snapshot,
+        'fresh_restore_executed_this_tick': False,
+        'restore_executed': False,
+        'prior_verified_tables': previous.get('tables_verified'),
+        'prior_verified_migrations': previous.get('migrations_verified'),
+        'prior_verified_sources': previous.get('source_files_verified'),
+        'target_system_id': target_system_id,
+    }
+
+
 def restore_once(directory,index,info,target_system_id):
     receipt=ROOT/'independent-restore-receipt.json'
     if receipt.exists():
         previous=json.loads(receipt.read_text())
-        if previous['target_system_id'] != target_system_id:
-            raise PermissionError('restore_proof_belongs_to_different_cluster')
-        return {**previous,'historic_restore_proof':True}
+        return historical_restore_status(previous,index['sha256'],target_system_id)
     target=os.environ['QA_RESTORE_DATABASE_URL']
     with psycopg.connect(target,row_factory=dict_row) as c:
         require_empty(c)
@@ -71,7 +98,11 @@ def restore_once(directory,index,info,target_system_id):
         c.execute('SET TRANSACTION READ ONLY')
         c.execute("SET LOCAL TIME ZONE 'UTC'")
         result=verify_restored(c,manifest)
-    result.update(restore_executed=True,backup_sha256=index['sha256'],
+    result.update(restore_executed=True,
+                  independently_restored_current_snapshot=True,
+                  fresh_restore_executed_this_tick=True,
+                  historic_restore_proof=False,
+                  backup_sha256=index['sha256'],
                   verified_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(),
                   target_system_id=target_system_id,
                   source_system_id=os.environ['QUIZ_APPROVED_DB_SYSTEM_ID'])
