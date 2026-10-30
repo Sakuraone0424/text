@@ -32,7 +32,8 @@ def _answered(raw):
     )
 
 
-def assess_attempt(paper, rows, *, qualified_ids, fsrs_failure_keys):
+def assess_attempt(paper, rows, *, qualified_ids, fsrs_failure_keys,
+                   verified_ai_grade_ids):
     """Prove the full event sequence; return only sanitized failure reason."""
     def failed(reason):
         return {"real_60q_end_to_end_verified": False, "reason": reason}
@@ -84,7 +85,8 @@ def assess_attempt(paper, rows, *, qualified_ids, fsrs_failure_keys):
             if (row.get("graded_by") != "AI自动核验"
                 or not isinstance(feedback, dict)
                 or not feedback.get("ai_job_id")
-                or not feedback.get("model_id")):
+                or not feedback.get("model_id")
+                or row["question_id"] not in verified_ai_grade_ids):
                 return failed("independent_ai_subjective_grade_provenance_missing")
             independent_ai_subjective_grades += 1
         if points < q["max_points"]:
@@ -157,8 +159,28 @@ def inspect(conn):
                 (paper["user_id"], f"graded-failure:{paper['attempt_id']}:%"),
             ).fetchall()
             fsrs_keys = {r["event_key"] for r in recorded}
+        verified_ai_grade_ids = set()
+        if paper["attempt_id"] is not None:
+            for item in rows:
+                snapshot = item["snapshot"]
+                if snapshot["question_type"] not in ("term", "short_answer"):
+                    continue
+                feedback = item.get("feedback")
+                if not isinstance(feedback, dict) or not feedback.get("ai_job_id"):
+                    continue
+                job = conn.execute(
+                    "SELECT state,result,payload FROM ai_jobs WHERE id=%s",
+                    (feedback["ai_job_id"],),
+                ).fetchone()
+                if (job and job["state"] == "succeeded"
+                    and job["result"].get("real_api") is True
+                    and job["payload"].get("paper_id") == paper["id"]
+                    and job["payload"].get("attempt_id") == paper["attempt_id"]
+                    and job["payload"].get("question_id") == item["question_id"]):
+                    verified_ai_grade_ids.add(item["question_id"])
         result = assess_attempt(
-            paper, rows, qualified_ids=verified_ids, fsrs_failure_keys=fsrs_keys
+            paper, rows, qualified_ids=verified_ids, fsrs_failure_keys=fsrs_keys,
+            verified_ai_grade_ids=verified_ai_grade_ids,
         )
         if result["real_60q_end_to_end_verified"]:
             verified += 1
