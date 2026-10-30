@@ -107,3 +107,58 @@ def test_other_types_keep_single_original_style_unit_without_choice_reconstructi
 
     chosen = select_exam_style(Fake(), "biochemistry", "fill_blank")
     assert chosen["style_unit_ids"] == [31]
+
+
+def test_cross_question_options_with_numbered_new_stem_never_complete_previous():
+    assert complete_choice_style_unit_ids([
+        unit(1, "1. Which synthetic item is true?"),
+        unit(2, "A. First B. Second"),
+        unit(3, "2. Next question C. Third D. Fourth"),
+    ]) is None
+
+
+def test_duplicate_out_of_order_and_empty_option_values_are_rejected():
+    for option_text in (
+        "A. First B. Second B. Again C. Third D. Fourth",
+        "A. First C. Third B. Second D. Fourth",
+        "A. B. C. D.",
+        "A. First B. Second C. Third D.",
+    ):
+        assert complete_choice_style_unit_ids([
+            unit(1, "1. A valid synthetic stem?"),
+            unit(2, option_text),
+        ]) is None
+
+
+def test_no_source_stem_and_later_year_or_answer_cannot_be_reused_as_style():
+    assert complete_choice_style_unit_ids([
+        unit(1, "A. First B. Second C. Third D. Fourth")
+    ]) is None
+    assert complete_choice_style_unit_ids([
+        unit(1, "1. An incomplete synthetic question?"),
+        unit(2, "参考答案：A. First B. Second C. Third D. Fourth"),
+    ]) is None
+    assert complete_choice_style_unit_ids([
+        unit(1, "1. An incomplete synthetic question?"),
+        unit(2, "2025年真题 A. First B. Second C. Third D. Fourth"),
+    ]) is None
+
+
+def test_valid_inline_stem_and_four_nonempty_ordered_options_are_retained():
+    assert complete_choice_style_unit_ids([
+        unit(1, "1. Which is correct? A. First B. Second C. Third D. Fourth")
+    ]) == [1]
+
+
+def test_option_risk_and_unrelated_continuation_fail_closed():
+    assert complete_choice_style_unit_ids([
+        unit(1, "1. Which is correct?"),
+        unit(2, "A. First B. Second"),
+        unit(3, "A separate explanatory paragraph"),
+        unit(4, "C. Third D. Fourth")
+    ]) is None
+    assert complete_choice_style_unit_ids([
+        unit(1, "1. Which is correct?"),
+        unit(2, "A. First B. Second"),
+        unit(3, "C. Third D. Fourth", ["untranscribed_image"])
+    ]) is None
