@@ -25,6 +25,25 @@ BOOK_KEYS = {
 SUBJECTS = {"cell": "cell_biology", "biou": "biochemistry", "biol": "biochemistry"}
 
 
+UNSAFE_UNTRANSCRIBED = frozenset({
+    "corrupt_ocr", "untranscribed_image", "ocr_uncertain",
+    "transcription_gap_reported",
+})
+
+
+def private_draft_source_flags(flags):
+    """Return unresolved OCR flags; block fundamentally untranscribed source.
+
+    This ONLY makes a traceable private draft, never marks any flagged evidence
+    verified or eligible for the scored 120-question reserve.
+    """
+    if not isinstance(flags, list) or any(not isinstance(x, str) for x in flags):
+        raise ValueError("editorial_ocr_flags_invalid")
+    if UNSAFE_UNTRANSCRIBED.intersection(flags):
+        return None
+    return sorted(set(flags))
+
+
 def source_facts():
     packet = json.loads(DATA.read_text(encoding="utf-8"))
     questions = packet.get("questions")
@@ -60,7 +79,13 @@ def make_question(fact, unit, bibliography, style_id):
             if fact["id"] == "cell-nls-11":
                 accepted.extend(["核定位信号", "NLS", "核定位序列"])
             if fact["id"] == "cell-srp-03":
-                accepted.extend(["SRP", "信号识别颗粒"])
+                accepted.extend(["SRP", "信号识别颗粒", "信号肽识别颗粒"])
+            if fact["id"] == "cell-na-pump-04":
+                accepted.extend(["ATP", "ATP水解", "ATP的水解"])
+            if fact["id"] == "biol-carnitine-10":
+                accepted.extend(["肉碱穿梭系统", "肉碱转运", "肉碱穿梭"])
+            if fact["id"] == "cell-mito-26-12":
+                accepted.extend(["动态平衡", "平衡", "平衡状态"])
         elif blank_count == 2 and fact["id"] == "cell-arp23-02":
             blanks = [{"accepted_answers": ["Arp2"], "points": 1},
                       {"accepted_answers": ["Arp3"], "points": 1}]
@@ -108,25 +133,28 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
             "SELECT u.id FROM source_units u "
             "JOIN source_documents d ON d.id=u.document_id "
             "WHERE d.file_id=%s AND " + current_source_sql("d", kind="textbook") +
-            " AND u.text LIKE %s AND u.quality_flags='[]'::jsonb "
+            " AND u.text LIKE %s "
             "ORDER BY u.id LIMIT 2",
             (fid, "%" + item["quote"] + "%"),
         ).fetchall()
         if len(rows) != 1:
-            results.append({"id":item["id"],"status":"source_not_unique_or_risky"})
+            results.append({"id":item["id"],"status":"source_not_unique_or_missing"})
             continue
         unit = snapshot_unit(conn, rows[0]["id"])
         if (
             unit["file_id"] != fid
             or unit["source_kind"] != "textbook"
             or unit["subject"] != subject
-            or unit["quality_flags"]
             or unit["ocr_page"] != item["ocr_page"]
             or unit["chapter"] in ("", "unknown", "unclassified", "contents")
             or item["quote"] not in unit["text"]
             or not pinned_source_bytes(fid, unit["source_sha256"])
         ):
             results.append({"id":item["id"],"status":"source_identity_or_page_mismatch"})
+            continue
+        pending_source_flags = private_draft_source_flags(unit["quality_flags"])
+        if pending_source_flags is None:
+            results.append({"id":item["id"],"status":"source_contains_untranscribed_or_corrupt_content"})
             continue
         style = style_lookup(conn, subject, item["kind"])
         if not style:
@@ -162,7 +190,10 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
                 "uncertainties":[
                     "Independent scientific and answer checks not completed",
                     "Owner's transcription may contain original exam memory/OCR omissions",
-                ],
+                ] + ([
+                    "Unresolved original OCR source flags: " + ", ".join(pending_source_flags)
+                    + "; private drafting only, no text/science/visual verification or publication"
+                ] if pending_source_flags else []),
                 "rubric_evidence":[{
                     "unit_ids":[unit["unit_id"]],
                     "explanation":(
@@ -177,11 +208,18 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
         row=conn.execute("SELECT status FROM reviewed_questions WHERE id=%s",(qid,)).fetchone()
         if not row or row["status"]!="draft":
             raise ValueError("curated_editorial_question_not_pending_draft")
-        results.append({"id":item["id"],"status":"draft_created_or_reused","qid":qid})
+        results.append({
+            "id":item["id"],"status":"draft_created_or_reused","qid":qid,
+            "unresolved_source_flags":pending_source_flags,
+        })
     by_state=Counter(r["status"] for r in results)
     return {
         "reviewed_source_fact_count":len(facts),
         "private_drafts_created_or_reused":by_state["draft_created_or_reused"],
+        "private_drafts_pending_ocr_uncertainty":sum(
+            r["status"] == "draft_created_or_reused" and bool(r["unresolved_source_flags"])
+            for r in results
+        ),
         "blocked_reasons":dict(sorted((k,v) for k,v in by_state.items() if k!="draft_created_or_reused")),
         "all_source_facts_accounted_for":len(results)==len(facts),
         "published_count":0,"independent_scientific_approvals":0,
