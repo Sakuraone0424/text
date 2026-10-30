@@ -63,3 +63,36 @@ def test_oversized_evidence_packets_do_not_starve_generation():
     from app.auto_generation import generation_payload_within_limit
     assert generation_payload_within_limit({"evidence": "x" * 1000})
     assert not generation_payload_within_limit({"evidence": "x" * 25000})
+
+
+def test_criterion_tag_cleanup_removes_only_unlisted_metadata_without_touching_science():
+    from app.auto_generation import drop_unlisted_criterion_tags
+    from copy import deepcopy
+    original = {
+        "knowledge_tags": ["ATP", "TCA"],
+        "stem": "Precisely evaluate ATP synthesis.",
+        "answer": "Scientifically referenced answer",
+        "max_points": 2,
+        "evidence": [{"excerpt": "Verbatim textbook text"}],
+        "rubric": [{
+            "points": 2,
+            "description": "Correct mechanism",
+            "knowledge_tags": ["TCA", "not-in-the-question", "ATP"],
+        }],
+    }
+    frozen = deepcopy(original)
+    result = drop_unlisted_criterion_tags(original)
+    assert result["rubric"][0]["knowledge_tags"] == ["TCA", "ATP"]
+    assert {k: v for k, v in result.items() if k != "rubric"} == {
+        k: v for k, v in original.items() if k != "rubric"
+    }
+    assert result["rubric"][0]["description"] == original["rubric"][0]["description"]
+    assert result["rubric"][0]["points"] == original["rubric"][0]["points"]
+    assert original == frozen
+
+
+def test_criterion_cleanup_fails_closed_for_invalid_shapes():
+    from app.auto_generation import drop_unlisted_criterion_tags
+    bad = {"knowledge_tags": [], "rubric": [{"knowledge_tags": [42]}]}
+    assert drop_unlisted_criterion_tags(bad) is bad
+    assert drop_unlisted_criterion_tags({"rubric": []}) == {"rubric": []}
