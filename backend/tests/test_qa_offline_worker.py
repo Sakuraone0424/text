@@ -134,3 +134,14 @@ def test_offline_cycle_fails_closed_on_source_byte_mismatch(monkeypatch):
     ))
     with pytest.raises(PermissionError, match="integrity_failed"):
         worker.cycle()
+
+
+def test_stage_errors_report_only_allowlisted_step_and_exception_type():
+    def failing():
+        raise ValueError("secret-ocr-text-and-api-key-must-not-leak")
+
+    with pytest.raises(worker.OfflineStageError) as info:
+        worker.step("twelve_editorial_drafts", failing)
+    assert info.value.stage == "twelve_editorial_drafts"
+    assert info.value.error_type == "ValueError"
+    assert "secret-ocr" not in str(info.value)
