@@ -103,6 +103,7 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["source_risk_items_tracked"] == 2
     assert result["unmarked_ocr_pages"] == 0
     assert result["model_calls"] == 0
+    assert result["only_six_ocr_sources"]["additional_pdf_sources_allowed"] is False
     assert result["scientific_approvals"] == 0
 
 
