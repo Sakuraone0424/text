@@ -5,6 +5,7 @@ Synthetic fixtures only; never certify real textbook text or exam answers.
 from copy import deepcopy
 
 from app.auto_generation import repair_source_identity_from_locked_units
+from app.auto_quality import evidence as _independent_science_gate
 
 
 def _unit(**changes):
@@ -53,7 +54,7 @@ def test_repairs_only_identity_from_literal_locked_snapshot():
     assert evidence["paragraph_id"] == 17
     assert evidence["ocr_page"] == 32
     assert evidence["chapter"] == "Chapter 3"
-    assert evidence["locator"] == "OCR page 32; source unit 17"
+    assert evidence["locator"] == "OCR:32:UNIT:17"
     assert evidence["excerpt"] == "enzyme requires ATP"
     assert raw == old  # Original model receipt remains unchanged
     assert repaired["stem"] == raw["stem"]
