@@ -20,7 +20,6 @@ def bootstrap():
     from app.common import ensure_user
     from app import model_router, cny_prices
     from app.source_readiness import audit
-    from app.model_compatibility import enqueue_probe
     authorized()
     if not pinned_worker(os.environ) or version('deepseek-harness-sdk') != SDK_VERSION:
         raise PermissionError('qa_runtime_or_sdk_identity_mismatch')
@@ -58,10 +57,10 @@ def bootstrap():
         if not model:
             raise ValueError('approved_model_not_in_official_catalog')
         if not model['compatibility'].get('real_api_verified'):
-            outstanding=conn.execute("SELECT 1 FROM ai_jobs WHERE kind='compatibility' "
-                "AND state IN ('pending','running','retrying') "
-                "AND settings_snapshot->'qa_automation'->>'scope_id'=%s LIMIT 1",(SCOPE,)).fetchone()
-            if not outstanding:enqueue_probe(conn,uid,'deepseek-flash','high')
+            # Do not send a paid compatibility probe: DeepSeek is restricted
+            # to daily question-generation only. A missing compatibility
+            # record keeps the entire generator fail-closed.
+            raise PermissionError('daily_generation_model_preflight_not_verified')
         bind_pending(conn,uid)
         # A completed attempt's SDK workspace is reproducible. Keep its raw
         # provider receipt; never prune a currently leased/running job.
@@ -93,8 +92,8 @@ def bootstrap():
 
 
 def plan_tick(uid):
-    from app.auto_worker import dispatch_completed, plan
-    from app import auto_knowledge, auto_generation, auto_exams
+    from app.auto_worker import dispatch_completed
+    from app import auto_generation
     with qa_db() as conn:
         if not conn.execute('SELECT pg_try_advisory_xact_lock(280061) AS ok').fetchone()['ok']:
             return
@@ -108,10 +107,13 @@ def plan_tick(uid):
         replay_enospc(conn,uid,Path(os.environ.get('AI_PRIVATE_HOME','/tmp/ustc-harness-private')))
         m = conn.execute("SELECT compatibility FROM ai_model_catalog WHERE model_id='deepseek-flash' AND available").fetchone()
         if m and m['compatibility'].get('real_api_verified'):
-            for fn in (plan, auto_knowledge.plan_small_batch, auto_generation.plan, auto_exams.plan):
-                try:
-                    with conn.transaction():fn(conn,uid)
-                except ValueError:pass
+            # No textbook analysis, exam analysis, science review, grading,
+            # explanation or study plan may enqueue paid DeepSeek jobs.
+            try:
+                with conn.transaction():
+                    auto_generation.plan(conn,uid)
+            except ValueError:
+                pass
         bind_pending(conn,uid)
 
 
