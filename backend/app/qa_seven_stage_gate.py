@@ -9,6 +9,7 @@ import json
 import os
 from app.source_intake import SCHEMA, isolated_db
 from app.source_readiness import audit as source_audit
+from app.qa_stage1_acceptance import inspect as stage1_inspect
 from app.qa_exam_year_inventory import summarize as exam_year_summary
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
@@ -98,6 +99,7 @@ def main():
         raise SystemExit("qa_gate_requires_isolated_schema")
     with isolated_db(schema,"staging",readonly=True) as conn:
         source=source_audit(conn)
+        stage1_ledger=stage1_inspect(conn, source)
         g=conn.execute(
             "SELECT count(*) AS nodes,"
             "count(*) FILTER(WHERE scientific_review_state <> 'pending') AS approved "
@@ -149,6 +151,19 @@ def main():
                     "chapters":chapters,"facets":facets},
             risk,chapter,years,q,papers,accepted_buckets=accepted_buckets
         )
+    data["stage_1"].update({
+        "all_unresolved_source_issues_have_traceable_states": (
+            stage1_ledger["issue_provenance_and_states_accepted"]
+        ),
+        "qa_source_text_units": stage1_ledger["source_units"],
+        "ocr_risk_ledger_entries": stage1_ledger["ocr_risk_occurrences_tracked"],
+        "media_ledger_entries": stage1_ledger["media_objects_tracked"],
+        "chapter_mapping_ledger_entries": stage1_ledger["chapter_ledger_total"],
+        "risk_tracking_states": stage1_ledger["risk_by_state"],
+        "chapter_tracking_states": stage1_ledger["chapter_by_state"],
+        # Completeness of a review ledger is not a scientific or visual pass.
+        "science_and_media_acceptance_still_required": True,
+    })
     print("QA_SEVEN_STAGE_HARD_GATE="+json.dumps(
         data,ensure_ascii=False,separators=(",",":"),sort_keys=True
     ),flush=True)
