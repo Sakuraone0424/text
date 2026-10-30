@@ -122,29 +122,33 @@ def select_exam_style(conn, subject, kind, concept=None):
         sum(term in normal(row["transcription"]) for term in anchors)
         for row in rows
     ]
-    best = max(matches, default=0)
-    pool = [row for row, score in zip(rows, matches) if score == best]
-    idx = (int((concept or {}).get("unit_id", 0)) % len(pool)) if concept else 0
-    for offset in range(len(pool)):
-        chosen = dict(pool[(idx + offset) % len(pool)])
-        if kind == "single_choice":
-            chunks = conn.execute(
-                "SELECT id,text,quality_flags FROM source_units "
-                "WHERE document_id=%s AND ordinal >= %s "
-                "AND ordinal < %s + 8 ORDER BY ordinal LIMIT 8",
-                (chosen["document_id"], chosen["start_ordinal"],
-                 chosen["start_ordinal"]),
-            ).fetchall()
-            parts = complete_choice_style_unit_ids(chunks)
-            if not parts or parts[0] != chosen["id"]:
-                continue
-            chosen["style_unit_ids"] = parts
-        else:
-            chosen["style_unit_ids"] = [chosen["id"]]
-        chosen["lexical_topic_overlap"] = best
-        chosen["scope"] = "past_exam_style_not_textbook_answer_evidence"
-        return chosen
+    # A topic-lexical match with missing/corrupt choices is *not* a usable
+    # exemplar. Fall back to lower-overlap authentic questions rather than
+    # returning no style even though a valid alternative exists.
+    for score in sorted(set(matches), reverse=True):
+        pool = [row for row, value in zip(rows, matches) if value == score]
+        idx = (int((concept or {}).get("unit_id", 0)) % len(pool)) if concept else 0
+        for offset in range(len(pool)):
+            chosen = dict(pool[(idx + offset) % len(pool)])
+            if kind == "single_choice":
+                chunks = conn.execute(
+                    "SELECT id,text,quality_flags FROM source_units "
+                    "WHERE document_id=%s AND ordinal >= %s "
+                    "AND ordinal < %s + 8 ORDER BY ordinal LIMIT 8",
+                    (chosen["document_id"], chosen["start_ordinal"],
+                     chosen["start_ordinal"]),
+                ).fetchall()
+                parts = complete_choice_style_unit_ids(chunks)
+                if not parts or parts[0] != chosen["id"]:
+                    continue
+                chosen["style_unit_ids"] = parts
+            else:
+                chosen["style_unit_ids"] = [chosen["id"]]
+            chosen["lexical_topic_overlap"] = score
+            chosen["scope"] = "past_exam_style_not_textbook_answer_evidence"
+            return chosen
     return None
+
 
 def plan(conn, uid):
     existing = conn.execute(
