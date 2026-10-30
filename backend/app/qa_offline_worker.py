@@ -24,6 +24,22 @@ from app.qa_editorial_first_draft import seed as seed_editorial_first_draft
 from app.qa_editorial_batch import seed as seed_editorial_batch
 from app.qa_ocr_scope_guard import inspect as inspect_ocr_scope
 
+class OfflineStageError(Exception):
+    """Only an allowlisted processing step and exception *class*, never private text."""
+
+    def __init__(self, stage, error_type):
+        self.stage = stage
+        self.error_type = error_type
+        super().__init__(stage)
+
+
+def step(label, fn, *args):
+    try:
+        return fn(*args)
+    except Exception as exc:
+        raise OfflineStageError(label, type(exc).__name__) from None
+
+
 FORBIDDEN_ON = (
     "DEEPSEEK_API_AUTHORIZED",
     "AI_AUTOMATION_ENABLED",
@@ -46,22 +62,22 @@ def cycle():
     locked_scope = inspect_ocr_scope()
     from migrate import apply_migrations
     with qa_db() as conn:
-        apply_migrations(conn)
-        state = source_audit(conn)
+        step("migrations", apply_migrations, conn)
+        state = step("source_byte_audit", source_audit, conn)
         if state.get("imported_files") != 6 or not state.get(
             "all_six_byte_integrity_checks_passed"
         ):
             raise PermissionError("offline_worker_six_source_integrity_failed")
-        result = seed_exam_pending(conn)
-        linked = seed_topic_links(conn)
-        formula = seed_formula_triage(conn)
-        science_jobs = seed_science_pending(conn)
-        chapter_hints = seed_chapter_neighbors(conn)
-        first_draft = seed_editorial_first_draft(conn)
-        curated_drafts = seed_editorial_batch(conn)
-        review = review_priorities(conn)
-        source_gate = stage1_provenance(conn, state)
-        graph_gate = graph_provenance(conn)
+        result = step("exam_pending", seed_exam_pending, conn)
+        linked = step("exam_textbook_lexical", seed_topic_links, conn)
+        formula = step("formula_triage", seed_formula_triage, conn)
+        science_jobs = step("science_pending", seed_science_pending, conn)
+        chapter_hints = step("chapter_neighbors", seed_chapter_neighbors, conn)
+        first_draft = step("first_editorial_draft", seed_editorial_first_draft, conn)
+        curated_drafts = step("twelve_editorial_drafts", seed_editorial_batch, conn)
+        review = step("priority_review", review_priorities, conn)
+        source_gate = step("source_provenance", stage1_provenance, conn, state)
+        graph_gate = step("graph_provenance", graph_provenance, conn)
         exam_rows = conn.execute(
             "SELECT d.file_id,d.sha256 AS source_sha256,"
             "t.year,t.question_type,t.question_number,t.concerns,u.quality_flags "
@@ -69,7 +85,7 @@ def cycle():
             "JOIN source_documents d ON d.id=t.document_id "
             "JOIN source_units u ON u.id=t.unit_id"
         ).fetchall()
-        years = summarize_exam_years(exam_rows)
+        years = step("exam_year_inventory", summarize_exam_years, exam_rows)
         return {
             "source_files": 6,
             "only_six_ocr_sources": locked_scope,
@@ -111,8 +127,10 @@ def main():
             print("QA_OFFLINE_WORKER=" + json.dumps(
                 cycle(), ensure_ascii=False, sort_keys=True
             ), flush=True)
+        except OfflineStageError as exc:
+            # Allowlisted stage plus exception CLASS only; no private source, prompt or credential.
+            print("QA_OFFLINE_ERROR=" + json.dumps({"stage":exc.stage,"error_type":exc.error_type}), flush=True)
         except Exception as exc:
-            # No book passages, private records, credentials or API receipts in logs.
             print("QA_OFFLINE_ERROR=" + type(exc).__name__, flush=True)
         time.sleep(3600)
 
