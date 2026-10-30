@@ -184,6 +184,11 @@ def main():
         ),
         "real_subject_year_choice_style_coverage": choice_option_inventory["by_source_year"],
         "real_subject_year_slots": len(choice_option_inventory["by_source_year"]),
+        "latest_complete_choice_style_year": choice_option_inventory["latest_complete_choice_year"],
+        "actual_complete_choice_styles_2017_to_2026": (
+            choice_option_inventory["complete_choice_2017_to_2026"]
+        ),
+        "recent_choice_style_not_assumed_from_older_exams": True,
         "unassigned_or_outside_range_choice_starts": (
             choice_option_inventory["unassigned_or_outside_year_choice_starts"]
         ),
