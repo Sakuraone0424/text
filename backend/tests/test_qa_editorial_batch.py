@@ -208,3 +208,16 @@ def test_source_risky_but_unique_quote_is_private_pending_with_flag_record(monke
 
 def test_arbitrary_risky_flag_does_not_hide_risk_when_creating_private_draft():
     assert batch.private_draft_source_flags(["some_new_future_flag"]) == ["some_new_future_flag"]
+
+
+def test_same_source_fusion_questions_share_explicit_mutual_exclusion_tag():
+    facts = {fact["id"]:fact for fact in batch.source_facts()}
+    labels = []
+    for key in ("cell-mito-fusion-06", "cell-mito-26-12"):
+        fact = facts[key]
+        u = unit()
+        u["ocr_page"] = fact["ocr_page"]
+        u["text"] = fact["quote"]
+        q = batch.make_question(fact,u,bibliography(),101)
+        labels.append(set(q["knowledge_tags"]))
+    assert labels[0] & labels[1] == {"exclusive:cell/mitochondria_fusion_fission"}
