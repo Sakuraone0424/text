@@ -398,9 +398,7 @@ def repair_source_identity_from_locked_units(raw_question, units):
             "ocr_page": unit["ocr_page"],
             "paragraph_id": unit["unit_id"],
             "chapter": unit["chapter"],
-            "locator": (
-                f"OCR page {unit['ocr_page']}; source unit {unit_id}"
-            ),
+            "locator": f"OCR:{unit['ocr_page']}:UNIT:{unit_id}",
             "excerpt": excerpt.strip(),
         })
     return {**raw_question, "evidence": fixed}
