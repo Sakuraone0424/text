@@ -96,3 +96,19 @@ def test_criterion_cleanup_fails_closed_for_invalid_shapes():
     bad = {"knowledge_tags": [], "rubric": [{"knowledge_tags": [42]}]}
     assert drop_unlisted_criterion_tags(bad) is bad
     assert drop_unlisted_criterion_tags({"rubric": []}) == {"rubric": []}
+
+
+def test_verified_literal_anchor_requires_dual_checked_same_version_source():
+    from app.auto_generation import verified_literal_anchor
+    u = {"text": "真实教材段落：ATP 水解释放自由能，可与多种反应偶联。",
+         "subject": "biochemistry", "chapter": "第四章",
+         "file_id": "book", "source_sha256": "a" * 64}
+    relation = {
+        "review_excerpt": "ATP 水解释放自由能",
+        "file_id": "book", "file_sha256": "a" * 64,
+        "chapter": "第四章", "subject": "biochemistry",
+    }
+    assert verified_literal_anchor({"relation": relation}, u) == relation["review_excerpt"]
+    assert verified_literal_anchor({"relation": {**relation, "file_sha256": "b" * 64}}, u) is None
+    assert verified_literal_anchor({"relation": {**relation, "review_excerpt": "教材并不存在的内容"}}, u) is None
+    assert verified_literal_anchor({"relation": {**relation, "review_excerpt": "ATP"}}, u) is None
