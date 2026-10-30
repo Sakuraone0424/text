@@ -42,6 +42,7 @@ def test_all_twelve_first_pass_answers_fit_real_60q_schema():
 def test_two_blanks_are_individually_scored_not_a_fake_single_fill():
     fact=next(x for x in batch.source_facts() if x["id"]=="cell-arp23-02")
     q=batch.make_question(fact,unit(),bibliography(),101)
+    assert "按编号由小到大" in q["stem"]
     assert q["blanks"]==[
         {"accepted_answers":["Arp2"],"points":1},
         {"accepted_answers":["Arp3"],"points":1}
