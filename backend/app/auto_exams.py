@@ -6,6 +6,7 @@ from psycopg.types.json import Jsonb
 from app.question_quality import StrictModel
 from app.candidate_review import snapshot_unit
 from app.ai_jobs import enqueue
+from app.evidence_work import stored_work_version
 
 
 class Transcript(StrictModel):
@@ -34,8 +35,16 @@ def plan(conn, uid):
         >= 2
     ):
         return
+    # The work inventory can be upgraded independently of the planner.
+    # Select the newest actually persisted compatible queue rather than
+    # hardcoding an obsolete 1.6 tag and silently starving exam analysis.
+    work_version = stored_work_version(conn)
     row = conn.execute(
-        "SELECT * FROM evidence_review_work w WHERE algorithm='evidence-work/1.6' AND kind='exam_question' AND NOT EXISTS(SELECT 1 FROM ai_jobs j WHERE j.payload->>'exam_work_key'=w.work_key) ORDER BY priority DESC,work_key LIMIT 1"
+        "SELECT * FROM evidence_review_work w WHERE algorithm=%s "
+        "AND kind='exam_question' AND NOT EXISTS(SELECT 1 FROM ai_jobs j "
+        "WHERE j.payload->>'exam_work_key'=w.work_key) "
+        "ORDER BY priority DESC,work_key LIMIT 1",
+        (work_version,),
     ).fetchone()
     if not row:
         return
