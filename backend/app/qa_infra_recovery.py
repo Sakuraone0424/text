@@ -96,3 +96,42 @@ def replay_enospc(conn, user_id, private_root, limit=2):
         enqueue(conn, user_id, new_key, job["kind"], job["payload"])
         count += 1
     return count
+
+
+def requeue_owner_paused(conn, user_id, scope_id, limit=4):
+    """Resume only the owner's unfinished signed QA tasks; do not reset attempts.
+
+    An automation_stopped error is recorded before provider dispatch. Other
+    blocked states (scientific rejection, unknown errors, exhausted attempts)
+    remain blocked. The existing lease/cost/admission checks run on claim.
+    """
+    from app.qa_automation import check_job
+
+    if not 1 <= limit <= 10:
+        raise ValueError("bounded_pause_resume_required")
+    rows = conn.execute(
+        "SELECT * FROM ai_jobs WHERE user_id=%s AND state='blocked' "
+        "AND error_code='automation_stopped' "
+        "AND settings_snapshot->'qa_automation'->>'scope_id'=%s "
+        "AND kind=ANY(%s) ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED",
+        (user_id, scope_id, list(REPLAYABLE_KINDS), limit),
+    ).fetchall()
+    resumed = 0
+    for job in rows:
+        try:
+            check_job(job)
+        except (KeyError, ValueError, PermissionError):
+            continue
+        snap = job["settings_snapshot"]
+        if job["attempts"] >= snap["retry_limit"] + 1:
+            continue
+        if not evidence_is_current(conn, job):
+            continue
+        # Preserve the original task and all attempts/costs/receipts.
+        conn.execute(
+            "UPDATE ai_jobs SET state='retrying',next_retry=clock_timestamp() "
+            "WHERE id=%s AND state='blocked' AND error_code='automation_stopped'",
+            (job["id"],),
+        )
+        resumed += 1
+    return resumed
