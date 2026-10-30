@@ -45,6 +45,9 @@ def execute(job):
         "DEEPSEEK_API_KEY",
         "DEEPSEEK_TRIAL_SCOPE_ID",
         "DEEPSEEK_REVIEW_SCOPE_ID",
+        "DEEPSEEK_AUTOMATION_SCOPE_ID",
+        "QA_AUTOMATION_SIGNING_KEY",
+        "QA_AUTOMATION_ENABLED",
     )
     env = {k: os.environ[k] for k in allowed if k in os.environ}
     env.update(
@@ -67,7 +70,7 @@ def execute(job):
         try:
             out, _ = process.communicate(
                 json.dumps(job, default=str),
-                timeout=420 if "review_campaign" in job["settings_snapshot"] else 150,
+                timeout=420 if ("review_campaign" in job["settings_snapshot"] or "qa_automation" in job["settings_snapshot"]) else 150,
             )
         except subprocess.TimeoutExpired:
             os.killpg(process.pid, signal.SIGKILL)
@@ -76,7 +79,7 @@ def execute(job):
         returncode = process.returncode
     if returncode:
         raise RuntimeError("harness_task_failed")
-    if len(out.encode()) > (1048576 if "review_campaign" in job["settings_snapshot"] else 131072):
+    if len(out.encode()) > (1048576 if ("review_campaign" in job["settings_snapshot"] or "qa_automation" in job["settings_snapshot"]) else 131072):
         raise ValueError("oversized_harness_response")
     result = json.loads(out)
     if result.get("provider_error"):

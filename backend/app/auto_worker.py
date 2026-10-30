@@ -11,7 +11,7 @@ from app.worker import tick, integrations_tick
 
 
 def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
-    if scope_kind not in ("limited_trial", "review_campaign"):
+    if scope_kind not in ("limited_trial", "review_campaign", "qa_automation"):
         raise ValueError("unknown_execution_scope")
     scope_filter = (
         " AND settings_snapshot->'" + scope_kind + "'->>'scope_id'=%s" if scope_id else ""
