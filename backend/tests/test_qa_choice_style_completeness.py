@@ -68,3 +68,34 @@ def test_incomplete_or_wrong_ordinal_question_is_not_counted():
     report = inventory([row], lambda doc, ordinal: choices)
     assert report["by_subject"]["biochemistry"]["complete_A_to_D_choice_examples"] == 0
     assert report["by_subject"]["biochemistry"]["incomplete_or_unreadable_options"] == 1
+
+
+def test_52_locked_subject_year_slots_report_actual_complete_options_only():
+    report = inventory(
+        [exam("biochemistry", 10), exam("cell_biology", 20)],
+        lambda doc, ordinal: chunks(doc),
+    )
+    assert report["by_source_year_is_52_real_source_slots"] is True
+    assert len(report["by_source_year"]) == 52
+    bio = next(item for item in report["by_source_year"]
+               if item["subject"] == "biochemistry" and item["year"] == 2017)
+    cell = next(item for item in report["by_source_year"]
+                if item["subject"] == "cell_biology" and item["year"] == 2017)
+    assert bio["complete_A_to_D_choice_examples"] == 1
+    assert cell["complete_A_to_D_choice_examples"] == 1
+    assert report["unassigned_or_outside_year_choice_starts"] == {
+        "biochemistry": 0, "cell_biology": 0
+    }
+    assert not any(
+        r["complete_A_to_D_choice_examples"] for r in report["by_source_year"]
+        if r["year"] != 2017
+    )
+
+
+def test_out_of_range_year_cannot_launder_complete_exam_question():
+    row = exam("biochemistry", 11)
+    row["year"] = 1998  # legitimate cell year but outside biochemistry source
+    report = inventory([row], lambda doc, ordinal: chunks(doc))
+    assert report["by_subject"]["biochemistry"]["complete_A_to_D_choice_examples"] == 0
+    assert report["by_subject"]["biochemistry"]["blocked_before_option_check"] == 1
+    assert report["unassigned_or_outside_year_choice_starts"]["biochemistry"] == 1
