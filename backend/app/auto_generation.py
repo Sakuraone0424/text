@@ -285,6 +285,7 @@ def plan(conn, uid):
             if (
                 u["unit_sha256"] != concept["unit_sha256"]
                 or u["source_kind"] != "textbook"
+                or u["quality_flags"]
                 or u["subject"] != subject
                 or not pinned_source_bytes(u["file_id"], u["source_sha256"])
             ):
@@ -354,6 +355,55 @@ def plan(conn, uid):
                 continue
             enqueue(conn, uid, key, "generation", payload)
             return
+
+
+
+def repair_source_identity_from_locked_units(raw_question, units):
+    """Correct citation *coordinates* from immutable source snapshots only.
+
+    The model is not an authority on document hashes, OCR page indices, or
+    paragraph IDs. Repair those clerical coordinates only when the model's
+    proposed literal excerpt is already present in the exact requested unit.
+    Never invent/replace excerpt text, change a source unit ID, or alter the
+    question's answer, stem, rubric, or scientific claims. Invalid evidence
+    must still fail independent review.
+    """
+    if not isinstance(raw_question, dict):
+        return raw_question
+    entries = raw_question.get("evidence")
+    if not isinstance(entries, list):
+        return raw_question
+    units_by_id = {u["unit_id"]: u for u in units}
+    fixed = []
+    for evidence in entries:
+        if not isinstance(evidence, dict):
+            return raw_question
+        unit_id = evidence.get("source_unit_id")
+        unit = units_by_id.get(unit_id) if type(unit_id) is int else None
+        excerpt = evidence.get("excerpt")
+        if (
+            unit is None
+            or unit.get("source_kind") != "textbook"
+            or unit.get("quality_flags")
+            or not isinstance(excerpt, str)
+            or not excerpt.strip()
+            or excerpt.strip() not in unit.get("text", "")
+        ):
+            # Do not try to repair invented text or unknown/stale evidence.
+            return raw_question
+        fixed.append({
+            **evidence,
+            "file_id": unit["file_id"],
+            "source_sha256": unit["source_sha256"],
+            "ocr_page": unit["ocr_page"],
+            "paragraph_id": unit["unit_id"],
+            "chapter": unit["chapter"],
+            "locator": (
+                f"OCR page {unit['ocr_page']}; source unit {unit_id}"
+            ),
+            "excerpt": excerpt.strip(),
+        })
+    return {**raw_question, "evidence": fixed}
 
 
 def drop_unlisted_criterion_tags(raw_question):
@@ -442,6 +492,7 @@ def accept(conn, job):
     # Retain compatibility with older explicitly wrapped generation responses.
     raw_question = response.get("question", response) if isinstance(response, dict) else response
     raw_question = drop_unlisted_criterion_tags(raw_question)
+    raw_question = repair_source_identity_from_locked_units(raw_question, p["evidence"])
     q = Question.model_validate(raw_question)
     if (q.subject, q.question_type, q.max_points) != (
         p["subject"],
