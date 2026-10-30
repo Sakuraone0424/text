@@ -55,6 +55,8 @@ def make_question(fact, unit, bibliography, style_id):
     if kind == "fill_blank":
         if blank_count == 1:
             accepted = [answer]
+            if fact["id"] == "biou-activation-07":
+                accepted.extend(["活化自由能", "活化自由能（ΔG‡）", "ΔG‡"])
             if fact["id"] == "cell-nls-11":
                 accepted.extend(["核定位信号", "NLS", "核定位序列"])
             if fact["id"] == "cell-srp-03":
@@ -142,7 +144,9 @@ def seed(conn, facts=None, create=create_packet, style_lookup=select_exam_style)
             continue
         bibliography = from_database(conn, unit)
         question = make_question(item, unit, bibliography, style_id)
-        candidate_key=f"qa-ocr-curated-{item['id']}-{unit['unit_id']}-{style_id}-v1"
+        # Changed scientific wording must not silently reuse an older first-pass draft.
+        revision = "v2" if item["id"] in {"biou-activation-07", "biol-carnitine-10"} else "v1"
+        candidate_key=f"qa-ocr-curated-{item['id']}-{unit['unit_id']}-{style_id}-{revision}"
         packet = {
             "candidate_key": candidate_key,
             "batch_key":"qa-editorial-first-pass/20261030",
