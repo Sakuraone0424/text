@@ -6,12 +6,13 @@ Only report boolean readiness flags. Never log a key or launch paid requests.
 """
 import json
 import os
+from app.source_intake import SCHEMA
 
 
 def inspect(env):
     checks = {
         "qa_environment_confirmed": env.get("RAILWAY_ENVIRONMENT_NAME","").lower()=="qa",
-        "qa_isolated_schema_selected": env.get("QA_IMPORT_SCHEMA","").startswith("source_staging_"),
+        "qa_isolated_schema_selected": bool(SCHEMA.fullmatch(env.get("QA_IMPORT_SCHEMA", ""))),
         "qa_source_upload_disabled": env.get("QA_IMPORT_ENABLED")=="0",
         "model_api_authorized_by_owner": env.get("DEEPSEEK_API_AUTHORIZED")=="1",
         "third_party_private_source_excerpt_transfer_authorized": (
@@ -19,8 +20,12 @@ def inspect(env):
         ),
         "model_provider_api_secret_present": bool(env.get("DEEPSEEK_API_KEY")),
         "paid_automation_explicitly_enabled": env.get("AI_AUTOMATION_ENABLED")=="1",
-        "isolated_worker_target_configured": (
-            env.get("QUIZ_DB_SCHEMA","").startswith("source_staging_")
+        "isolated_worker_target_configured": bool(
+            SCHEMA.fullmatch(env.get("QUIZ_DB_SCHEMA", ""))
+        ),
+        "worker_uses_exact_QA_source_schema": bool(
+            SCHEMA.fullmatch(env.get("QA_IMPORT_SCHEMA", ""))
+            and env.get("QUIZ_DB_SCHEMA") == env.get("QA_IMPORT_SCHEMA")
         ),
     }
     # Neither metadata presence nor consent represents a successful model call,
