@@ -121,6 +121,9 @@ def withdraw(question_id: int):
 
 @router.post("/papers")
 def paper(blueprint: Blueprint, username: str = Depends(require_auth)):
+    if (os.environ.get("QUIZ_DEPLOYMENT_PROFILE") == "ustc-exam-ocr-qa"
+            and blueprint.specification != "xiaohan-60q-150pt-v2"):
+        raise HTTPException(409, "QA training requires 60-question specification")
     return operation(lambda c, u: service.create_paper(c, u, blueprint), username)
 
 

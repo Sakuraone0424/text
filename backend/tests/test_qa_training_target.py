@@ -31,3 +31,18 @@ def test_wrong_target_or_schema_rejected_before_connection(qa, monkeypatch, key,
     monkeypatch.setenv(key, value)
     with pytest.raises(PermissionError):
         verify_isolated_target()
+
+
+def test_qa_rejects_legacy_new_paper_before_database(qa, monkeypatch):
+    from fastapi import HTTPException
+    from app import routes_v2
+    from app.question_quality import Blueprint
+    from app.training_spec import default_blueprint
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Legacy paper must be refused before touching QA data")
+
+    monkeypatch.setattr(routes_v2, "operation", forbidden)
+    with pytest.raises(HTTPException) as error:
+        routes_v2.paper(Blueprint.model_validate(default_blueprint()), "owner")
+    assert error.value.status_code == 409
