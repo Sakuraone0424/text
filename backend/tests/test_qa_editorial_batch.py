@@ -117,6 +117,8 @@ def test_every_scoring_checkpoint_has_source_pending_evidence(monkeypatch, fact_
     fact = next(f for f in batch.source_facts() if f["id"] == fact_id)
     base = unit()
     base.update(
+        file_id=next(fid for fid, meta in batch.FILES.items()
+                     if meta["key"] == batch.BOOK_KEYS[fact["source_key"]]),
         subject=batch.SUBJECTS[fact["source_key"]],
         ocr_page=fact["ocr_page"],
         text=fact["quote"],
