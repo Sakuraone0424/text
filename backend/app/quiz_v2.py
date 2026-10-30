@@ -22,6 +22,21 @@ class PreparationPaused(ValueError):
     pass
 
 
+def exclusive_topic_collision(question, other):
+    """Do not put two differently worded questions on the SAME concept in a paper.
+
+    Only explicit curated tags are exclusive. General chapter or chapter-wide
+    knowledge labels are not exclusive, so legitimate different topics remain.
+    This is a selection gate, not scientific approval.
+    """
+    def ids(item):
+        return {
+            tag for tag in item.get("knowledge_tags", [])
+            if isinstance(tag, str) and tag.startswith("exclusive:")
+        }
+    return bool(ids(question) & ids(other))
+
+
 class BankShortage(ValueError):
     def __init__(self, shortages):
         self.shortages = shortages
@@ -283,6 +298,14 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     next(r for r in audit if r["question_id"] == row["id"])[
                         "excluded_reasons"
                     ].append("mutual_answer_cue")
+                    continue
+                if any(
+                    exclusive_topic_collision(content, r["content"])
+                    for r in selected + pool
+                ):
+                    next(r for r in audit if r["question_id"] == row["id"])[
+                        "excluded_reasons"
+                    ].append("exclusive_concept_already_present")
                     continue
                 if any(
                     duplicate(content["stem"], r["content"]["stem"])
