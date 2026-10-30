@@ -221,3 +221,59 @@ def test_same_source_fusion_questions_share_explicit_mutual_exclusion_tag():
         q = batch.make_question(fact,u,bibliography(),101)
         labels.append(set(q["knowledge_tags"]))
     assert labels[0] & labels[1] == {"exclusive:cell/mitochondria_fusion_fission"}
+
+
+def test_notation_flagged_exam_style_creates_private_draft_with_disclosed_risk(monkeypatch):
+    fact = next(f for f in batch.source_facts() if f["id"] == "biou-activation-07")
+    base = {
+        **unit(),
+        "file_id": next(fid for fid, meta in batch.FILES.items()
+                        if meta["key"] == "biochemistry_upper"),
+        "subject": "biochemistry",
+        "text": fact["quote"],
+        "ocr_page": fact["ocr_page"],
+    }
+    exam = {
+        **base,
+        "unit_id": 101,
+        "source_kind": "exam_transcription",
+        "file_id": next(fid for fid, meta in batch.FILES.items()
+                        if meta["key"] == "biochemistry_exams"),
+        "quality_flags": ["scientific_notation_requires_source_review"],
+    }
+    monkeypatch.setattr(batch,"snapshot_unit", lambda conn, uid: base if uid==9 else exam)
+    monkeypatch.setattr(batch,"pinned_source_bytes",lambda *args: True)
+    monkeypatch.setattr(batch,"from_database",lambda *args: bibliography())
+
+    class Conn:
+        def execute(self,sql,params=None):
+            if sql.startswith("SELECT u.id"):
+                return type("Rows",(),{"fetchall":lambda self:[{"id":9}]})()
+            if sql.startswith("SELECT status FROM reviewed_questions"):
+                return type("Row",(),{"fetchone":lambda self:{"status":"draft"}})()
+            raise AssertionError(sql)
+
+    packets=[]
+    result = batch.seed(
+        Conn(),facts=[fact],
+        create=lambda conn,payload: (packets.append(payload) or 901),
+        style_lookup=lambda *args: {"id":101,"year":2024},
+    )
+    assert result["private_drafts_created_or_reused"] == 1
+    assert result["private_drafts_pending_exam_style_uncertainty"] == 1
+    assert result["published_count"] == 0
+    assert result["independent_scientific_approvals"] == 0
+    assert result["model_calls"] == 0
+    assert "Unresolved historical exam style" in " ".join(
+        packets[0]["ai_analysis"]["uncertainties"]
+    )
+
+    for forbidden in ("corrupt_ocr","untranscribed_image","ocr_uncertain","transcription_gap_reported"):
+        exam["quality_flags"]=[forbidden]
+        packets.clear()
+        refused=batch.seed(
+            Conn(),facts=[fact],
+            create=lambda conn,payload: pytest.fail("risky style must not persist"),
+            style_lookup=lambda *args: {"id":101,"year":2024},
+        )
+        assert refused["blocked_reasons"] == {"historical_exam_style_not_source_locked":1}
