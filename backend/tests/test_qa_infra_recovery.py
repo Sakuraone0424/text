@@ -72,3 +72,35 @@ def test_unknown_or_semantic_failure_never_selected(monkeypatch, tmp_path):
     assert "error_code='OSError'" in sql
     assert "'28'" in sql
     assert "state='blocked'" in sql
+
+
+def test_owner_pause_only_resumes_signed_fresh_unexhausted_tasks(monkeypatch):
+    from app import qa_automation
+    evidence = {"unit_id": 1, "unit_sha256": "sha", "file_id": "f", "source_sha256": "source"}
+    monkeypatch.setattr(qa_automation, "check_job", lambda j: None)
+    monkeypatch.setattr(r, "evidence_is_current", lambda c, j: True)
+    row = dict(id=42, kind="textbook_analysis", attempts=0,
+               settings_snapshot={"retry_limit": 2}, payload={"evidence": evidence})
+    conn = FakeConn([row])
+    assert r.requeue_owner_paused(conn, 9, "signed-scope") == 1
+    sql = conn.queries[0][0]
+    assert "error_code='automation_stopped'" in sql
+    assert "qa_automation" in sql
+    assert conn.queries[-1][1] == (42,)
+    assert "next_retry=clock_timestamp()" in conn.queries[-1][0]
+
+
+def test_owner_pause_does_not_reset_attempts_or_replay_stale(monkeypatch):
+    from app import qa_automation
+    monkeypatch.setattr(qa_automation, "check_job", lambda j: None)
+    monkeypatch.setattr(r, "evidence_is_current", lambda c, j: False)
+    row = dict(id=42, kind="textbook_analysis", attempts=0,
+               settings_snapshot={"retry_limit": 2})
+    conn = FakeConn([row])
+    assert r.requeue_owner_paused(conn, 9, "scope") == 0
+    assert len(conn.queries) == 1
+    monkeypatch.setattr(r, "evidence_is_current", lambda c, j: True)
+    row["attempts"] = 3
+    conn = FakeConn([row])
+    assert r.requeue_owner_paused(conn, 9, "scope") == 0
+    assert len(conn.queries) == 1
