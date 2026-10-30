@@ -162,3 +162,35 @@ def test_option_risk_and_unrelated_continuation_fail_closed():
         unit(2, "A. First B. Second"),
         unit(3, "C. Third D. Fourth", ["untranscribed_image"])
     ]) is None
+
+
+def test_selector_falls_back_when_best_literal_topic_match_has_no_full_options():
+    from app.auto_generation import select_exam_style
+
+    class Fake:
+        def execute(self, sql, params):
+            if "FROM exam_transcript_candidates" in sql:
+                return Cursor([
+                    dict(id=10, document_id=6, start_ordinal=100,
+                         year=2024, transcription="1. Synthetic ATP question?"),
+                    dict(id=20, document_id=6, start_ordinal=200,
+                         year=2023, transcription="2. Synthetic alternative question?"),
+                ])
+            if params[1] == 100:
+                return Cursor([
+                    unit(10, "1. Synthetic ATP question?"),
+                    unit(11, "A. First B. Second C. Third"),
+                ])
+            return Cursor([
+                unit(20, "2. Synthetic alternative question?"),
+                unit(21, "A. First B. Second C. Third D. Fourth"),
+            ])
+
+    chosen = select_exam_style(Fake(), "biochemistry", "single_choice", {
+        "unit_id": 0, "relation": {"name": "ATP"}
+    })
+    assert chosen is not None
+    assert chosen["id"] == 20
+    assert chosen["style_unit_ids"] == [20, 21]
+    assert chosen["lexical_topic_overlap"] == 0
+    assert chosen["scope"] == "past_exam_style_not_textbook_answer_evidence"
