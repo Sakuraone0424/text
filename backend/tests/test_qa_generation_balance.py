@@ -21,7 +21,9 @@ def test_per_quota_attempt_balance_does_not_count_scientific_approvals():
     }
     result = balanced_generation_buckets(attempts)
     assert all(subject == "cell_biology" for subject, _, _ in result[:4])
-    assert [kind for subject, kind, _ in result[4:]] == list(COUNTS)
+    assert [kind for subject, kind, _ in result[4:]] == [
+        "short_answer", "term", "fill_blank", "single_choice"
+    ]
 
 
 def test_prevent_repeated_failed_single_choice_generations_from_starving_other_kinds():
