@@ -16,6 +16,7 @@ from app.qa_choice_style_completeness import inspect as choice_style_inventory
 from app.qa_review_worklist import inspect as science_review_worklist
 from app.qa_real_60q_readback import inspect as real_training_readback
 from app.qa_exam_year_inventory import summarize as exam_year_summary
+from app.qa_exam_paper_variants import summary as exam_variant_summary
 from app.auto_generation import eligible_verified_reserve, STARTUP_RESERVE_DAYS
 from app.training_spec_v2 import SUBJECTS, COUNTS
 
@@ -172,6 +173,7 @@ def main():
         "real_paper_failures_by_reason": real_training_proof["rejected_real_papers_by_reason"],
         "artificial_test_papers_cannot_count": True,
     })
+    data["stage_3"].update(exam_variant_summary())
     data["stage_3"].update({
         "past_exam_provenance": "user_provided_genuine_past_exams",
         "eight_source_style_bucket_candidates": {
