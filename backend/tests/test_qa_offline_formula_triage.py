@@ -1,6 +1,9 @@
 """Synthetic arithmetic/notation fixtures, not acceptance of real OCR."""
 import pytest
 from app import qa_offline_formula_triage as audit
+from app.source_policy import FILES
+
+CELL_FILE_ID = next(fid for fid, item in FILES.items() if item["key"] == "cell_biology")
 
 
 def test_formula_direction_and_cofactor_visual_checks_are_pending():
@@ -19,9 +22,9 @@ def test_safe_paragraph_without_equation_generates_no_formula_issue():
 
 
 def test_formula_flags_are_not_scientific_verdicts(monkeypatch):
-    monkeypatch.setattr(audit, "pinned_source_bytes", lambda fid, sha: fid=="cell_biology")
+    monkeypatch.setattr(audit, "pinned_source_bytes", lambda fid, sha: fid==CELL_FILE_ID)
     rows, counts = audit.build([{
-        "unit_id": 9, "file_id": "cell_biology",
+        "unit_id": 9, "file_id": CELL_FILE_ID,
         "source_sha256": "a"*64, "ocr_page": 37,
         "text": "ATP + H₂O → ADP + Pi",
     }])
