@@ -70,6 +70,14 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "published_questions": 0,
         "model_calls": 0,
     })
+    monkeypatch.setattr(worker, "seed_exam_media_firstpass", lambda conn: {
+        "original_docx_files":2,
+        "media_source_records":31,
+        "content_firstpass_status":{
+            "firstpass_supported_with_limits":16,"blocked":11,"reference_only":4},
+        "science_approved":0,"official_answers_approved":0,"model_calls":0,
+        "unreviewed_remaining":0,
+    })
     monkeypatch.setattr(worker, "seed_chapter_neighbors", lambda conn: {
         "unmapped_pages_with_navigation_records": 72,
         "chapter_repairs_applied": 0,
@@ -122,6 +130,8 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["pending_science_review_worklist"]["new_pending_tasks"] == 12
     assert result["source_locked_science_content_firstpass"]["substantive_science_corrections_source_attested"] == 10
     assert result["source_locked_science_content_firstpass"]["scientific_double_approvals"] == 0
+    assert result["exam_media_source_locked_science_firstpass"]["media_source_records"]==31
+    assert result["exam_media_source_locked_science_firstpass"]["science_approved"]==0
     assert result["chapter_navigation_review"]["unmapped_pages_with_navigation_records"] == 72
     assert result["chapter_ocr_navigation"]["exact_six_source_navigation_proposals"] == 72
     assert result["chapter_ocr_navigation"]["verified_scientific_chapter_repairs"] == 0
