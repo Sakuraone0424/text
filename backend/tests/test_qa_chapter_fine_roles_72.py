@@ -2,6 +2,7 @@
 and no claim about missing original PDF pages or independent approval.
 """
 from collections import Counter
+from hashlib import sha256
 import pytest
 from app import qa_chapter_fine_roles_72 as page
 
@@ -18,7 +19,7 @@ def fake_original_proposals():
             "issue_key":f"{source}/{index}",
             "source_key":source,
             "ocr_page":index,
-            "source_sha256":"a"*64,
+            "source_sha256":sha256(source.encode("utf-8")).hexdigest(),
             "ocr_text_sha256":f"{index:064x}",
             "navigation_category":page.BROAD.get(role,"frontmatter_or_contents"),
         })
@@ -64,7 +65,9 @@ def test_all_72_precise_roles_accounted_for_and_intro_not_labeled_preface():
 
 
 def test_72_ocr_roles_sql_real_readback_no_science_signatures(monkeypatch):
-    monkeypatch.setattr(page,"pinned_source_bytes",lambda fid,sha:sha=="a"*64)
+    monkeypatch.setattr(page,"pinned_source_bytes",lambda fid,sha:any(
+        page.BOOKS[key]==fid and sha256(key.encode("utf-8")).hexdigest()==sha
+        for key in page.BOOKS))
     fake=DB()
     result=page.seed(fake)
     assert len(fake.stored)==72
