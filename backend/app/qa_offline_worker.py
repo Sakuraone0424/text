@@ -20,6 +20,7 @@ from app.qa_stage1_acceptance import inspect as stage1_provenance
 from app.qa_graph_provenance_gate import inspect as graph_provenance
 from app.qa_graph_worklist_seed import ensure as seed_science_pending
 from app.qa_graph_23_science_firstpass import seed as seed_mechanism_23_firstpass
+from app.qa_ocr_poliii_core_conflict import seed as seed_poliii_source_conflict
 from app.qa_science_substantive_firstpass import seed as seed_substantive_science_firstpass
 from app.qa_exam_media_science_firstpass import seed as seed_exam_media_firstpass
 from app.qa_chapter_neighbor_proposals import seed as seed_chapter_neighbors
@@ -78,6 +79,7 @@ def cycle():
         formula = step("formula_triage", seed_formula_triage, conn)
         science_jobs = step("science_pending", seed_science_pending, conn)
         science_mechanisms = step("23_mechanism_science_firstpass", seed_mechanism_23_firstpass, conn)
+        poliii_conflict = step("poliii_source_conflict", seed_poliii_source_conflict, conn)
         substantive_review = step("substantive_science_firstpass", seed_substantive_science_firstpass, conn)
         exam_media_review = step("exam_media_science_firstpass", seed_exam_media_firstpass, conn)
         chapter_hints = step("chapter_neighbors", seed_chapter_neighbors, conn)
@@ -106,6 +108,7 @@ def cycle():
             "formula_visual_review": formula,
             "pending_science_review_worklist": science_jobs,
             "mechanism_science_firstpass": science_mechanisms,
+            "real_ocr_scientific_conflict": poliii_conflict,
             "source_locked_science_content_firstpass": substantive_review,
             "exam_media_source_locked_science_firstpass": exam_media_review,
             "chapter_navigation_review": chapter_hints,
