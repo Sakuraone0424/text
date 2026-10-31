@@ -23,6 +23,7 @@ from app.qa_science_substantive_firstpass import seed as seed_substantive_scienc
 from app.qa_exam_media_science_firstpass import seed as seed_exam_media_firstpass
 from app.qa_chapter_neighbor_proposals import seed as seed_chapter_neighbors
 from app.qa_chapter_ocr_navigation_72 import seed as seed_chapter_ocr_navigation
+from app.qa_chapter_fine_roles_72 import seed as seed_chapter_fine_roles
 from app.qa_editorial_first_draft import seed as seed_editorial_first_draft
 from app.qa_editorial_batch import seed as seed_editorial_batch
 from app.qa_ocr_scope_guard import inspect as inspect_ocr_scope
@@ -79,6 +80,7 @@ def cycle():
         exam_media_review = step("exam_media_science_firstpass", seed_exam_media_firstpass, conn)
         chapter_hints = step("chapter_neighbors", seed_chapter_neighbors, conn)
         chapter_ocr_navigation = step("chapter_ocr_navigation", seed_chapter_ocr_navigation, conn)
+        chapter_precise_roles = step("chapter_precise_roles_72", seed_chapter_fine_roles, conn)
         first_draft = step("first_editorial_draft", seed_editorial_first_draft, conn)
         curated_drafts = step("twelve_editorial_drafts", seed_editorial_batch, conn)
         review = step("priority_review", review_priorities, conn)
@@ -105,6 +107,7 @@ def cycle():
             "exam_media_source_locked_science_firstpass": exam_media_review,
             "chapter_navigation_review": chapter_hints,
             "chapter_ocr_navigation": chapter_ocr_navigation,
+            "chapter_precise_ocr_roles": chapter_precise_roles,
             "first_source_grounded_editorial_draft": first_draft,
             "twelve_source_reviewed_private_drafts": curated_drafts,
             "source_ledger_provenance": source_gate["issue_provenance_and_states_accepted"],
