@@ -168,6 +168,9 @@ def claim_reason(conn, job, amount):
 
 
 def execution_guard(job):
+    if "qa_automation" in job["settings_snapshot"]:
+        from app.qa_automation import execution_guard as automation_guard
+        return automation_guard(job)
     if "review_campaign" in job["settings_snapshot"]:
         from app.review_campaign import execution_guard as campaign_guard
         return campaign_guard(job)

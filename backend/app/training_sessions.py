@@ -6,7 +6,17 @@ from datetime import timedelta
 from psycopg.types.json import Jsonb
 
 from app.training_spec import DURATION_SECONDS, validate_items
+from app import training_spec_v2 as new_spec
 from app.question_quality import normalize_answer
+
+
+def validate_paper_items(conn, paper_id, items):
+    row = conn.execute("SELECT blueprint FROM papers_v2 WHERE id=%s", (paper_id,)).fetchone()
+    if not row:
+        raise LookupError("Paper not found")
+    if row["blueprint"].get("specification") == new_spec.SPECIFICATION:
+        return new_spec.validate_items(items)
+    return validate_items(items)
 
 
 def server_now(conn):
@@ -28,7 +38,7 @@ def start(conn, user_id, paper_id):
         items = conn.execute(
             "SELECT snapshot FROM paper_items_v2 WHERE paper_id=%s", (paper_id,)
         ).fetchall()
-        validate_items([i["snapshot"] for i in items])
+        validate_paper_items(conn, paper_id, [i["snapshot"] for i in items])
         if conn.execute(
             "SELECT 1 FROM attempts_v2 WHERE paper_id=%s", (paper_id,)
         ).fetchone():
@@ -210,7 +220,7 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
         "SELECT question_id,snapshot FROM paper_items_v2 WHERE paper_id=%s ORDER BY position",
         (paper_id,),
     ).fetchall()
-    validate_items([i["snapshot"] for i in items])
+    validate_paper_items(conn, paper_id, [i["snapshot"] for i in items])
     drafts = {
         r["question_id"]: r["value"]
         for r in conn.execute(
@@ -288,6 +298,16 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
     from app.archiving import enqueue
 
     enqueue(conn, user_id, paper_id)
+    if timed_out:
+        # Timeout finalization can run from the expiry worker, a draft retry
+        # or a read-only API request. It must have the same conditional grading
+        # dispatch as an explicit submit, even when the learner is offline.
+        # try_queue enforces provider/private-data authorization and never
+        # performs a paid model call in this transaction. Job keys are
+        # idempotent; a later submit retry cannot duplicate accepted grades.
+        from app.grading_activity import try_queue
+
+        try_queue(conn, user_id, paper_id)
 
 
 def expire_due(conn):

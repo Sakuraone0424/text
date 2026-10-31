@@ -15,10 +15,26 @@ from app.question_quality import (
 )
 from app.common import today_cn
 from app.training_spec import COUNTS, SUBJECTS, validate_items
+from app import training_spec_v2 as spec_v2
 
 
 class PreparationPaused(ValueError):
     pass
+
+
+def exclusive_topic_collision(question, other):
+    """Do not put two differently worded questions on the SAME concept in a paper.
+
+    Only explicit curated tags are exclusive. General chapter or chapter-wide
+    knowledge labels are not exclusive, so legitimate different topics remain.
+    This is a selection gate, not scientific approval.
+    """
+    def ids(item):
+        return {
+            tag for tag in item.get("knowledge_tags", [])
+            if isinstance(tag, str) and tag.startswith("exclusive:")
+        }
+    return bool(ids(question) & ids(other))
 
 
 class BankShortage(ValueError):
@@ -135,23 +151,30 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     day = day or today_cn()
     lock_bank(conn)
     spec = blueprint.model_dump()
+    is_v2 = spec["specification"] == spec_v2.SPECIFICATION
+    spec_counts = spec_v2.COUNTS if is_v2 else COUNTS
     existing = conn.execute(
         "SELECT * FROM papers_v2 WHERE user_id=%s AND paper_date=%s", (user_id, day)
     ).fetchone()
     if existing:
         if existing["blueprint"] != spec:
-            raise ValueError("Today already has a paper with a different blueprint")
+            # A pre-upgrade 28q paper must remain reachable under its own
+            # immutable rules; do not overwrite/restart it with a 60q request.
+            if not is_v2:
+                raise ValueError("Today already has a paper with a different blueprint")
         return load_paper(conn, user_id, existing["id"])
     if resume_unfinished:
         # Preparing a paper is not exposure or a running exam. A restored first
         # paper must remain reachable when cloud activation happens another day.
         previous = conn.execute(
             "SELECT p.id FROM papers_v2 p LEFT JOIN training_sessions s ON s.paper_id=p.id "
-            "WHERE p.user_id=%s AND p.paper_date<%s AND p.blueprint=%s "
+            "WHERE p.user_id=%s AND p.paper_date<%s "
+            "AND (p.blueprint=%s OR (%s AND p.blueprint->>'specification'=%s "
+            "AND s.paper_id IS NOT NULL AND s.submitted_at IS NULL AND s.deadline>clock_timestamp())) "
             "AND NOT EXISTS(SELECT 1 FROM attempts_v2 a WHERE a.paper_id=p.id) "
             "AND (s.paper_id IS NULL OR (s.submitted_at IS NULL AND s.deadline>clock_timestamp())) "
             "ORDER BY p.paper_date DESC,p.id DESC LIMIT 1 FOR UPDATE OF p",
-            (user_id, day, Jsonb(spec)),
+            (user_id, day, Jsonb(spec), is_v2, "xiaohan-150-60-v1"),
         ).fetchone()
         if previous:
             return load_paper(conn, user_id, previous["id"])
@@ -196,6 +219,19 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         except ValueError:
             reasons.append("invalid_question_or_rubric")
         if not reasons:
+            supported_points = spec_v2.POINTS if is_v2 else {
+                "single_choice": 2, "fill_blank": 3, "term": 4,
+                "short_answer": 8, "essay": 20,
+            }
+            if (content.get("question_type") not in supported_points
+                or content.get("max_points") != supported_points[content["question_type"]]):
+                reasons.append("not_compatible_with_paper_version_scoring")
+        if not reasons and is_v2:
+            from app.source_policy import pinned_science_evidence
+
+            if not pinned_science_evidence(content):
+                reasons.append("scientific_evidence_outside_locked_ocr_four")
+        if not reasons:
             automatic = conn.execute(
                 "SELECT status FROM auto_question_states WHERE question_id=%s",
                 (row["id"],),
@@ -205,7 +241,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
 
                 if not ready(conn, row["id"]):
                     reasons.append("automatic_quality_not_ready_or_stale")
-            elif os.environ.get("QUIZ_AUTO_ONLY") == "1":
+            elif is_v2 or os.environ.get("QUIZ_AUTO_ONLY") == "1":
                 reasons.append("automatic_ready_qualification_required")
             else:
                 # Historical API compatibility; new automatic records never fall back to it.
@@ -250,7 +286,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         ]
         eligible.append(row)
     for subject in SUBJECTS:
-        for kind, count in COUNTS.items():
+        for kind, count in spec_counts.items():
             pool = []
             for row in eligible:
                 content = row["content"]
@@ -262,6 +298,14 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     next(r for r in audit if r["question_id"] == row["id"])[
                         "excluded_reasons"
                     ].append("mutual_answer_cue")
+                    continue
+                if any(
+                    exclusive_topic_collision(content, r["content"])
+                    for r in selected + pool
+                ):
+                    next(r for r in audit if r["question_id"] == row["id"])[
+                        "excluded_reasons"
+                    ].append("exclusive_concept_already_present")
                     continue
                 if any(
                     duplicate(content["stem"], r["content"]["stem"])
@@ -297,7 +341,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             )
     if shortages:
         raise BankShortage(shortages)
-    validate_items([r["content"] for r in selected])
+    (spec_v2.validate_items if is_v2 else validate_items)([r["content"] for r in selected])
     from app.answer_cues import conflict
 
     if any(
@@ -386,7 +430,7 @@ def load_paper(conn, user_id, paper_id):
     return {
         "paper_id": paper_id,
         "date": row["paper_date"].isoformat(),
-        "mode": "reviewed_28",
+        "mode": "reviewed_60" if row["blueprint"].get("specification") == spec_v2.SPECIFICATION else "reviewed_28",
         "blueprint": row["blueprint"],
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),
@@ -588,6 +632,13 @@ def result(conn, user_id, paper_id):
                 "question_type": r["snapshot"]["question_type"],
                 "max_points": r["snapshot"]["max_points"],
                 "solution": r["snapshot"]["answer"],
+                "options": r["snapshot"].get("options", {}),
+                "solution_display": (
+                    f'{r["snapshot"]["answer"]}. {r["snapshot"]["options"][r["snapshot"]["answer"]]}'
+                    if r["snapshot"]["question_type"] == "single_choice"
+                    and r["snapshot"]["answer"] in r["snapshot"].get("options", {})
+                    else r["snapshot"]["answer"]
+                ),
                 "evidence": r["snapshot"]["evidence"],
                 "rubric": r["snapshot"]["rubric"],
             }

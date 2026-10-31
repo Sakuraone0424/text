@@ -249,11 +249,11 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     page.wait_for_function('navigator.serviceWorker.controller !== null')
     page.wait_for_function("""async () => {
       const keys = await caches.keys();
-      return keys.includes('xiaohan-training-shell-v8-offline-recovery-upgrade') &&
+      return keys.includes('xiaohan-training-shell-v9-sixty-question-upgrade') &&
              !keys.includes('xiaohan-training-shell-v7-offline-recovery');
     }""")
     assert page.evaluate("""async () => {
-      const cache = await caches.open('xiaohan-training-shell-v8-offline-recovery-upgrade');
+      const cache = await caches.open('xiaohan-training-shell-v9-sixty-question-upgrade');
       const asset = await cache.match('/static/training.js');
       return !!asset && (await asset.text()).includes('cachedPaper(username, paper.paper_id)');
     }""")

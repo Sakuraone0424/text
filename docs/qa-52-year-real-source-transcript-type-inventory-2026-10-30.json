@@ -1,0 +1,927 @@
+{
+  "status": "qa_postgres_parser_transcript_candidates_not_official_original_exams",
+  "source": "Railway ustc-exam-ocr-qa qa source database; read-only audit from deployment ce6265b2-888f-4ef9-8118-5a1c99ba00f1",
+  "summary": {
+    "candidate_numbered_starts": 1986,
+    "expected_years": 52,
+    "official_original_exams_authenticated": false,
+    "parser_structurally_safe_starts": 1519,
+    "question_counts_certified": false,
+    "scientific_answer_keys_approved": false,
+    "scope": "canonical_QA_SQL_user_DOCX_transcription_year_type_candidates",
+    "unknown_year_unit_counts": {
+      "biochemistry_exams": 1,
+      "cell_biology_exams": 1
+    },
+    "unrecognized_type_start_counts": {
+      "biochemistry_exams": 152,
+      "cell_biology_exams": 195
+    },
+    "years_missing": [],
+    "years_with_transcription": 52
+  },
+  "type_counts": {
+    "fill_blank": 583,
+    "question_answer": 155,
+    "single_choice": 141,
+    "term": 500,
+    "short_answer": 396,
+    "true_false": 82,
+    "unknown": 86,
+    "comprehensive": 24,
+    "essay": 19
+  },
+  "year_rows": [
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "fill_blank": 48
+      },
+      "indexed_transcript_units": 63,
+      "official_original_verified": false,
+      "parsed_question_starts": 48,
+      "parser_structurally_safe_starts": 44,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2006
+    },
+    {
+      "candidate_start_blocked": 26,
+      "candidate_type_counts": {
+        "fill_blank": 31,
+        "question_answer": 6
+      },
+      "indexed_transcript_units": 68,
+      "official_original_verified": false,
+      "parsed_question_starts": 37,
+      "parser_structurally_safe_starts": 11,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2007
+    },
+    {
+      "candidate_start_blocked": 14,
+      "candidate_type_counts": {
+        "single_choice": 66,
+        "term": 36
+      },
+      "indexed_transcript_units": 175,
+      "official_original_verified": false,
+      "parsed_question_starts": 102,
+      "parser_structurally_safe_starts": 88,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2004
+    },
+    {
+      "candidate_start_blocked": 55,
+      "candidate_type_counts": {
+        "question_answer": 5,
+        "short_answer": 8,
+        "single_choice": 30,
+        "true_false": 20
+      },
+      "indexed_transcript_units": 114,
+      "official_original_verified": false,
+      "parsed_question_starts": 63,
+      "parser_structurally_safe_starts": 8,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2005
+    },
+    {
+      "candidate_start_blocked": 67,
+      "candidate_type_counts": {
+        "short_answer": 4,
+        "single_choice": 10,
+        "term": 5,
+        "true_false": 20,
+        "unknown": 40
+      },
+      "indexed_transcript_units": 112,
+      "official_original_verified": false,
+      "parsed_question_starts": 79,
+      "parser_structurally_safe_starts": 12,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2008
+    },
+    {
+      "candidate_start_blocked": 2,
+      "candidate_type_counts": {
+        "fill_blank": 28,
+        "term": 10
+      },
+      "indexed_transcript_units": 47,
+      "official_original_verified": false,
+      "parsed_question_starts": 38,
+      "parser_structurally_safe_starts": 36,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2009
+    },
+    {
+      "candidate_start_blocked": 6,
+      "candidate_type_counts": {
+        "comprehensive": 5,
+        "fill_blank": 18,
+        "short_answer": 12,
+        "term": 5
+      },
+      "indexed_transcript_units": 66,
+      "official_original_verified": false,
+      "parsed_question_starts": 40,
+      "parser_structurally_safe_starts": 34,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2010
+    },
+    {
+      "candidate_start_blocked": 6,
+      "candidate_type_counts": {
+        "fill_blank": 42,
+        "question_answer": 6,
+        "short_answer": 10,
+        "term": 10
+      },
+      "indexed_transcript_units": 98,
+      "official_original_verified": false,
+      "parsed_question_starts": 68,
+      "parser_structurally_safe_starts": 62,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2011
+    },
+    {
+      "candidate_start_blocked": 2,
+      "candidate_type_counts": {
+        "comprehensive": 2,
+        "fill_blank": 32,
+        "short_answer": 28,
+        "term": 24
+      },
+      "indexed_transcript_units": 101,
+      "official_original_verified": false,
+      "parsed_question_starts": 86,
+      "parser_structurally_safe_starts": 84,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2012
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "comprehensive": 4,
+        "fill_blank": 39,
+        "short_answer": 21,
+        "term": 22
+      },
+      "indexed_transcript_units": 103,
+      "official_original_verified": false,
+      "parsed_question_starts": 86,
+      "parser_structurally_safe_starts": 82,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2013
+    },
+    {
+      "candidate_start_blocked": 19,
+      "candidate_type_counts": {
+        "comprehensive": 11,
+        "fill_blank": 45,
+        "short_answer": 28,
+        "term": 10
+      },
+      "indexed_transcript_units": 177,
+      "official_original_verified": false,
+      "parsed_question_starts": 94,
+      "parser_structurally_safe_starts": 75,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2014
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "comprehensive": 2,
+        "fill_blank": 25,
+        "short_answer": 19,
+        "term": 5
+      },
+      "indexed_transcript_units": 66,
+      "official_original_verified": false,
+      "parsed_question_starts": 51,
+      "parser_structurally_safe_starts": 47,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2015
+    },
+    {
+      "candidate_start_blocked": 5,
+      "candidate_type_counts": {
+        "fill_blank": 24,
+        "question_answer": 5,
+        "short_answer": 13,
+        "term": 8
+      },
+      "indexed_transcript_units": 57,
+      "official_original_verified": false,
+      "parsed_question_starts": 50,
+      "parser_structurally_safe_starts": 45,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2016
+    },
+    {
+      "candidate_start_blocked": 0,
+      "candidate_type_counts": {
+        "short_answer": 4,
+        "term": 6
+      },
+      "indexed_transcript_units": 13,
+      "official_original_verified": false,
+      "parsed_question_starts": 10,
+      "parser_structurally_safe_starts": 10,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2017
+    },
+    {
+      "candidate_start_blocked": 2,
+      "candidate_type_counts": {
+        "fill_blank": 17,
+        "question_answer": 2,
+        "short_answer": 12,
+        "term": 10
+      },
+      "indexed_transcript_units": 46,
+      "official_original_verified": false,
+      "parsed_question_starts": 41,
+      "parser_structurally_safe_starts": 39,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2020
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 24,
+        "question_answer": 3,
+        "short_answer": 10,
+        "term": 10
+      },
+      "indexed_transcript_units": 55,
+      "official_original_verified": false,
+      "parsed_question_starts": 47,
+      "parser_structurally_safe_starts": 44,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2021
+    },
+    {
+      "candidate_start_blocked": 7,
+      "candidate_type_counts": {
+        "fill_blank": 18,
+        "question_answer": 3,
+        "short_answer": 13,
+        "term": 10
+      },
+      "indexed_transcript_units": 57,
+      "official_original_verified": false,
+      "parsed_question_starts": 44,
+      "parser_structurally_safe_starts": 37,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2022
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 22,
+        "question_answer": 3,
+        "short_answer": 10,
+        "term": 10
+      },
+      "indexed_transcript_units": 60,
+      "official_original_verified": false,
+      "parsed_question_starts": 45,
+      "parser_structurally_safe_starts": 42,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2018
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 22,
+        "question_answer": 3,
+        "short_answer": 10,
+        "term": 11
+      },
+      "indexed_transcript_units": 54,
+      "official_original_verified": false,
+      "parsed_question_starts": 46,
+      "parser_structurally_safe_starts": 43,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2019
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 19,
+        "question_answer": 3,
+        "short_answer": 10,
+        "term": 10
+      },
+      "indexed_transcript_units": 50,
+      "official_original_verified": false,
+      "parsed_question_starts": 42,
+      "parser_structurally_safe_starts": 39,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2023
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 20,
+        "question_answer": 3,
+        "short_answer": 10,
+        "term": 10
+      },
+      "indexed_transcript_units": 51,
+      "official_original_verified": false,
+      "parsed_question_starts": 43,
+      "parser_structurally_safe_starts": 40,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2024
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 20,
+        "question_answer": 3,
+        "short_answer": 10,
+        "term": 10
+      },
+      "indexed_transcript_units": 58,
+      "official_original_verified": false,
+      "parsed_question_starts": 43,
+      "parser_structurally_safe_starts": 40,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2025
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 20,
+        "question_answer": 3,
+        "short_answer": 10,
+        "term": 10
+      },
+      "indexed_transcript_units": 59,
+      "official_original_verified": false,
+      "parsed_question_starts": 43,
+      "parser_structurally_safe_starts": 40,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "biochemistry_exams",
+      "transcription_year_present": true,
+      "year": 2026
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 10,
+        "question_answer": 3,
+        "term": 10
+      },
+      "indexed_transcript_units": 27,
+      "official_original_verified": false,
+      "parsed_question_starts": 23,
+      "parser_structurally_safe_starts": 20,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 1998
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "fill_blank": 15,
+        "question_answer": 3,
+        "term": 10
+      },
+      "indexed_transcript_units": 36,
+      "official_original_verified": false,
+      "parsed_question_starts": 28,
+      "parser_structurally_safe_starts": 25,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2001
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "question_answer": 4,
+        "term": 18
+      },
+      "indexed_transcript_units": 26,
+      "official_original_verified": false,
+      "parsed_question_starts": 22,
+      "parser_structurally_safe_starts": 18,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 1999
+    },
+    {
+      "candidate_start_blocked": 42,
+      "candidate_type_counts": {
+        "question_answer": 4,
+        "short_answer": 7,
+        "single_choice": 20,
+        "true_false": 20
+      },
+      "indexed_transcript_units": 93,
+      "official_original_verified": false,
+      "parsed_question_starts": 51,
+      "parser_structurally_safe_starts": 9,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2002
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "question_answer": 4,
+        "term": 24
+      },
+      "indexed_transcript_units": 56,
+      "official_original_verified": false,
+      "parsed_question_starts": 28,
+      "parser_structurally_safe_starts": 24,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2003
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "fill_blank": 10,
+        "question_answer": 4,
+        "term": 10
+      },
+      "indexed_transcript_units": 28,
+      "official_original_verified": false,
+      "parsed_question_starts": 24,
+      "parser_structurally_safe_starts": 20,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2000
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "fill_blank": 5,
+        "question_answer": 4,
+        "single_choice": 5,
+        "term": 10
+      },
+      "indexed_transcript_units": 54,
+      "official_original_verified": false,
+      "parsed_question_starts": 24,
+      "parser_structurally_safe_starts": 20,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2004
+    },
+    {
+      "candidate_start_blocked": 28,
+      "candidate_type_counts": {
+        "true_false": 12,
+        "unknown": 16
+      },
+      "indexed_transcript_units": 37,
+      "official_original_verified": false,
+      "parsed_question_starts": 28,
+      "parser_structurally_safe_starts": 0,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2005
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "fill_blank": 8,
+        "question_answer": 4,
+        "term": 8
+      },
+      "indexed_transcript_units": 24,
+      "official_original_verified": false,
+      "parsed_question_starts": 20,
+      "parser_structurally_safe_starts": 16,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2006
+    },
+    {
+      "candidate_start_blocked": 31,
+      "candidate_type_counts": {
+        "question_answer": 11,
+        "single_choice": 10,
+        "term": 6,
+        "true_false": 10
+      },
+      "indexed_transcript_units": 57,
+      "official_original_verified": false,
+      "parsed_question_starts": 37,
+      "parser_structurally_safe_starts": 6,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2007
+    },
+    {
+      "candidate_start_blocked": 10,
+      "candidate_type_counts": {
+        "question_answer": 10
+      },
+      "indexed_transcript_units": 12,
+      "official_original_verified": false,
+      "parsed_question_starts": 10,
+      "parser_structurally_safe_starts": 0,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2008
+    },
+    {
+      "candidate_start_blocked": 19,
+      "candidate_type_counts": {
+        "unknown": 19
+      },
+      "indexed_transcript_units": 20,
+      "official_original_verified": false,
+      "parsed_question_starts": 19,
+      "parser_structurally_safe_starts": 0,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2009
+    },
+    {
+      "candidate_start_blocked": 11,
+      "candidate_type_counts": {
+        "unknown": 11
+      },
+      "indexed_transcript_units": 19,
+      "official_original_verified": false,
+      "parsed_question_starts": 11,
+      "parser_structurally_safe_starts": 0,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2010
+    },
+    {
+      "candidate_start_blocked": 8,
+      "candidate_type_counts": {
+        "question_answer": 8
+      },
+      "indexed_transcript_units": 17,
+      "official_original_verified": false,
+      "parsed_question_starts": 8,
+      "parser_structurally_safe_starts": 0,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2011
+    },
+    {
+      "candidate_start_blocked": 9,
+      "candidate_type_counts": {
+        "fill_blank": 21,
+        "question_answer": 9
+      },
+      "indexed_transcript_units": 33,
+      "official_original_verified": false,
+      "parsed_question_starts": 30,
+      "parser_structurally_safe_starts": 21,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2012
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "essay": 2,
+        "question_answer": 4,
+        "short_answer": 6,
+        "term": 10
+      },
+      "indexed_transcript_units": 27,
+      "official_original_verified": false,
+      "parsed_question_starts": 22,
+      "parser_structurally_safe_starts": 18,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2013
+    },
+    {
+      "candidate_start_blocked": 11,
+      "candidate_type_counts": {
+        "question_answer": 11,
+        "short_answer": 6,
+        "term": 15
+      },
+      "indexed_transcript_units": 39,
+      "official_original_verified": false,
+      "parsed_question_starts": 32,
+      "parser_structurally_safe_starts": 21,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2014
+    },
+    {
+      "candidate_start_blocked": 6,
+      "candidate_type_counts": {
+        "question_answer": 6,
+        "short_answer": 6,
+        "term": 8
+      },
+      "indexed_transcript_units": 24,
+      "official_original_verified": false,
+      "parsed_question_starts": 20,
+      "parser_structurally_safe_starts": 14,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2015
+    },
+    {
+      "candidate_start_blocked": 6,
+      "candidate_type_counts": {
+        "question_answer": 6,
+        "short_answer": 6,
+        "term": 10
+      },
+      "indexed_transcript_units": 26,
+      "official_original_verified": false,
+      "parsed_question_starts": 22,
+      "parser_structurally_safe_starts": 16,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2016
+    },
+    {
+      "candidate_start_blocked": 0,
+      "candidate_type_counts": {
+        "essay": 4,
+        "short_answer": 9,
+        "term": 11
+      },
+      "indexed_transcript_units": 28,
+      "official_original_verified": false,
+      "parsed_question_starts": 24,
+      "parser_structurally_safe_starts": 24,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2017
+    },
+    {
+      "candidate_start_blocked": 0,
+      "candidate_type_counts": {
+        "essay": 4,
+        "short_answer": 11,
+        "term": 10
+      },
+      "indexed_transcript_units": 29,
+      "official_original_verified": false,
+      "parsed_question_starts": 25,
+      "parser_structurally_safe_starts": 25,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2018
+    },
+    {
+      "candidate_start_blocked": 0,
+      "candidate_type_counts": {
+        "essay": 3,
+        "short_answer": 12,
+        "term": 14
+      },
+      "indexed_transcript_units": 33,
+      "official_original_verified": false,
+      "parsed_question_starts": 29,
+      "parser_structurally_safe_starts": 29,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2019
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "question_answer": 3,
+        "short_answer": 12,
+        "term": 14
+      },
+      "indexed_transcript_units": 33,
+      "official_original_verified": false,
+      "parsed_question_starts": 29,
+      "parser_structurally_safe_starts": 26,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2020
+    },
+    {
+      "candidate_start_blocked": 0,
+      "candidate_type_counts": {
+        "short_answer": 16,
+        "term": 12
+      },
+      "indexed_transcript_units": 32,
+      "official_original_verified": false,
+      "parsed_question_starts": 28,
+      "parser_structurally_safe_starts": 28,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2021
+    },
+    {
+      "candidate_start_blocked": 0,
+      "candidate_type_counts": {
+        "essay": 3,
+        "short_answer": 14,
+        "term": 10
+      },
+      "indexed_transcript_units": 31,
+      "official_original_verified": false,
+      "parsed_question_starts": 27,
+      "parser_structurally_safe_starts": 27,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2022
+    },
+    {
+      "candidate_start_blocked": 3,
+      "candidate_type_counts": {
+        "question_answer": 3,
+        "short_answer": 13,
+        "term": 12
+      },
+      "indexed_transcript_units": 36,
+      "official_original_verified": false,
+      "parsed_question_starts": 28,
+      "parser_structurally_safe_starts": 25,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2023
+    },
+    {
+      "candidate_start_blocked": 2,
+      "candidate_type_counts": {
+        "question_answer": 2,
+        "short_answer": 13,
+        "term": 16
+      },
+      "indexed_transcript_units": 35,
+      "official_original_verified": false,
+      "parsed_question_starts": 31,
+      "parser_structurally_safe_starts": 29,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2024
+    },
+    {
+      "candidate_start_blocked": 0,
+      "candidate_type_counts": {
+        "essay": 3,
+        "short_answer": 11,
+        "term": 16
+      },
+      "indexed_transcript_units": 34,
+      "official_original_verified": false,
+      "parsed_question_starts": 30,
+      "parser_structurally_safe_starts": 30,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2025
+    },
+    {
+      "candidate_start_blocked": 4,
+      "candidate_type_counts": {
+        "question_answer": 4,
+        "short_answer": 12,
+        "term": 14
+      },
+      "indexed_transcript_units": 43,
+      "official_original_verified": false,
+      "parsed_question_starts": 30,
+      "parser_structurally_safe_starts": 26,
+      "question_count_certified": false,
+      "scientific_answer_verified": false,
+      "source_key": "cell_biology_exams",
+      "transcription_year_present": true,
+      "year": 2026
+    }
+  ],
+  "question_answers_scientifically_verified": false,
+  "independent_official_question_authentication": false,
+  "available_for_unreviewed_release": false
+}

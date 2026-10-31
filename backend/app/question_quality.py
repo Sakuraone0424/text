@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from typing import Literal
 
 from app.training_spec import POINTS, DURATION_SECONDS, validate_quotas
+from app import training_spec_v2 as v2
 
 from pydantic import (
     BaseModel,
@@ -107,8 +108,11 @@ class Question(StrictModel):
             raise ValueError("Rubric knowledge tags must belong to the question")
         if sum(c.points for c in self.rubric) != self.max_points:
             raise ValueError("Rubric points must sum to max_points")
-        if self.max_points != POINTS[self.question_type]:
-            raise ValueError("max_points must match the custom 150-point specification")
+        permissible = {POINTS[self.question_type]}
+        if self.question_type in v2.POINTS:
+            permissible.add(v2.POINTS[self.question_type])
+        if self.max_points not in permissible:
+            raise ValueError("max_points must match a supported versioned training specification")
         if self.question_type == "single_choice":
             if set(self.options) != set("ABCD") or self.answer not in self.options:
                 raise ValueError(
@@ -172,8 +176,18 @@ class Blueprint(StrictModel):
     specification: str = Field(min_length=1, max_length=300)
     quotas: dict[Subject, dict[QuestionType, StrictInt]]
 
+    @model_validator(mode="before")
+    @classmethod
+    def v2_default_scoring(cls, value):
+        if isinstance(value, dict) and value.get("specification") == v2.SPECIFICATION and "points" not in value:
+            return {**value, "points": dict(v2.POINTS)}
+        return value
+
     @model_validator(mode="after")
     def total(self):
+        if self.specification == v2.SPECIFICATION:
+            v2.validate_blueprint(self.model_dump())
+            return self
         if set(self.quotas) != {"biochemistry", "cell_biology"}:
             raise ValueError("Both subjects are required")
         if any(set(q) != set(TYPES) for q in self.quotas.values()):

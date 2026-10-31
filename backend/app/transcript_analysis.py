@@ -1,8 +1,17 @@
-"""Versioned transcription parsing; candidate counts are never original-exam verification."""
+"""Parse the user-designated genuine past-exam files into candidate questions.
+
+Preserve supplied wording, year and type; parser uncertainty concerns boundaries,
+OCR/images and answer support, not whether the supplied exams are real.
+"""
 
 import re
 
-VERSION = "transcript-index/1.1"
+VERSION = "transcript-index/1.2"
+STYLE_SOURCE_BLOCKERS = frozenset({
+    "corrupt_ocr", "untranscribed_image", "image_dependent",
+    "docx_table_requires_review", "complex_table", "ocr_uncertain",
+    "transcription_gap_reported",
+})
 TYPES = {
     "多项选择题": "multiple_choice",
     "多项选择": "multiple_choice",
@@ -63,7 +72,7 @@ def section_heading(text):
     return None
 
 
-def candidates(units, item):
+def _raw_candidates(units, item):
     year = None
     qtype = None
     segment = None
@@ -150,7 +159,6 @@ def candidates(units, item):
         if role == "question_start":
             parent = uid
         concerns = [
-            "transcription_not_original_exam_verified",
             *unit.get("quality_flags", []),
         ]
         if year is None:
@@ -158,13 +166,13 @@ def candidates(units, item):
         if qtype is None:
             concerns.append("question_type_unknown")
         elif qtype not in FORMAL_TYPES:
-            concerns.append("type_requires_manual_adaptation")
+            concerns.append("type_requires_automatic_mapping")
         if role == "unassigned":
             concerns.append("question_boundary_unconfirmed")
         if role == "continuation":
             concerns.append("continuation_not_separate_question")
         if role == "answer":
-            concerns.append("answer_source_and_correctness_unverified")
+            concerns.append("answer_requires_independent_textbook_check")
         yield {
             "unit_id": uid,
             "year": year,
@@ -184,3 +192,32 @@ def candidates(units, item):
                 "declared_questions": sec["declared_questions"] if sec else None,
             },
         }
+
+
+def candidates(units, item):
+    """Block style anchors whose separately extracted continuation is a figure.
+
+    DOCX can store question wording in one paragraph and its drawing in the
+    following image-only paragraph. Checking only the question-start text
+    would incorrectly admit an incomplete real question as a clean style
+    example. Do not infer image content; attach the unresolved source flags to
+    its parent candidate while retaining the exact original transcription.
+    """
+    parsed = list(_raw_candidates(units, item))
+    beginnings = {
+        row["unit_id"]: row
+        for row in parsed if row["analysis"]["role"] == "question_start"
+    }
+    for row in parsed:
+        if row["analysis"]["role"] not in (
+            "continuation", "subquestion", "option"
+        ):
+            continue
+        parent = row["analysis"]["parent_question_unit_id"]
+        if parent not in beginnings:
+            continue
+        risks = set(row["concerns"]) & STYLE_SOURCE_BLOCKERS
+        if risks:
+            original = beginnings[parent]
+            original["concerns"] = sorted(set(original["concerns"]) | risks)
+    yield from parsed

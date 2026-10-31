@@ -55,7 +55,7 @@ def enqueue(conn, user_id, key, kind, payload):
 
 
 def claim(conn, scope_id=None, scope_kind="limited_trial"):
-    if scope_kind not in ("limited_trial", "review_campaign"):
+    if scope_kind not in ("limited_trial", "review_campaign", "qa_automation"):
         raise ValueError("unknown_execution_scope")
     # Expired leases are never concurrently finalized: every attempt has a new fence.
     scope_filter = (
@@ -125,6 +125,9 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     if "review_campaign" in s:
         from app.review_campaign import claim_reason as campaign_reason
         trial_reason = campaign_reason(conn, job)
+    if "qa_automation" in s:
+        from app.qa_automation import claim_reason as automation_reason
+        trial_reason = automation_reason(conn, job)
     if trial_reason in ("trial_call_in_flight", "trial_waiting_for_validation"):
         return None
     reason = reason or trial_reason
@@ -136,7 +139,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         return None
     claimed = conn.execute(
         "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_until=clock_timestamp()+%s*interval '1 second',started_at=clock_timestamp() WHERE id=%s RETURNING *",
-        (amount, str(uuid4()), 600 if "review_campaign" in s else 180, job["id"]),
+        (amount, str(uuid4()), 600 if ("review_campaign" in s or "qa_automation" in s) else 180, job["id"]),
     ).fetchone()
     conn.execute(
         "INSERT INTO ai_cny_reservations(job_id,attempt,amount_cny,price_snapshot) VALUES(%s,%s,%s,%s)",
@@ -152,11 +155,11 @@ def finish(conn, job, result=None, error=None):
     if locked["state"] != "running" or locked["lease_token"] != job["lease_token"]:
         raise ValueError("stale_lease")
     if result is not None and len(json.dumps(result).encode()) > (
-        1048576 if "review_campaign" in locked["settings_snapshot"] else 131072
+        1048576 if ("review_campaign" in locked["settings_snapshot"] or "qa_automation" in locked["settings_snapshot"]) else 131072
     ):
         raise ValueError("oversized_result")
     if (
-        (locked["settings_snapshot"].get("limited_trial") or locked["settings_snapshot"].get("review_campaign"))
+        (locked["settings_snapshot"].get("limited_trial") or locked["settings_snapshot"].get("review_campaign") or locked["settings_snapshot"].get("qa_automation"))
         and result
         and result.get("real_api") is True
         and result.get("returned_model_id") != locked["settings_snapshot"]["model_id"]
@@ -230,7 +233,9 @@ def run_once(get_db, executor, scope_id=None, scope_kind="limited_trial"):
         result = executor(job)
     except Exception as exc:
         with get_db() as c:
-            finish(c, job, error=exc)
+            metadata = ({"execution_failure": {"type": type(exc).__name__, "errno": exc.errno}}
+                        if isinstance(exc, OSError) else None)
+            finish(c, job, result=metadata, error=exc)
     else:
         with get_db() as c:
             finish(c, job, result=result)

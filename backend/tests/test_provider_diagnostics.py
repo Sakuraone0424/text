@@ -121,3 +121,28 @@ def test_relay_persists_raw_bytes_without_headers_even_on_interruption(monkeypat
     for path in (tmp_path / "receipt").iterdir():
         assert b"synthetic-credential-local-only" not in path.read_bytes()
         assert b"x-api-key" not in path.read_bytes()
+
+
+def test_container_layout_does_not_make_entire_filesystem_the_checkout(tmp_path, monkeypatch):
+    from app import harness_gateway
+    code = tmp_path / "image" / "app"
+    monkeypatch.setattr(harness_gateway, "__file__", str(code / "app" / "harness_gateway.py"))
+    private = tmp_path / "private-outside-image"
+    assert harness_gateway.prepare_private_home(private, "9-attempt-1").is_dir()
+    with pytest.raises(ValueError, match="outside_checkout"):
+        harness_gateway.prepare_private_home(code / "private", 9)
+    assert harness_gateway.prepare_private_home(private, "9-attempt-2").is_dir()
+
+
+def test_sdk_cache_cleanup_preserves_actual_receipt_and_never_follows_links(tmp_path):
+    from app.harness_gateway import prune_runtime_cache
+    home=tmp_path/'job-1-attempt-1';home.mkdir()
+    receipt=home/'provider-receipt';receipt.mkdir()
+    (receipt/'response.sse').write_bytes(b'synthetic retained transport evidence')
+    cache=home/'runtime-cache';cache.mkdir();(cache/'binary').write_bytes(b'reproducible SDK binary')
+    outside=tmp_path/'outside';outside.mkdir();(outside/'keep').write_text('keep')
+    (home/'link').symlink_to(outside,target_is_directory=True)
+    prune_runtime_cache(home)
+    assert (receipt/'response.sse').read_bytes()==b'synthetic retained transport evidence'
+    assert (outside/'keep').read_text()=='keep'
+    assert not cache.exists() and not (home/'link').exists()

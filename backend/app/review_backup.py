@@ -71,9 +71,10 @@ def verify_package(archive, index, pg_bin):
 
 def export(destination, schema, pg_bin, expected_database):
     destination = Path(destination).resolve()
-    if destination.exists() or destination.is_relative_to(
-        Path(__file__).resolve().parents[2]
-    ):
+    code_root = Path(__file__).resolve().parents[1]
+    checkout = next((p for p in (code_root, *code_root.parents)
+                     if (p / ".git").exists()), code_root)
+    if destination.exists() or destination.is_relative_to(checkout):
         raise ValueError("Choose a new private directory outside checkout")
     if not SCHEMA.fullmatch(schema):
         raise ValueError("Isolated source_staging_* schema required")

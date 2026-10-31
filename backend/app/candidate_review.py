@@ -56,6 +56,7 @@ def create_packet(conn, payload):
         not in (
             "AI-assisted / pending human review",
             "AI自动核验 / pending independent checks",
+            "Offline editorial / pending independent science and answer review",
         )
         or analysis.get("independent_human_review") is not False
         or set(analysis.get("axes", {})) != set(AXES)
@@ -99,12 +100,14 @@ def create_packet(conn, payload):
         style.append(
             {
                 **u,
-                "source_level": "transcription",
-                "original_verified": False,
-                "official_answer_verified": False,
+                # Supplied DOCX is the user's genuine past-exam corpus.
+                # An extracted exam question is a style reference, not a
+                # substitute for independently evidenced textbook answers.
+                "source_level": "user_provided_genuine_past_exam",
+                "answer_source": "independent_textbook_evidence_required",
                 "year": ref.get("year"),
                 "relationship": ref["relationship"],
-                "frequency_eligible": False,
+                "frequency_eligible": bool(ref.get("year")),
             }
         )
     if not style:

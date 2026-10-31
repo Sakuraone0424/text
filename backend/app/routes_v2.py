@@ -21,13 +21,20 @@ from app.common import ensure_user
 from app.dynamic_model import Policy
 from app import quiz_v2 as service
 
-router = APIRouter(prefix="/v2", tags=["reviewed-28"])
+router = APIRouter(prefix="/v2", tags=["reviewed-training"])
 
 
 @router.get("/training-specification")
 def training_specification():
-    from app.training_spec import formal_specification
-
+    # Local isolated regression fixtures explicitly exercise pre-upgrade papers.
+    # Never expose this legacy preview in a deployed production environment.
+    if (
+        os.environ.get("QUIZ_QA_LEGACY_FIXTURE") == "1"
+        and os.environ.get("QUIZ_QA_LEGACY_FIXTURE_SCHEMA", "").startswith("quiz_live_test_")
+    ):
+        from app.training_spec import formal_specification
+    else:
+        from app.training_spec_v2 import formal_specification
     return formal_specification()
 
 
@@ -114,6 +121,9 @@ def withdraw(question_id: int):
 
 @router.post("/papers")
 def paper(blueprint: Blueprint, username: str = Depends(require_auth)):
+    if (os.environ.get("QUIZ_DEPLOYMENT_PROFILE") == "ustc-exam-ocr-qa"
+            and blueprint.specification != "xiaohan-60q-150pt-v2"):
+        raise HTTPException(409, "QA training requires 60-question specification")
     return operation(lambda c, u: service.create_paper(c, u, blueprint), username)
 
 
@@ -123,23 +133,69 @@ def read_paper(paper_id: int, username: str = Depends(require_auth)):
 
 
 class Submission(StrictModel):
-    answers: dict[int, str | dict] = Field(default_factory=dict, max_length=28)
+    answers: dict[int, str | dict] = Field(default_factory=dict, max_length=60)
     expected_version: StrictInt = Field(default=0, ge=0)
 
 
 @router.post("/papers/{paper_id}/submit")
 def submit(paper_id: int, payload: Submission, username: str = Depends(require_auth)):
-    return operation(
-        lambda c, u: service.submit(
-            c, u, paper_id, payload.answers, payload.expected_version
-        ),
-        username,
-    )
+    def finalize_and_queue(c, u):
+        result = service.submit(c, u, paper_id, payload.answers, payload.expected_version)
+        if result.get("pending"):
+            from app.grading_activity import try_queue
+            result["grading_queue"] = try_queue(c, u, paper_id)
+        return result
+
+    return operation(finalize_and_queue, username)
 
 
 @router.get("/papers/{paper_id}/result")
 def result(paper_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: service.result(c, u, paper_id), username)
+
+
+@router.get("/papers/{paper_id}/verification")
+def question_verification(paper_id: int, username: str = Depends(require_auth)):
+    """Only the owner of a submitted exam may view evidence audit disclosures."""
+    from app.question_verification import report
+
+    return operation(lambda c, u: report(c, u, paper_id), username)
+
+
+@router.get("/quality/six-source-readiness")
+def six_source_readiness(username: str = Depends(require_auth)):
+    """Read-only metadata of the six active sources; not a science attestation."""
+    from app.source_readiness import audit
+
+    return operation(lambda c, u: audit(c), username)
+
+
+@router.get("/quality/genuine-exam-style-readiness")
+def genuine_exam_style_readiness(username: str = Depends(require_auth)):
+    """Original supplied exam content, not model-generated style examples."""
+    from app.exam_style_readiness import report
+
+    return operation(lambda c, u: report(c), username)
+
+
+@router.get("/quality/60q-bank-readiness")
+def sixty_question_bank_readiness(username: str = Depends(require_auth)):
+    """Authenticated learner can inspect exact verified-inventory shortages.
+
+    This is a conservative filter only; cross-answer cue screening is applied
+    again when an actual paper is atomically prepared.
+    """
+    from app.bank_readiness import report
+
+    return operation(lambda c, u: report(c, u), username)
+
+
+@router.get("/papers/{paper_id}/grading-activity")
+def grading_activity(paper_id: int, username: str = Depends(require_auth)):
+    """Read-only progress for the authenticated owner; no AI task is started."""
+    from app.grading_activity import progress
+
+    return operation(lambda c, u: progress(c, u, paper_id), username)
 
 
 ErrorCategory = Literal[
@@ -535,10 +591,20 @@ def review_solution(question_id: int, username: str = Depends(require_auth)):
         ).fetchone()
         if not row:
             raise LookupError("Review card not found")
+        question = row["content"]
+        options = question.get("options") or {}
+        answer = question["answer"]
         return {
-            "answer": row["content"]["answer"],
-            "rubric": row["content"]["rubric"],
-            "evidence": row["content"]["evidence"],
+            "answer": answer,
+            "question_type": question["question_type"],
+            "options": options,
+            "answer_display": (
+                f"{answer}. {options[answer]}"
+                if question["question_type"] == "single_choice" and answer in options
+                else answer
+            ),
+            "rubric": question["rubric"],
+            "evidence": question["evidence"],
         }
 
     return operation(read, username)
@@ -807,7 +873,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             ).fetchall()
         ]
         recent = c.execute(
-            "SELECT p.id AS paper_id,p.paper_date,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
+            "SELECT p.id AS paper_id,p.paper_date,p.blueprint->>'specification' AS specification,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
             (u,),
         ).fetchall()
         return {
@@ -815,7 +881,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             "training": [
                 {
                     **r,
-                    "mode": "reviewed_28",
+                    "mode": "reviewed_60" if r["specification"] == "xiaohan-60q-150pt-v2" else "reviewed_28",
                     "score": None if r["pending"] else r["graded_points"],
                 }
                 for r in recent

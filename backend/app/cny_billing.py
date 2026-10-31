@@ -133,11 +133,14 @@ def calendar_2026():
     import json
     from pathlib import Path
 
-    return json.loads(
-        (
-            Path(__file__).resolve().parents[1] / "config" / "china-calendar-2026.json"
-        ).read_text()
-    )
+    try:
+        return json.loads(
+            (Path(__file__).resolve().parents[1] / "config" / "china-calendar-2026.json").read_text()
+        )
+    except (OSError, ValueError):
+        # Missing calendar must retain the conservative rate ceiling, never
+        # abort settlement after a provider has already received a request.
+        return {}
 
 
 def period(at, calendar):

@@ -39,6 +39,8 @@ def live_app(tmp_path):
             apply_migrations(conn)
             factory = fixtures.question_factory.__wrapped__(conn)
             blueprint = fixtures.blueprint.__wrapped__()
+            from app.training_spec import SPECIFICATION as historical_specification
+            blueprint = blueprint.model_copy(update={"specification": historical_specification})
             fixtures.bank.__wrapped__(
                 conn, factory, fixtures.passing_audit.__wrapped__(), blueprint
             )
@@ -55,6 +57,8 @@ def live_app(tmp_path):
             "QUIZ_REVIEW_API_KEY": "operator-live",
             "NOTION_SYNC_ENABLED": "0",
             "QUIZ_WORKER_ENABLED": "1",
+            "QUIZ_QA_LEGACY_FIXTURE_SCHEMA": schema,
+            "QUIZ_QA_LEGACY_FIXTURE": "1",
         }
         with (tmp_path / "server.log").open("w+") as log:
             process = subprocess.Popen(
@@ -90,6 +94,13 @@ def live_app(tmp_path):
                     time.sleep(0.1)
                 else:
                     raise RuntimeError("Test server readiness timeout")
+
+                # Existing 28q paper is intentionally prepared in this
+                # disposable QA schema. Upgraded UI must safely resume it,
+                # not replace it with an unreviewed 60q synthetic bank.
+                seeded = client.post("/v2/papers", json=blueprint.model_dump())
+                if seeded.status_code != 200 or seeded.json().get("count") != 28:
+                    raise RuntimeError("Legacy HTTPS QA fixture was not prepared")
 
                 def restart_server():
                     nonlocal process

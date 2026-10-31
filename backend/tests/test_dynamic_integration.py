@@ -557,7 +557,7 @@ def test_client_dictionary_order_cannot_change_the_seeded_draw(
 def test_one_formal_interface_and_no_legacy_static_resources(client):
     root = client.get("/")
     assert root.status_code == 200 and "肖涵 · 中科大考研智能答题" in root.text
-    assert "60题" not in root.text and "/static/app.js" not in root.text
+    assert "唯一新版训练规格：60题" in root.text and "/static/app.js" not in root.text
     assert client.get("/static/app.js").status_code == 404
     assert client.get("/static/index.html").status_code == 404
     assert (

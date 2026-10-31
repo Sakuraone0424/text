@@ -13,26 +13,25 @@ from test_api_v2 import LEARNER, REVIEWER
 
 
 def test_single_current_product_contract_and_retired_legacy_routes(client):
-    from app.training_spec import default_blueprint
+    from app.training_spec_v2 import COUNTS as new_counts, POINTS as new_points, SPECIFICATION
 
-    spec = client.get("/v2/training-specification")
-    assert spec.status_code == 200
-    value = spec.json()
-    assert (value["questions"], value["points"], value["duration_seconds"]) == (28, 150, 3600)
-    assert (value["questions_per_subject"], value["points_per_subject"]) == (14, 75)
-    expected = dict(single_choice=3, fill_blank=3, term=4, short_answer=3, essay=1)
-    assert value["quotas"] == {s: expected for s in ("biochemistry", "cell_biology")}
-    assert value["points_by_type"] == dict(single_choice=2, fill_blank=3, term=4, short_answer=8, essay=20)
-    assert default_blueprint() == {k: value[k] for k in ("specification", "quotas")}
+    response = client.get("/v2/training-specification")
+    assert response.status_code == 200
+    value = response.json()
+    assert (value["questions"], value["points"], value["duration_seconds"]) == (60, 150, 3600)
+    assert (value["questions_per_subject"], value["points_per_subject"]) == (30, 75)
+    assert value["specification"] == SPECIFICATION
+    assert value["quotas"] == {s: new_counts for s in ("biochemistry", "cell_biology")}
+    assert value["points_by_type"] == new_points
+    assert "essay" not in value["quotas"]["biochemistry"]
     for route in ("/", "/training"):
         page = client.get(route).text
-        assert "唯一训练规格：28题" in page and "各14题75分" in page
-        assert "3道单选" in page and "3道填空" in page and "4道名词解释" in page
-        assert "3道简答" in page and "1道论述" in page
-        assert "60题" not in page and "双模式" not in page
+        assert "唯一新版训练规格：60题" in page and "各30题75分" in page
+        assert "每科18道单选" in page and "7道填空" in page
+        assert "4道名词解释" in page and "1道简答" in page
+        assert "3道简答" not in page and "1道论述" not in page
     assert client.get("/quiz/today", headers=LEARNER).status_code == 410
     assert client.post("/quiz/submit", headers=LEARNER).status_code == 410
-
 
 def test_daily_sixty_and_mode_switch_requests_are_rejected(client):
     data = {
@@ -48,7 +47,7 @@ def test_daily_sixty_and_mode_switch_requests_are_rejected(client):
 
 def test_chatgpt_adapter_uses_only_formal_blueprint():
     from app.chatgpt_adapter import TrainingAdapter
-    from app.training_spec import default_blueprint
+    from app.training_spec_v2 import default_blueprint
 
     class Transport:
         def request(self, method, path, *, json):
@@ -461,10 +460,20 @@ def test_learning_views_are_owned_and_archive_configuration_is_truthful(
     pid = paper["paper_id"]
     qid = paper["questions"][0]["id"]
     q.submit(db, uid, pid, {qid: "B"})
-    assert (
-        client.get(f"/v2/memory/{qid}/solution", headers=LEARNER).json()["answer"]
-        == "A"
+    solution = client.get(f"/v2/memory/{qid}/solution", headers=LEARNER).json()
+    assert solution["answer"] == "A"
+    assert solution["question_type"] == "single_choice"
+    assert solution["answer_display"] == "A. alpha"
+    assert solution["options"] == {"A": "alpha", "B": "beta", "C": "gamma", "D": "delta"}
+    db.execute(
+        "UPDATE fsrs_cards SET due=clock_timestamp()-interval '1 minute' WHERE user_id=%s AND question_id=%s",
+        (uid, qid),
     )
+    due_cards = client.get("/v2/memory/due", headers=LEARNER).json()["items"]
+    review = next(item for item in due_cards if item["question_id"] == qid)
+    assert review["options"] == solution["options"]
+    assert review["question_type"] == "single_choice"
+    assert "answer" not in review and "rubric" not in review and "evidence" not in review
     assert client.get("/v2/stats/weekly", headers=LEARNER).json()["chapters"]
     assert not client.get("/v2/archive/status", headers=LEARNER).json()["configured"]
     assert (
@@ -502,3 +511,57 @@ def test_prestart_server_rejects_drafts_images_and_submit_without_writes(db, ban
     started = sessions.start(db, uid, pid)
     assert started["drafts"] == {} and started["version"] == 0
     assert q.load_paper(db, uid, pid)["questions"]
+
+
+def test_expiry_dispatches_authorized_subjective_grading_once_without_user_return(
+    db, running, monkeypatch
+):
+    """A background timeout must not leave subjective answers unqueued."""
+    from app import auto_grading, grading_activity
+
+    uid, paper = running
+    pid = paper["paper_id"]
+    term = next(q for q in paper["questions"] if q["question_type"] == "term")
+    sessions.save(db, uid, pid, term["id"], {"text": "synthetic saved answer"}, 0)
+    dispatched = []
+    monkeypatch.setattr(
+        grading_activity, "auto_queue_allowed", lambda conn, user: (True, None)
+    )
+
+    def record_schedule(conn, user_id, paper_id):
+        rows = conn.execute(
+            "SELECT a.question_id FROM answers_v2 a "
+            "JOIN attempts_v2 t ON t.id=a.attempt_id "
+            "WHERE t.paper_id=%s AND a.points IS NULL",
+            (paper_id,),
+        ).fetchall()
+        dispatched.append((user_id, paper_id, [r["question_id"] for r in rows]))
+        return ["mock_enqueue_only_no_paid_provider"]
+
+    monkeypatch.setattr(auto_grading, "schedule", record_schedule)
+    expire(db, pid)
+    assert sessions.expire_due(db) == 1
+    assert dispatched == [(uid, pid, [term["id"]])]
+    assert q.result(db, uid, pid)["pending"] == 1
+    assert sessions.expire_due(db) == 0
+    # Duplicate POST cannot initiate a second actual timeout finalization.
+    repeated = q.submit(db, uid, pid, {})
+    assert repeated["pending"] == 1
+    assert len(dispatched) == 1
+    assert db.execute(
+        "SELECT count(*) AS n FROM attempts_v2 WHERE paper_id=%s", (pid,)
+    ).fetchone()["n"] == 1
+
+
+def test_expiry_without_ai_authorization_never_queues_or_spends(db, running, monkeypatch):
+    uid, paper = running
+    pid = paper["paper_id"]
+    term = next(q for q in paper["questions"] if q["question_type"] == "term")
+    sessions.save(db, uid, pid, term["id"], {"text": "synthetic saved answer"}, 0)
+    monkeypatch.setenv("QUIZ_AUTO_GRADE_ON_SUBMIT", "0")
+    expire(db, pid)
+    assert sessions.expire_due(db) == 1
+    assert q.result(db, uid, pid)["pending"] == 1
+    assert db.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='grading'"
+    ).fetchone()["n"] == 0

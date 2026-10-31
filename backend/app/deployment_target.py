@@ -9,6 +9,13 @@ TARGET = {
     "ENVIRONMENT": "ca9c95e7-81b8-495e-a51b-f01607a8eeab",
     "SERVICE": "15083462-a2f4-49d0-9a72-0873208e0669",
 }
+QA_TARGET = {
+    "PROJECT": "0ff7ff18-e746-42db-8eb2-b515306fa473",
+    "ENVIRONMENT": "246e3b1c-811b-4e02-ba42-89cb3e19f2cb",
+    "SERVICE": "b2cbe2fd-cc60-49ec-b52f-68f5fd35aa07",
+}
+QA_SOURCE_SCHEMA = "source_staging_ocr_20261030"
+
 PROTECTED_PROJECT = "c8ace6c2-e725-4e19-b064-3c71b44d4fde"
 PROTECTED_ENVIRONMENT = "54a1a3e3-9a24-4182-8441-5670d1ba9f04"
 SOURCE_SCHEMA = "source_staging_real_20261026"
@@ -39,7 +46,13 @@ def verify_isolated_target():
         raise PermissionError("Original project is protected")
     if os.environ.get("QUIZ_ISOLATED_TARGET_APPROVED") != "1":
         raise PermissionError("Verified isolated Railway target approval required")
-    for kind, pinned in TARGET.items():
+    qa = os.environ.get("QUIZ_DEPLOYMENT_PROFILE") == "ustc-exam-ocr-qa"
+    selected = QA_TARGET if qa else TARGET
+    if qa and os.environ.get("RAILWAY_ENVIRONMENT_NAME") != "qa":
+        raise PermissionError("QA deployment requires exact qa environment")
+    if qa and os.environ.get("QUIZ_DAILY_SPECIFICATION") != "xiaohan-60q-150pt-v2":
+        raise PermissionError("QA training requires 60-question specification")
+    for kind, pinned in selected.items():
         actual = os.environ.get(f"RAILWAY_{kind}_ID", "")
         approved = os.environ.get(f"QUIZ_APPROVED_RAILWAY_{kind}_ID", "")
         try:
@@ -47,7 +60,7 @@ def verify_isolated_target():
                 raise ValueError()
         except ValueError:
             raise PermissionError("Railway target identity mismatch: " + kind)
-    if os.environ.get("QUIZ_DB_SCHEMA") != SOURCE_SCHEMA:
+    if os.environ.get("QUIZ_DB_SCHEMA") != (QA_SOURCE_SCHEMA if qa else SOURCE_SCHEMA):
         raise PermissionError("Exact approved source schema required")
 
 

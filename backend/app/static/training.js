@@ -60,11 +60,19 @@ async function api(path, options = {}) {
     throw error;
   }
   if (!r.ok) {
-    const e = new Error(
-      typeof value.detail === "string"
-        ? value.detail
-        : JSON.stringify(value.detail),
-    );
+    let reason = value.detail;
+    if (typeof reason === "string" && reason.startsWith("{")) {
+      try { reason = JSON.parse(reason); } catch { /* use original text */ }
+    }
+    if (reason && reason.code === "insufficient_reviewed_bank") {
+      const missing = (reason.shortages || []).filter(x => x.missing > 0);
+      reason = "自动核验合格题库不足，尚不能安全生成60题：" +
+        missing.map(x => (x.subject === "biochemistry" ? "生化" : "细胞") +
+          " " + (names[x.question_type] || x.question_type) +
+          "缺" + x.missing + "题").join("；") +
+        "。系统不会使用未经核验的题目凑数。";
+    }
+    const e = new Error(typeof reason === "string" ? reason : JSON.stringify(reason));
     e.status = r.status;
     if ([401, 403].includes(r.status) && path !== "/auth/login") rejectAccess();
     if (r.status >= 500) serverConfirmed = false;
@@ -463,7 +471,7 @@ function renderProgress() {
     (v) =>
       v.text?.trim() || v.blanks?.some((x) => x.trim()) || v.image_ids?.length,
   ).length;
-  $("progress").textContent = `已答 ${done} / 28 · 剩余 ${28 - done}`;
+  $("progress").textContent = `已答 ${done} / ${paper?.count || 60} · 剩余 ${(paper?.count || 60) - done}`;
   emitUI();
 }
 function render() {
@@ -654,6 +662,10 @@ async function showResult() {
   for (const answer of result.answers) {
     const article = element("article", undefined, $("result"));
     element("p", answer.stem, article);
+    if (answer.question_type === "single_choice" && answer.options) {
+      for (const [letter, label] of Object.entries(answer.options).sort(([a], [b]) => a.localeCompare(b)))
+        element("p", letter + ". " + label, article);
+    }
     try {
       for (const id of JSON.parse(answer.answer).image_ids || []) {
         const image = element("img", undefined, article);
@@ -672,15 +684,16 @@ async function showResult() {
     } catch {
       response = { text: answer.answer };
     }
-    element(
-      "p",
-      "你的作答：" +
-        (response.text ||
-          (response.blanks || []).join("；") ||
-          (response.image_ids?.length ? "手写图片" : "未作答")),
-      article,
-    );
-    element("p", "参考答案：" + answer.solution, article);
+    const ownAnswer = response.text ||
+      (response.blanks || []).join("；") ||
+      (response.image_ids?.length ? "手写图片" : "未作答");
+    const ownChoice = answer.question_type === "single_choice"
+      ? answer.options?.[ownAnswer.toUpperCase()]
+      : null;
+    element("p", "你的作答：" + ownAnswer +
+      (ownChoice ? ". " + ownChoice : ""), article);
+    element("p", "参考答案：" +
+      (answer.solution_display || answer.solution), article);
     for (const criterion of answer.rubric)
       element(
         "p",
@@ -742,16 +755,130 @@ async function showResult() {
       };
     }
     for (const evidence of answer.evidence) {
+      const bibliographicPending = /未核查|待核查/.test(
+        (evidence.authors || "") + " " + (evidence.edition || "")
+      );
       element(
         "p",
-        `${evidence.textbook} · ${evidence.edition} · ${evidence.chapter} · ${evidence.locator}`,
+        "教材依据：" + evidence.textbook + " · " + evidence.chapter +
+          " · " + evidence.locator,
         article,
       );
+      if (bibliographicPending)
+        element("p", "书目信息尚未核验；OCR定位不等于纸书页码。", article);
       element("blockquote", evidence.excerpt, article);
     }
   }
   window.TrainingUI?.result(result);
-  status("已交卷。照片识别不清时须人工确认，不会直接判零。");
+  startGradingActivity(paper.paper_id);
+  showVerificationStatus(paper.paper_id);
+  status("已交卷。照片识别未通过自动核验时保持待处理，不会直接判零。");
+}
+
+async function showVerificationStatus(paperId) {
+  const old = $("verification-status");
+  if (old) old.remove();
+  const root = element("section", undefined, $("result"));
+  root.id = "verification-status";
+  root.className = "card verification-status";
+  element("h2", "本卷教材与答案核验状态", root);
+  const summary = element("p", "正在读取真实核验记录……", root);
+  const detail = element("details", undefined, root);
+  element("summary", "逐题核验记录", detail);
+  try {
+    const result = await api("/v2/papers/" + paperId + "/verification");
+    if (!root.isConnected || paper?.paper_id !== paperId) return;
+    const excerpt = result.items.filter(q => q.ocr_quote_matches_stored_text).length;
+    const ai = result.items.filter(q => q.independent_ai_science_and_answer_review).length;
+    const audits = result.items.filter(q => q.review_audit_record_matches_current_question).length;
+    const bibliography = result.items.filter(q => q.book_metadata_pending).length;
+    summary.textContent = "OCR摘录匹配 " + excerpt + "/" + result.count +
+      "；独立AI双轮复核 " + ai + "/" + result.count +
+      "；审题记录匹配 " + audits + "/" + result.count +
+      "；书目信息待核查 " + bibliography + "题。";
+    element("p", "这些记录不代表已对照纸质原书逐页人工审核，也不代表真题官方答案核实。", root);
+    for (const entry of result.items) {
+      element("p", "第" + entry.position + "题： " +
+        (entry.ocr_quote_matches_stored_text ? "OCR摘录字段匹配" : "OCR摘录匹配未确认") + " · " +
+        (entry.independent_ai_science_and_answer_review ? "独立AI证据复核通过" :
+          entry.review_audit_record_matches_current_question ? "存在匹配的审题记录" : "科学复核状态未确认") +
+        (entry.book_metadata_pending ? " · 书目信息待核查" : ""), detail);
+    }
+  } catch (error) {
+    summary.textContent = "暂时无法核验本卷出处：" + error.message;
+  }
+}
+
+let gradingActivityTimer = null;
+function startGradingActivity(paperId) {
+  if (gradingActivityTimer) clearInterval(gradingActivityTimer);
+  gradingActivityTimer = null;
+  const existing = $("grading-activity");
+  if (existing) existing.remove();
+  const section = element("section", undefined, $("result"));
+  section.id = "grading-activity";
+  section.className = "card grading-activity";
+  section.setAttribute("aria-label", "本卷实时批改活动");
+  element("h2", "实时批改活动", section);
+  const hint = element("p", "正在读取服务端批改状态……", section);
+  hint.setAttribute("role", "status");
+  const events = element("div", undefined, section);
+  const refreshScores = element("button", "刷新成绩与解析", section);
+  refreshScores.type = "button";
+  refreshScores.onclick = () => showResult().catch((e) => status(e.message));
+  let busy = false;
+  let priorGraded = null;
+  const labels = {
+    pending: "等待处理", retrying: "等待重试", running: "正在批改",
+    succeeded: "模型响应已返回，等待评分写入", blocked: "需要人工处理或重新授权",
+    cancelled: "已取消", pending_automatic_queue: "尚未进入自动批改队列",
+    vision_pipeline_unavailable: "照片待自动识别；当前视觉流程不可用",
+    graded: "已判分"
+  };
+  async function poll() {
+    if (busy || paper?.paper_id !== paperId || document.visibilityState !== "visible") return;
+    busy = true;
+    try {
+      const data = await api("/v2/papers/" + paperId + "/grading-activity");
+      if (!section.isConnected) {
+        if (gradingActivityTimer) clearInterval(gradingActivityTimer);
+        gradingActivityTimer = null;
+        return;
+      }
+      hint.textContent = "已判分 " + data.graded + "/" + data.total +
+        " 题，待批 " + data.pending + " 题。" +
+        (data.auto_queue_available ? "自动批改需独立工作进程执行。" :
+          "自动批改尚未启用或授权不足；不会假装已发送AI任务。");
+      events.replaceChildren();
+      for (const row of data.questions.filter((q) =>
+        q.state !== "graded" || q.reviewer_kind === "AI"
+      ).slice(0, 60)) {
+        const item = element("p", "第" + row.position + "题 · " +
+          (labels[row.state] || row.state) +
+          (row.points === null ? "" : " · " + row.points + "分"), events);
+        if (row.error_code) item.textContent += " · " + row.error_code;
+      }
+      const gained = priorGraded !== null && data.graded > priorGraded;
+      priorGraded = data.graded;
+      if (gained) {
+        // Read the actual revised result; do not invent a full score while
+        // individual grading jobs remain pending.
+        showResult().catch((error) => status(error.message));
+        return;
+      }
+      if (data.complete && gradingActivityTimer) {
+        clearInterval(gradingActivityTimer);
+        gradingActivityTimer = null;
+        hint.textContent += " 批改已完成，成绩以服务端记录为准。";
+      }
+    } catch (error) {
+      hint.textContent = "批改状态暂时无法读取：" + error.message;
+    } finally {
+      busy = false;
+    }
+  }
+  poll();
+  gradingActivityTimer = setInterval(poll, 5000);
 }
 // Identity confirmation, paper reachability and local recovery are separate checks.
 const recoverable = (error) =>
@@ -801,7 +928,7 @@ function cachedPaper(user, paperId = null) {
     if (
       !Number.isSafeInteger(p.paper_id) ||
       p.paper_id <= 0 ||
-      p.count !== 28 ||
+      ![28, 60].includes(p.count) ||
       p.max_points !== 150 ||
       p.duration_seconds !== 3600 ||
       !["not_started", "in_progress", "submitted"].includes(t?.status) ||
@@ -822,7 +949,7 @@ function cachedPaper(user, paperId = null) {
         !Number.isFinite(Date.parse(t.server_now)) ||
         !Number.isFinite(saved.offset) ||
         !Array.isArray(p.questions) ||
-        p.questions.length !== 28
+        p.questions.length !== p.count
       )
         throw new Error("本机缓存计时信息无效，请联网核验。");
       const ids = new Set();
@@ -835,7 +962,7 @@ function cachedPaper(user, paperId = null) {
           !["biochemistry", "cell_biology"].includes(q.subject) ||
           !Number.isSafeInteger(q.position) ||
           q.position < 1 ||
-          q.position > 28 ||
+          q.position > p.count ||
           !Number.isSafeInteger(q.max_points) ||
           q.max_points <= 0 ||
           !object(q.options)
@@ -1076,40 +1203,163 @@ $("memory").onclick = async () => {
     for (const card of result.items) {
       const article = element("article", undefined, $("learning"));
       element("p", card.stem, article);
+      const choice = card.question_type === "single_choice";
+      const options = choice && card.options && typeof card.options === "object"
+        ? Object.entries(card.options).sort(([a], [b]) => a.localeCompare(b))
+        : [];
+      let selected = null;
+      const optionButtons = [];
+      if (choice && !options.length) {
+        element("p", "旧卡片缺少选项，不能完整复测。请联系维护者核查题目快照。", article);
+      }
+      for (const [letter, text] of options) {
+        const button = element("button", letter + ". " + text, article);
+        button.type = "button";
+        button.className = "review-choice";
+        button.setAttribute("aria-pressed", "false");
+        button.onclick = () => {
+          selected = letter;
+          for (const item of optionButtons)
+            item.setAttribute("aria-pressed", String(item === button));
+        };
+        optionButtons.push(button);
+      }
+      if (choice && options.length)
+        element("p", "先独立选择，再查看答案；选择只用于本次复习，不改写原卷。", article);
       const reveal = element("button", "先回忆，再查看答案", article);
       reveal.onclick = async () => {
-        const solution = await api(`/v2/memory/${card.question_id}/solution`);
-        element("p", solution.answer, article);
-        reveal.disabled = true;
-        for (const [rating, label] of [
-          [1, "忘记"],
-          [2, "困难"],
-          [3, "记得"],
-          [4, "轻松"],
-        ]) {
-          const button = element("button", label, article);
-          button.onclick = async () => {
+        try {
+          const solution = await api("/v2/memory/" + card.question_id + "/solution");
+          const answerDisplay = solution.answer_display || solution.answer;
+          reveal.disabled = true;
+          for (const button of optionButtons) button.disabled = true;
+          if (choice && selected !== null) {
+            const picked = options.find(([letter]) => letter === selected);
+            element("p", "本次选择：" + selected + ". " + (picked ? picked[1] : ""), article);
+            element("p", selected === solution.answer ? "本次选择正确" : "本次选择需要订正", article);
+          }
+          element("p", "正确答案：" + answerDisplay, article);
+          const criteria = (solution.rubric || []).map(
+            (item) => "评分核对点（" + item.points + "分）：" + item.description
+          );
+          for (const line of criteria) element("p", line, article);
+          const evidence = (solution.evidence || []).map((entry) =>
+            entry.textbook + " · " + entry.chapter + " · " + entry.locator +
+            "：" + entry.excerpt
+          );
+          if (solution.evidence?.length) {
+            const detail = element("details", undefined, article);
+            element("summary", "教材依据与出处核验状态", detail);
+            for (const entry of solution.evidence) {
+              const unknown = /未核查|待核查/.test(
+                (entry.authors || "") + " " + (entry.edition || "")
+              );
+              element("p", entry.textbook + " · " + entry.chapter +
+                " · " + entry.locator + (unknown ? " · 书目信息待核查" : ""), detail);
+              element("blockquote", entry.excerpt, detail);
+            }
+          }
+          const copy = element("button", "复制正确答案、评分点及教材依据", article);
+          copy.onclick = async () => {
             try {
-              await api(`/v2/memory/${card.question_id}/review`, {
-                method: "POST",
-                body: JSON.stringify({
-                  rating,
-                  expected_version: card.version,
-                  event_key: crypto.randomUUID(),
-                }),
-              });
-              article.replaceChildren();
-              element("p", "复习反馈已保存，下次复测时间已更新。", article);
-            } catch (e) {
-              status(e.message);
+              await navigator.clipboard.writeText([
+                card.stem, ...options.map(([letter, text]) => letter + ". " + text),
+                "正确答案：" + answerDisplay, ...criteria, ...evidence
+              ].join("\n"));
+              status("已复制完整复习内容。");
+            } catch {
+              status("复制未成功，请长按正确答案或教材依据选择文本。");
             }
           };
+          for (const [rating, label] of [
+            [1, "忘记"],
+            [2, "困难"],
+            [3, "记得"],
+            [4, "轻松"],
+          ]) {
+            const button = element("button", label, article);
+            button.onclick = async () => {
+              try {
+                await api("/v2/memory/" + card.question_id + "/review", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    rating,
+                    expected_version: card.version,
+                    event_key: crypto.randomUUID(),
+                  }),
+                });
+                article.replaceChildren();
+                element("p", "复习反馈已保存，下次复测时间已更新。", article);
+              } catch (e) {
+                status(e.message);
+              }
+            };
+          }
+        } catch (e) {
+          status(e.message);
         }
       };
     }
   } catch (e) {
     status(e.message);
   }
+};
+$("source-status").onclick = async () => {
+  const root = $("learning");
+  root.replaceChildren();
+  element("h2", "教材与60题题库核验", root);
+  element("p", "下列数据直接从系统数据库读取；不会把原文件已下载、OCR可检索或AI任务排队误写成已审核。", root);
+  const endpoints = [
+    ["/v2/quality/six-source-readiness", "六份教材与真题文件"],
+    ["/v2/quality/genuine-exam-style-readiness", "真实真题题型与风格依据"],
+    ["/v2/quality/60q-bank-readiness", "60题最低库存与120题储备"],
+  ];
+  const answers = await Promise.allSettled(endpoints.map(([path]) => api(path)));
+  const display = {biochemistry: "生物化学", cell_biology: "细胞生物学"};
+  const typeName = {single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答"};
+  answers.forEach((answer, index) => {
+    const section = element("section", undefined, root);
+    element("h3", endpoints[index][1], section);
+    if (answer.status !== "fulfilled") {
+      element("p", "暂时无法读取该部分：" + answer.reason.message, section);
+      return;
+    }
+    const value = answer.value;
+    if (index === 0) {
+      element("p", "真实文件已入库 " + value.imported_files + "/" + value.expected_files +
+        " · 字节/页标完整性通过 " + value.integrity_passed_files + "/" + value.expected_files,
+        section);
+      for (const file of value.files) {
+        const issue = file.issues.length ? " · 需检查：" + file.issues.join("、") : "";
+        const figures = file.embedded_media_objects
+          ? " · 内嵌图像 " + file.embedded_media_objects + " 个（图像内容未独立核验）"
+          : "";
+        element("p", file.filename + " · " + file.status + issue + figures, section);
+      }
+    } else if (index === 1) {
+      element("p", "你提供的两份试题汇编作为真实历年真题。这里只核实能否从DOCX可靠提取题目，不审核真题身份。", section);
+      for (const bucket of value.buckets) {
+        element("p", (display[bucket.subject] || bucket.subject) + " · " +
+          (typeName[bucket.question_type] || bucket.question_type) +
+          "：可引用风格题 " + bucket.safe_style_anchors +
+          "，待处理图像/解析问题 " + bucket.blocked_by_parsing_or_images, section);
+      }
+    } else {
+      const min = value.buckets.reduce((n, x) => n + x.eligible_upper_bound, 0);
+      const shortages = value.buckets.reduce((n, x) => n + x.shortage_at_least, 0);
+      const reserve = value.buckets.reduce((n, x) => n + x.two_day_reserve_shortage_at_least, 0);
+      element("p", "经当前AI双轮审查且符合新版分值、可抽取的候选上限 " +
+        min + " 题；当天至少还缺 " + shortages +
+        " 题，两天储备目标至少还缺 " + reserve + " 题。", section);
+      for (const bucket of value.buckets) {
+        element("p", (display[bucket.subject] || bucket.subject) + " · " +
+          (typeName[bucket.question_type] || bucket.question_type) +
+          "：可用上限 " + bucket.eligible_upper_bound +
+          "/" + bucket.required + "，两天目标 " + bucket.two_day_reserve_target, section);
+      }
+      element("p", "以上数量仍需经过跨题提示、相似题及章节覆盖的最终抽卷检查；不保证已经能生成完整60题。", section);
+    }
+  });
 };
 $("weekly").onclick = async () => {
   try {
@@ -1230,7 +1480,7 @@ $("history").onclick = async () => {
     for (const item of data.training) {
       const article = element(
         "article",
-        `28题 · ${item.paper_date} · ${item.score === null ? "待批改" : item.score + "分"}`,
+        `${item.mode === "reviewed_60" ? 60 : 28}题 · ${item.paper_date} · ${item.score === null ? "待批改" : item.score + "分"}`,
         $("learning"),
       );
       const button = element("button", "查看已提交结果", article);
