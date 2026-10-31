@@ -84,6 +84,13 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
         "formal_science_approvals":0,
         "model_calls":0,
     })
+    monkeypatch.setattr(worker, "seed_poliii_source_conflict", lambda conn: {
+        "real_textbook_internal_conflicts":1,
+        "source_original_quotes":3,
+        "independent_science_approvals":0,
+        "question_autoscoring_allowed":False,
+        "model_calls":0,
+    })
     monkeypatch.setattr(worker, "seed_chapter_neighbors", lambda conn: {
         "unmapped_pages_with_navigation_records": 72,
         "chapter_repairs_applied": 0,
@@ -143,6 +150,8 @@ def test_offline_cycle_seeds_only_pending_exam_review(monkeypatch):
     assert result["pending_science_review_worklist"]["new_pending_tasks"] == 12
     assert result["mechanism_science_firstpass"]["mechanism_content_firstpass_source_verified"]==23
     assert result["mechanism_science_firstpass"]["formal_science_approvals"]==0
+    assert result["real_ocr_scientific_conflict"]["real_textbook_internal_conflicts"]==1
+    assert result["real_ocr_scientific_conflict"]["question_autoscoring_allowed"] is False
     assert result["source_locked_science_content_firstpass"]["substantive_science_corrections_source_attested"] == 10
     assert result["source_locked_science_content_firstpass"]["scientific_double_approvals"] == 0
     assert result["exam_media_source_locked_science_firstpass"]["media_source_records"]==31
