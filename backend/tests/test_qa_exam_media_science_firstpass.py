@@ -35,7 +35,7 @@ class DB:
     def execute(self,sql,args=None):
         if sql.startswith("SELECT sha256 FROM source_documents"):
             return Rows(one={"sha256":"a"*64})
-        if sql.startswith("CREATE TABLE"):
+        if sql.lstrip().startswith("CREATE TABLE"):
             self.created=True
             return Rows()
         if sql.startswith("SELECT source_file_id,"):
