@@ -19,6 +19,7 @@ from app.qa_exam_year_inventory import summarize as summarize_exam_years
 from app.qa_stage1_acceptance import inspect as stage1_provenance
 from app.qa_graph_provenance_gate import inspect as graph_provenance
 from app.qa_graph_worklist_seed import ensure as seed_science_pending
+from app.qa_graph_23_science_firstpass import seed as seed_mechanism_23_firstpass
 from app.qa_science_substantive_firstpass import seed as seed_substantive_science_firstpass
 from app.qa_exam_media_science_firstpass import seed as seed_exam_media_firstpass
 from app.qa_chapter_neighbor_proposals import seed as seed_chapter_neighbors
@@ -76,6 +77,7 @@ def cycle():
         linked = step("exam_textbook_lexical", seed_topic_links, conn)
         formula = step("formula_triage", seed_formula_triage, conn)
         science_jobs = step("science_pending", seed_science_pending, conn)
+        science_mechanisms = step("23_mechanism_science_firstpass", seed_mechanism_23_firstpass, conn)
         substantive_review = step("substantive_science_firstpass", seed_substantive_science_firstpass, conn)
         exam_media_review = step("exam_media_science_firstpass", seed_exam_media_firstpass, conn)
         chapter_hints = step("chapter_neighbors", seed_chapter_neighbors, conn)
@@ -103,6 +105,7 @@ def cycle():
             "exam_textbook_lexical_review": linked,
             "formula_visual_review": formula,
             "pending_science_review_worklist": science_jobs,
+            "mechanism_science_firstpass": science_mechanisms,
             "source_locked_science_content_firstpass": substantive_review,
             "exam_media_source_locked_science_firstpass": exam_media_review,
             "chapter_navigation_review": chapter_hints,
