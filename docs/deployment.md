@@ -77,50 +77,125 @@ worker 真正开始调用模型，需要同时满足：
 
 2026 年节假日日历已核实（国务院通知），11 月 1 日至 12 月 21 日没有法定节假日；`tests/test_cost_control.py` 逐半小时核对这段时间内低峰判断（`cost_control.is_peak`）与计费模块（`cny_billing.period`）一致，且不会出现「未知」档。月/日统计窗口按北京时间切分，跨 12 月 1 日已测。CNY 价格每次随调用刷新 24 小时有效期，与日期无关。不需要 2027 年日历。
 
-## 正式站切换（第 10 步，只读检查结果，2026-11-01）
+## 正式站切换（第 10 步：搬家方案，仅方案，尚未执行）
 
-> 本节只来自只读检查（Railway 只读接口 + 本地模拟），**没有改动正式站**。
+> 状态：**只有方案，没有动手**。正式站没有改过任何东西。守卫改动、搬家脚本都等你「第 10 步」通知后才在单独分支（`prod-move/…`，不合并进 `feat/60q-v2-spec`）上实现。
 
-### 正式站现状
+### 1. 已核实的事实
 
-- 项目 `xiao-ustc-quiz`，环境 `production`，服务 `quiz-backend` + `Postgres`（Postgres 18 镜像）。
-- 构建：`backend/Dockerfile`，源仓库 `Sakuraone0424/text`；**preDeploy = `python migrate.py`**（已核实）。
-- 服务变量只有三项：`APP_PASSWORD`、`DATABASE_URL`、`SESSION_SECRET`。没有任何 `QUIZ_*`、`AI_*`、`DEEPSEEK_*`。
-- 最近一次部署是 2026-10-27 的「redeploy」（无提交信息，实际运行的提交无法从 Railway 看出）；9 月的部署来自 `main`（最新 `0888ad9`，`main` 现在只有迁移 001–002）。**正式站数据库已应用哪些迁移，必须查 `schema_migrations` 才能确定**（见下）。
+- 正式站（项目 `xiao-ustc-quiz`，环境 `production`，服务 `quiz-backend` + `Postgres`）数据库实测（用户从 Railway 后台确认）：**没有 `schema_migrations`，没有 `papers_v2`**；只有 `answers、attempts、paper_questions、papers、questions、review_schedule、topics、users` 八张表（即 `001_initial.sql` 的结构）；`papers` 4 行（2026-09-26、10-27、10-28、10-30），`user_id` 都是 1。
+- 服务变量只有 `APP_PASSWORD`、`DATABASE_URL`、`SESSION_SECRET`；preDeploy = `python migrate.py`；上一次部署可回滚（Railway 标记 `canRollback`）。
+- 结论：**不能在原库的 `public` 里直接跑新迁移。** 本地模拟（用 `001_initial.sql` 建出与正式站相同的八张旧表）：
+  - 当 `search_path` 里有旧表所在的 schema（即忘了设 `QUIZ_DB_SCHEMA`）时，`migrate.py` 会改动旧表（在旧 `questions` 上加列/索引，并在旧 schema 里建出 83 张表）——**这正是要防的事故**。
+  - 当 `search_path` 只含新 schema（`db.get_db` 对 `QUIZ_DB_SCHEMA` 的做法：`SET LOCAL search_path TO <新 schema>`）时，旧 schema 的列、索引、触发器、行数**逐项不变**，新 schema 里建出 83 张表（含自己的 `schema_migrations`）。
 
-### a. 旧代码/旧库能否安全执行迁移 022–030
+### 2. 总体方案
 
-结论：**可以，没有破坏性改动**，前提是先备份。
+在**同一个正式 Postgres**里建一个**全新的 schema**（暂定名 `prod_v2_20261101`，最终以执行当天日期为准），新系统只在该 schema 内读写；`public` 里的八张旧表原样保留、不碰、不删。数据来自 QA 库，用「先演练、后正式」的方式搬。
 
-- 022–030 只有两处非「新增」：022 把 `paper_items_v2` 的 `position` 检查从 1–28 放宽为 1–60（旧行全部满足新约束，不改任何历史行）；028 替换触发器函数 `protect_reviewed_question()` 并把 `auto_question_states.policy_version` 默认值改为 `auto-evidence/2`（只影响新行）；030 给 `paper_items_v2` 加带默认值的 `is_reused` 列。其余都是新表。没有 DROP TABLE/COLUMN、DELETE、TRUNCATE、UPDATE 历史数据。
-- `migrate.py` 在**一个事务**里按顺序应用所有未应用的迁移，已应用的文件校验 sha256（被改过会拒绝）。失败则整体回滚，不会留下半套结构。
-- 本地模拟（临时 schema，不碰任何真实库）：从只有 001–002 的库（`main` 的结构）和从 001–021 的库（28 题分支结构）出发，一次应用全部 30 个迁移均成功（0.26 秒 / 0.04 秒），重复运行为空操作。
-- 注意：从 001–002 直接到 030 会一次性建立 003–021 的全部表，包括 `reviewed_questions`、`papers_v2` 等。旧的 `questions/papers/attempts/answers` 表（001–002）保持不动，但新代码不再读它们。
-- 022 在 `paper_items_v2` 上短暂持锁，数据量小，可忽略。
-- 切换前请在正式库执行（只读）：`SELECT name FROM schema_migrations ORDER BY name;` 并把结果交给我核对；如无该表说明正式站从未跑过 `migrate.py`。
+```
+QA 库 schema source_staging_ocr_20261030
+   │  pg_dump（结构全部 + 选定表的数据）
+   ▼
+本地/临时库演练：恢复 → migrate.py → 健康检查 → 抽样核对
+   │  同一份转储文件
+   ▼
+正式 Postgres：新建空 schema → 恢复 → 校验 → 配置 QUIZ_DB_SCHEMA → 部署新代码
+```
 
-### b. 旧 28 题历史在新代码下能否显示
+为什么用 `pg_dump --schema` 而不是逐表 INSERT：公开题目的触发器（028）、不可变表、外键顺序和 `schema_migrations` 的 sha256 校验都会随结构一起完整带过去；逐表 INSERT 容易被触发器拒绝或留下半套数据。恢复后 `migrate.py` 只会应用转储中没有的新迁移。
 
-结论：**能**，针对「库里已有 `papers_v2` 的 28 题」。`tests/test_training_spec_v2.py::test_stored_28q_paper_stays_readable_after_v2_default` 验证：旧卷快照不可变，新规格成为默认后旧卷仍按 28 题 / 150 分读出；新卷不会退回 28 题（`test_daily_60q_scheduler.py`）。
-- 但如果正式站仍是 `main` 时代（只有 001–002 的 `papers/questions` 表），那里的历史**不会**出现在新界面：新代码只读 `papers_v2` 系列。这部分是否存在、有多少条，需要查表确认（`SELECT count(*) FROM papers;`）。若需要保留，须另写一次性只读导入，**先问你**。
+### 3. 搬哪些数据
 
-### c. 切换所需环境变量与服务
+| 搬 | 表 |
+|---|---|
+| 教材/资料原文及其审核记录 | `source_documents、source_units、source_pages、source_original_parts、source_versions、source_review_events、source_supplements、source_text_annotations、source_bibliography_reviews、formula_search_renderings、source_mapping_proposals` |
+| 真题与知识关系 | `exam_records、exam_transcript_candidates、exam_scopes、exam_samples、exam_annotations、knowledge_links、knowledge_dependencies、past_exam_items、question_origins` |
+| 已入库题目及其审核证据 | `reviewed_questions、question_audits、auto_question_states、auto_quality_events、auto_knowledge_events、candidate_review_packets、candidate_revision_links、candidate_human_decisions、candidate_science_assessments、legacy_question_publications、legacy_proposals、legacy_hints、legacy_page_calibration、legacy_reuse_state` |
+| 用户与设置 | `users`（仅正式站那一个登录用户，见下）、`ai_settings`（复制后逐项核对金额、并发、`stopped`）、`ai_model_catalog`、`selection_policies` 及其 assignments |
+| 出题/审核的任务记录 | `ai_jobs`、`ai_call_events`：**需要用户决定**（见第 7 节问题 2） |
 
-服务：保持现有 `quiz-backend` + `Postgres`；另外新建一个 AI worker 服务（`deploy/railway-automation/Dockerfile` + `worker.railway.json`），与 QA 相同。
+**不搬**（QA 上的测试作答与计费，搬了会污染正式学习记录和月费用）：`papers_v2、paper_items_v2、attempts_v2、answers_v2、reviews_v2、training_sessions、answer_drafts、answer_images、handwriting_*、fsrs_*、grading_events、answer_reflections、selection_runs、question_reports、ai_budget_reservations、ai_cny_*、ai_settings_events、ai_review_campaign*、qa_automation_*、archive_*、automation_jobs、reviewer_*`。实现上用 `pg_dump --exclude-table-data=…`：这些表的结构仍会建出（外键保持完整），只是空表。
 
-`quiz-backend` 需新增：`QUIZ_DAILY_SPECIFICATION=xiaohan-60q-150pt-v2`、`QUIZ_AUTO_GRADE_ON_SUBMIT=1`、`DEEPSEEK_API_KEY`、`DEEPSEEK_API_AUTHORIZED=1`、`DEEPSEEK_PRIVATE_DATA_AUTHORIZED=1`；拍照作答保持关闭（不设 `QUIZ_PHOTO_ANSWERS_ENABLED`）。
-worker 需要：`DATABASE_URL`、`AI_AUTOMATION_ENABLED=1`、`AI_QUEUE_AUTOPLAN=1`、`AI_CALLS_PER_RUN`（默认 2）、上面的 DeepSeek 三项、`QUIZ_DB_SCHEMA`，以及思考档位 `AI_GENERATION_THINKING` / `AI_REVIEW_THINKING` / `AI_GRADING_THINKING`（可选）。**不要设置** `AI_FULL_CORPUS_ENABLED`。教材/真题原文文件需随 worker 镜像（沿用 QA 的做法）。
+用户行：正式站登录靠 `APP_PASSWORD` + `SESSION_SECRET`，会话令牌里是用户名；新 schema 里只放一个用户行，用户名与现有登录一致（执行前请你告诉我旧 `users` 表里那一行的用户名，我只读 `username`，不读别的），`id` 不要求等于旧表的 1。不复制 QA 的其它用户行。
 
-### 风险点
+### 4. 步骤（每步都有检查点；先在演练库做一遍）
 
-1. **阻断：部署目标守卫会拒绝正式站。** `app/db.py` 每次连库都调用 `verify_isolated_target()`，在 Railway 上遇到 `RAILWAY_PROJECT_ID == c8ace6c2-…`（正式项目）或项目名 `xiao-ustc-quiz` 即抛 `PermissionError("Original project is protected")`。不改代码，新版本在正式站连不上库，连 preDeploy 的 `migrate.py` 也会失败（失败即不部署，旧版本继续运行，不会损坏数据）。需要你明确批准后修改这一守卫（第 11 步），并把 `PROTECTED_*`、`TARGET`、`SOURCE_SCHEMA` 改为正式站的固定值。
-2. **阻断：`auto_worker.main` 要求 `QUIZ_DB_SCHEMA` 以 `source_staging_` 开头**，且 `deployment_target` 要求 `QUIZ_DB_SCHEMA` 等于固定的 staging 名称。正式库没有该 schema，需放宽（同第 11 步）。
-3. 一次事务应用 28 个迁移，任何一步失败整体回滚，但**先做 Postgres 备份/快照**（Railway 的 Postgres 卷备份）再触发部署。
-4. 迁移不可回退（只追加）；回滚代码后新增的表仍在，旧代码会忽略它们，但 022 放宽后的位置约束不会还原（无害）。
-5. 正式站目前不知实际运行的提交；若它比 `main` 新，请以 `schema_migrations` 为准。
-6. 触发方式：正式服务的源分支未在只读配置里显示；**合并到 `main` 可能自动触发正式站部署**。当前只合并到 `feat/60q-v2-spec`，不碰 `main`。
-7. 正式站无任何 DeepSeek 变量：切换前不会产生任何模型费用；切换后首批用 `AI_BANK_TARGET_PER_BUCKET=5` 限量。
-8. `APP_PASSWORD` / `SESSION_SECRET` 保持不变，已登录会话不受影响。
+0. **前提**：第 8、8.5 步完成，QA 上的题库就是你愿意带上正式站的版本；在 QA 停止 worker（`AI_AUTOMATION_ENABLED=0` 或停服务），保证转储时数据不再变化。
+1. **备份**：Railway 为正式 Postgres 做一次备份/快照；另外 `pg_dump -n public` 导出旧八张表到你手里的文件（4 张卷子的数据体量很小）。检查点：备份文件可读，`papers` 4 行。
+2. **转储**：`pg_dump -n source_staging_ocr_20261030 --no-owner --no-privileges` + 上表的 `--exclude-table-data`。教材原文在转储文件里，**文件只放在你的机器/受控位置，不进仓库、不写日志、不进 Docker 镜像**。
+3. **演练**：新建临时库，建 schema，恢复，执行 `migrate.py`（`QUIZ_DB_SCHEMA` 指向演练 schema），然后核对：每张「搬」的表行数 = QA 行数；「不搬」的表行数 = 0；`/db/health` 为 200；`reviewed_questions` 中 `published` 且 `auto_question_states.status='ready'` 的数量按（科目 × 题型）与 QA 一致；抽 5 道题确认引用的教材段落能在 `source_units` 里按原文精确找到；`ai_settings` 的 `stopped` 为 `true`。演练失败则整个丢弃重来，不影响任何环境。
+4. **正式站建 schema**：`CREATE SCHEMA prod_v2_…`（应用本身不允许创建 schema：`db.py` 要求 schema 必须事先存在），恢复转储到该 schema，行数核对同第 3 步。检查点：`public` 的八张表行数、列、索引与备份时一致（用第 1 步的清单逐项比）。
+5. **改守卫的代码合入正式服务**（单独分支，见第 6 节）并部署到正式站之前，先把所有新变量配到服务上（旧代码会忽略它们）：`QUIZ_DB_SCHEMA`、`QUIZ_DEPLOYMENT_PROFILE`、`QUIZ_APPROVED_*`、`QUIZ_DAILY_SPECIFICATION`、DeepSeek 三项等（完整清单见第 8 节）。
+6. **部署新代码**：preDeploy 的 `python migrate.py` 在 `QUIZ_DB_SCHEMA` 内只应用转储里没有的迁移（若转储来自最新 QA，则为空操作）。失败即不切换，旧版本继续服务。
+7. **冒烟**：登录、打开今日页、查看 `/v2/model/spend`；此时 `ai_settings.stopped=true`，不会产生模型费用。
+8. **启动 AI**：新建 worker 服务，`AI_BANK_TARGET_PER_BUCKET` 视库存需要设置，再把 `ai_settings.stopped` 置为 `false`；观察一整天的费用与进度。
+
+### 5. 回滚
+
+| 阶段 | 回滚方法 | 数据影响 |
+|---|---|---|
+| 第 1–4 步（尚未部署新代码） | `DROP SCHEMA prod_v2_… CASCADE`（只删新 schema） | 旧八张表从未改动 |
+| 第 5–7 步（新代码已部署） | 在 Railway 回滚到上一次部署（`7cf3bb5a…`，旧代码），并删除/忽略 `QUIZ_DB_SCHEMA`；旧代码仍读 `public` 的八张表 | 新 schema 留着不动，可再次启用 |
+| 已产生学习记录之后 | 不要 `DROP`；先导出新 schema（`pg_dump -n`）留档，再决定 | 新 schema 里的学习记录以导出文件为准 |
+
+### 6. 两个阻断项的设计（单独分支实现，不合并，等你「第 10 步」通知）
+
+当前代码的两个阻断：
+
+1. `deployment_target.verify_isolated_target()` 看到正式项目 ID / 环境 ID / 项目名 `xiao-ustc-quiz` 就拒绝；
+2. `db.get_db()` 和 `auto_worker.main()` 要求 `QUIZ_DB_SCHEMA` 匹配 `source_staging_*`，`deployment_target` 还要求它等于固定的 staging 名。
+
+设计：**加一个明确的正式站档案，而不是删除保护。**
+
+- 新档案 `QUIZ_DEPLOYMENT_PROFILE=xiao-ustc-prod`，放行条件**全部**满足才通过：
+  - `RAILWAY_PROJECT_ID` = `c8ace6c2-e725-4e19-b064-3c71b44d4fde`，`RAILWAY_ENVIRONMENT_ID` = `54a1a3e3-9a24-4182-8441-5670d1ba9f04`，`RAILWAY_ENVIRONMENT_NAME` = `production`；
+  - `RAILWAY_SERVICE_ID` 属于固定白名单（现有 `quiz-backend` = `1c4b68d9-…`，以及第 8 步之后新建 worker 的服务 ID，执行时填入）；
+  - 对应的 `QUIZ_APPROVED_RAILWAY_*_ID` 与实际一致，`QUIZ_ISOLATED_TARGET_APPROVED=1`；
+  - `QUIZ_DB_SCHEMA` 必须**恰好等于**代码里钉死的新 schema 名（常量，不是前缀匹配），且不是 `public`；
+  - 数据库身份沿用现有 `QUIZ_APPROVED_DB_{HOST,PORT,NAME,USER,SYSTEM_ID}` 校验（私网地址、固定库名/角色/集群标识）。
+- 其它任何项目、环境、服务、schema、未知档案**仍然拒绝**；正式项目在没有该档案时**仍然拒绝**（保护不变）。QA 档案和 `source_staging_*` 规则保持原样。
+- 运行时再加一道断言（防止再出现上面「模拟 B」的事故）：正式档案下每次连库后确认 `search_path` 只含该新 schema，且 `to_regclass('public.papers')` 不在 `search_path` 内可见；迁移与应用都不可能再碰旧表。
+- `auto_worker.main` 的 `source_staging_` 前缀检查改为调用同一个「该档案允许的 schema」函数，不再自己判断。
+- 测试：参数化覆盖「正式档案 + 正确身份 → 通过」、「缺任何一项 / 项目或环境或服务 ID 不对 / 其它 schema / `public` / 无档案的正式项目 / QA 档案用于正式项目 → 拒绝」，并加一个把八张旧表放在另一个 schema 里的迁移回归测试（即本次模拟 A/B）。
+
+### 7. 风险与需要你决定的问题
+
+风险：
+
+1. **误碰旧表**：只要 `QUIZ_DB_SCHEMA` 漏设，`migrate.py` 就会改旧表（模拟 B 已证实）。靠第 6 节的档案 + 运行时断言防住；执行前再做一次正式库「改前/改后」对比。
+2. **转储里的教材原文**：是你的私有资料，转储文件不得入仓库/日志/镜像；演练库用完即删。
+3. **QA 与正式的身份混淆**：`ai_settings`、`users` 复制后必须人工核对（尤其预算和 `stopped`）。
+4. **月费用口径**：若复制 `ai_cny_*`，QA 的 11 月花费会算进正式站的 90 元上限，所以默认不复制（见上表）。
+5. **题目的审核证据依赖任务记录**：`ready()` 需要「真实完成的审核调用且载荷可重算」，若不带 `ai_jobs/ai_call_events`，复制来的已入库题可能不被认作 ready（取决于重算方式，演练时会验证，不通过就改为带上这两张表）。
+6. 搬家期间 QA 必须停写；转储之后在 QA 产生的新题不会自动同步。
+7. 未知：正式 Postgres 角色是否有建 schema 的权限（演练前先用只读检查 `has_database_privilege`，不行则由你在 Railway 后台用管理角色建 schema）。
+
+需要你决定：
+
+1. **旧 4 张卷子是否导入新历史**（工作量评估，见第 9 节）。
+2. `ai_jobs / ai_call_events` 是否随库带过去（建议：演练两种，选能让已入库题保持 ready 且不带计费记录的那种）。
+3. 新 schema 的最终名称；旧 `users` 表那一行的用户名。
+
+### 8. 环境变量与服务清单（搬家后）
+
+服务：保留 `quiz-backend` + `Postgres`；新增 AI worker 服务（`deploy/railway-automation/Dockerfile` + `worker.railway.json`）。
+
+`quiz-backend` 与 worker 共同：`DATABASE_URL`（私网地址）、`QUIZ_DEPLOYMENT_PROFILE=xiao-ustc-prod`、`QUIZ_ISOLATED_TARGET_APPROVED=1`、`QUIZ_DB_SCHEMA=<新 schema>`、`RAILWAY_*` 对应的 `QUIZ_APPROVED_RAILWAY_{PROJECT,ENVIRONMENT,SERVICE}_ID`、`QUIZ_APPROVED_DB_{HOST,PORT,NAME,USER,SYSTEM_ID}`、`QUIZ_PROTECTED_DB_SYSTEM_IDS`（不含正式站自己的集群标识）、`QUIZ_DAILY_SPECIFICATION=xiaohan-60q-150pt-v2`。
+`quiz-backend` 另需：`QUIZ_AUTO_GRADE_ON_SUBMIT=1`、`DEEPSEEK_API_KEY`、`DEEPSEEK_API_AUTHORIZED=1`、`DEEPSEEK_PRIVATE_DATA_AUTHORIZED=1`；拍照作答保持关闭；`APP_PASSWORD`、`SESSION_SECRET` 不变。
+worker 另需：`AI_AUTOMATION_ENABLED=1`、`AI_QUEUE_AUTOPLAN=1`、`AI_CALLS_PER_RUN`（默认 2）、DeepSeek 三项、可选的思考档位变量；**不设** `AI_FULL_CORPUS_ENABLED`；教材/真题原文文件随 worker 镜像（沿用 QA 做法）。
+
+### 9. 旧 4 张卷子：评估（不动手）
+
+旧结构是 `papers / paper_questions / questions / attempts / answers`（未经审核的旧题库）。新系统的历史只认 `papers_v2`，而 `papers_v2` 的每个条目必须指向 `reviewed_questions`（经证据审核的题）——旧题没有教材证据，**不能**硬塞进去，否则就是伪造「已审核」。可选方式：
+
+| 方式 | 做法 | 工作量 | 说明 |
+|---|---|---|---|
+| A. 不导入，只留档 | 旧表原样留在 `public`；导出 4 张卷子（题面、你的作答、得分）为 Markdown/CSV 交给你 | 约 0.5 天 | 零风险；新界面看不到旧卷 |
+| B. 作为「旧版记录」只读导入 | 新增一张迁移 `031`（`legacy_papers_archive`：日期、总分、每题得分摘要、原题面文本），历史页以「旧版」标签显示，不进入出题、选题、FSRS | 约 1–1.5 天（迁移 + 导入脚本 + 历史页展示 + 测试） | 不创建任何已审核题；只读 |
+| C. 完整导入为 `papers_v2` | 需要把旧题伪造成已审核题 | 不建议 | 违反证据政策 |
+
+建议 A，若你要在新界面看到成绩曲线再升级为 B。需要先知道旧 `papers`/`answers` 是否有可信的得分字段（请执行只读 `SELECT count(*) FROM questions; SELECT count(*) FROM answers; SELECT count(*) FROM paper_questions;` 给我行数）。
 
 ## 回滚
 
