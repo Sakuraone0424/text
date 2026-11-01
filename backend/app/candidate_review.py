@@ -1,4 +1,8 @@
-"""Immutable AI-assisted draft packets and separately authenticated human decisions."""
+"""Historical AI-assisted draft packets; manual review decisions are disabled.
+
+New questions must use automated textbook-grounded science and answer gates.
+Historical decisions remain readable for audit and existing submitted attempts.
+"""
 
 import hashlib
 import json
@@ -263,6 +267,9 @@ def inspect(conn, key):
 
 
 def decide(conn, key, reviewer, data):
+    # 2026-11-01 latest owner policy: manual/expert signoff must not be a
+    # requirement or an alternative shortcut. Keep historical rows immutable.
+    raise PermissionError("manual_review_disabled_use_automated_science_answer_gate")
     UUID(data["request_id"])
     if (
         not reviewer.strip()
