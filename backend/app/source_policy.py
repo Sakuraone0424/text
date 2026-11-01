@@ -44,6 +44,10 @@ def pinned_science_evidence(question):
     """
     if not isinstance(question, dict):
         return False
+    # 2026-11-01: web claims may only supplement verified textbook bytes.
+    # Do not require a human/expert signature; do not let web override the book.
+    if question.get("external_overrode_textbook") is True or question.get("science_authority") == "external_only":
+        return False
     evidences = question.get("evidence")
     if not isinstance(evidences, list) or not evidences:
         return False
