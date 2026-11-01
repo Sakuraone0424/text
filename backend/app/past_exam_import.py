@@ -17,6 +17,7 @@ from psycopg.types.json import Jsonb
 from pydantic import Field, StrictBool, StrictInt
 
 from app.ai_jobs import content_sha, enqueue
+from app.auto_execution import MAX_EVIDENCE_CHARS, MAX_EVIDENCE_UNITS  # one definition, enforced at the call
 from app.candidate_review import create_packet, snapshot_unit
 from app.exam_authoring import _MISSING_ASSET, issues as exam_issues
 from app.question_quality import AXES, Question, StrictModel, stem_key
@@ -31,8 +32,6 @@ ORIGIN_GENERATED = "generated"
 # Hard ceiling on what is sent to the model for ONE question. Chinese text is
 # three UTF-8 bytes per character and ai_jobs rejects payloads over 24000 bytes,
 # so these also keep every request well inside that bound.
-MAX_EVIDENCE_UNITS = 4
-MAX_EVIDENCE_CHARS = 5000
 MIN_UNIT_CHARS = 80
 MAX_UNIT_CHARS = 4000
 MAX_CONCURRENT_JOBS = 2

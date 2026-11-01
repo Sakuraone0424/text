@@ -21,6 +21,7 @@ def main():
     patch = Path(__file__).resolve().parents[1] / "harness" / "restricted.patch.yml"
     from app.deepseek_relay import relay
     from app.limited_trial import execution_guard
+    from app.ai_jobs import extended_limits
 
     guard = execution_guard(request)
     from app.provider_diagnostics import parse_completed_result, safe_diagnostic
@@ -35,7 +36,7 @@ def main():
                        usage=measured["usage"], diagnostic=diagnostic), sys.stdout)
 
     with (
-        relay(s["model_id"], s["token_limit"], request_guard=guard, evidence_dir=Path(os.environ["DSH_HOME"]) / "provider-receipt", request_timeout=360 if ("review_campaign" in s or "qa_automation" in s) else 120) as (base, measured),
+        relay(s["model_id"], s["token_limit"], request_guard=guard, evidence_dir=Path(os.environ["DSH_HOME"]) / "provider-receipt", request_timeout=360 if extended_limits(s) else 120) as (base, measured),
         DeepSeekHarness(
             dsh_home=os.environ["DSH_HOME"],
             cwd=os.environ["DSH_HOME"],
@@ -45,7 +46,7 @@ def main():
             model=s["model_id"],
             reasoning_effort=s["effort"],
             max_tokens=s["token_limit"],
-            request_timeout_seconds=360 if ("review_campaign" in s or "qa_automation" in s) else 120,
+            request_timeout_seconds=360 if extended_limits(s) else 120,
             initialize_timeout_seconds=20,
             env={"DEEPSEEK_BASE_URL": base, "DSH_PRIMARY_RUNTIME": ""},
         ) as harness,

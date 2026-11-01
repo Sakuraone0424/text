@@ -185,6 +185,16 @@ class ChoiceAnswerFinding(Finding):
     other_correct_options: list[Literal["A", "B", "C", "D"]]
 
 
+AMBIGUITY_RULE = (
+    " Ambiguity rule (blind science round): judge the question on its own wording. If the stem "
+    "can reasonably be read in more than one way, leaves a needed condition or term undefined, "
+    "cannot be answered from the supplied excerpts alone, or contains a factual error, set "
+    "checks.uniqueness=false and passed=false and describe the problem in unresolved. For a "
+    "single-choice question, if two or more options can be defended, or none can, return "
+    "independent_choice=null. You are never given the answer key; do not guess one."
+)
+
+
 OPTION_VERIFICATION = (
     " Option verification (single choice): fill option_checks for EACH of A, B, C and D with "
     "verdict 'correct' only if that option is fully correct under the supplied excerpts, "
@@ -271,7 +281,7 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
     if phase == "answer" and q["question_type"] == "single_choice":
         payload["schema"] = ChoiceAnswerFinding.model_json_schema()
         payload["instructions"] += OPTION_VERIFICATION
-    if contract_version in (2, 3, 4, 5, 6, 7):
+    if contract_version in (2, 3, 4, 5, 6, 7, 8):
         if phase == "answer":
             payload["question"]["accepted_answers"] = q.get("accepted_answers", [])
         payload["instructions"] += (
@@ -318,16 +328,29 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
                 "in evidence-backed claims and rationale instead. When no numeric "
                 "calculation is needed, return calculations=[]."
             )
+        if contract_version >= 8 and phase == "science":
+            payload["instructions"] += AMBIGUITY_RULE
     elif contract_version != 1:
         raise ValueError("unknown_review_output_contract")
     return payload
 
 
+CURRENT_CONTRACT = 8
+
+
 def job_contract_version(job):
-    if "qa_automation" in job["settings_snapshot"]:
-        return 7 if "Output contract:" in job["payload"].get("instructions", "") else 1
-    policy = job["settings_snapshot"].get("review_campaign", {}).get("policy", {})
-    return policy.get("contract_version", 1)
+    """The prompt contract a stored review job was issued under.
+
+    Campaign jobs carry theirs in the frozen policy; every other job is
+    recognised by the clauses in its own instructions, so a job issued under an
+    older contract is still recomputed (and judged) exactly as it was sent.
+    """
+    if "review_campaign" in job["settings_snapshot"]:
+        return job["settings_snapshot"]["review_campaign"].get("policy", {}).get("contract_version", 1)
+    instructions = (job.get("payload") or {}).get("instructions", "")
+    if "Ambiguity rule" in instructions:
+        return 8
+    return 7 if "Output contract:" in instructions else 1
 
 
 def schedule_checks(conn, uid, qid):
@@ -340,9 +363,7 @@ def schedule_checks(conn, uid, qid):
     for phase, kind in [("science", "science_review"), ("answer", "answer_review")]:
         # Freshly retrieved data each round. Science gets no expected answer/rubric/AI conclusions.
         q, refs, style = evidence(conn, qid)
-        import os
-        contract = 7 if os.environ.get("QA_AUTOMATION_ENABLED") == "1" else 1
-        payload = review_payload(phase, qid, checksum, q, refs, style, contract)
+        payload = review_payload(phase, qid, checksum, q, refs, style, CURRENT_CONTRACT)
         jobs.append(
             enqueue(conn, uid, f"quality:{qid}:{checksum}:{phase}", kind, payload)
         )

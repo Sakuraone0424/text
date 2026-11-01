@@ -31,6 +31,11 @@ class ProviderFailure(RuntimeError):
         super().__init__("provider_request_failed")
 
 
+def extended_limits(snapshot):
+    """Long calls (high-effort reviews) for everything except the frozen 3-question trial."""
+    return "limited_trial" not in snapshot
+
+
 def enqueue(conn, user_id, key, kind, payload):
     if kind not in model_router.TASKS:
         raise ValueError("unknown_ai_task")
@@ -139,7 +144,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         return None
     claimed = conn.execute(
         "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_until=clock_timestamp()+%s*interval '1 second',started_at=clock_timestamp() WHERE id=%s RETURNING *",
-        (amount, str(uuid4()), 600 if ("review_campaign" in s or "qa_automation" in s) else 180, job["id"]),
+        (amount, str(uuid4()), 600 if extended_limits(s) else 180, job["id"]),
     ).fetchone()
     conn.execute(
         "INSERT INTO ai_cny_reservations(job_id,attempt,amount_cny,price_snapshot) VALUES(%s,%s,%s,%s)",
@@ -155,12 +160,11 @@ def finish(conn, job, result=None, error=None):
     if locked["state"] != "running" or locked["lease_token"] != job["lease_token"]:
         raise ValueError("stale_lease")
     if result is not None and len(json.dumps(result).encode()) > (
-        1048576 if ("review_campaign" in locked["settings_snapshot"] or "qa_automation" in locked["settings_snapshot"]) else 131072
+        1048576 if extended_limits(locked["settings_snapshot"]) else 131072
     ):
         raise ValueError("oversized_result")
     if (
-        (locked["settings_snapshot"].get("limited_trial") or locked["settings_snapshot"].get("review_campaign") or locked["settings_snapshot"].get("qa_automation"))
-        and result
+        result
         and result.get("real_api") is True
         and result.get("returned_model_id") != locked["settings_snapshot"]["model_id"]
     ):

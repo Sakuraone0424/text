@@ -73,7 +73,7 @@ def private_job(db, trial, slot="39:science", suffix=""):
     return db.execute("SELECT * FROM ai_jobs WHERE id=%s", (j["id"],)).fetchone()
 
 
-def test_no_scope_means_no_official_executor(monkeypatch):
+def test_an_unscoped_job_that_is_not_a_leased_automatic_job_has_no_executor(monkeypatch):
     from app.harness_gateway import execute
 
     monkeypatch.setattr(
@@ -81,7 +81,9 @@ def test_no_scope_means_no_official_executor(monkeypatch):
         "authorized",
         lambda **kwargs: None,
     )
-    with pytest.raises(ValueError, match="approved_limited_trial"):
+    # Ordinary jobs now run under the automatic guard (tests/test_auto_execution.py);
+    # an unleased / malformed one is still refused before any process starts.
+    with pytest.raises(ValueError, match="leased_automatic_attempt_required"):
         execute({"kind": "compatibility", "settings_snapshot": {}})
 
 
