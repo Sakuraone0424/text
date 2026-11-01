@@ -194,3 +194,42 @@ def spend_report(conn, uid):
                       peak_hours_beijing=["09:00-12:00", "14:00-18:00 (weekdays, not holidays)"]),
         thinking=dict(generation=effort_for("generation"), review=effort_for("quality_review"), grading=effort_for("grading")),
     )
+
+
+# ---- temporary bank target (first trial batch) ----------------------------------------
+
+
+def bank_target():
+    """AI_BANK_TARGET_PER_BUCKET: stock wanted per subject x question type, or None.
+
+    TEMPORARY. Unset (or invalid / not positive) means the normal rule: top each
+    bucket up to two days of reserve. Set, it replaces that reserve target, e.g. 5
+    gives the 8 buckets x 5 = 40 question first batch.
+    """
+    raw = os.environ.get("AI_BANK_TARGET_PER_BUCKET", "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def reserve_target(required, days):
+    return bank_target() or required * days
+
+
+def bucket_supply(conn, subject, kind):
+    """Questions of a bucket that exist or are already on their way (any pipeline stage)."""
+    made = conn.execute(
+        "SELECT count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+        "WHERE st.status IN ('ready','candidate','checking','repairing') "
+        "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s",
+        (subject, kind),
+    ).fetchone()["n"]
+    queued = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND dispatched_at IS NULL "
+        "AND state IN ('pending','running','retrying','succeeded') "
+        "AND payload->>'subject'=%s AND payload->>'question_type'=%s",
+        (subject, kind),
+    ).fetchone()["n"]
+    return made + queued

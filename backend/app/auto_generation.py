@@ -17,7 +17,7 @@ from app.exam_authoring import instructions as exam_instructions, issues as exam
 from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
-from app import past_exam_import
+from app import cost_control, past_exam_import
 
 STARTUP_RESERVE_DAYS = 2  # 60 questions/day, 120 verified candidates per user
 # A paragraph already written from is worth this fraction of a fresh one.
@@ -362,7 +362,7 @@ def plan(conn, uid):
         return
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
         count = eligible_reserve_count(conn, uid, subject, kind)
-        if count >= required * STARTUP_RESERVE_DAYS:
+        if count >= cost_control.reserve_target(required, STARTUP_RESERVE_DAYS):
             continue
         # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
         concepts = conn.execute(
@@ -439,7 +439,7 @@ def bucket_gaps(conn, uid):
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
         key = (subject, kind)
         gap = (
-            required * STARTUP_RESERVE_DAYS
+            cost_control.reserve_target(required, STARTUP_RESERVE_DAYS)
             - eligible_reserve_count(conn, uid, subject, kind)
             - pipeline.get(key, 0) - inflight.get(key, 0) - past.get(key, 0)
         )

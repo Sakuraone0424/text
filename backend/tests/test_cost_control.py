@@ -337,3 +337,41 @@ def test_a_reported_question_is_not_reused(db, old_paper, blueprint):
     with pytest.raises(quiz_v2.BankShortage) as short:
         quiz_v2.create_paper(db, uid, blueprint, day=date.today())
     assert [(s["subject"], s["question_type"], s["missing"]) for s in short.value.shortages if s["missing"]] == [(victim["subject"], victim["question_type"], 1)]
+
+
+# ---- dates up to the project end (2026-12-21) --------------------------------------------
+
+PROJECT_END = date(2026, 12, 21)
+
+
+def test_every_half_hour_until_the_project_end_has_one_verified_answer_in_both_modules():
+    calendar = cny_billing.calendar_2026()
+    assert calendar["verified"] and calendar["year"] == 2026
+    at = beijing("2026-11-01 00:00")
+    end = beijing("2026-12-22 00:00")
+    peaks = 0
+    while at < end:
+        assert cny_billing.period(at, calendar) in ("peak", "off_peak"), at  # never "unknown" before the end
+        assert (cny_billing.period(at, calendar) == "peak") == cc.is_peak(at, calendar), at
+        peaks += cc.is_peak(at, calendar)
+        at += timedelta(minutes=30)
+    assert peaks > 0  # weekdays in Nov-Dec 2026 do have peak hours
+
+
+def test_no_holiday_is_listed_between_november_and_the_project_end():
+    # 2026 official notice: the last public holiday of the year is National Day; Nov-Dec are ordinary.
+    holidays = [d for d in cny_billing.calendar_2026()["holidays"] if "2026-11-01" <= d <= PROJECT_END.isoformat()]
+    assert holidays == []
+
+
+def test_month_and_day_windows_follow_beijing_time_across_the_december_boundary(db):
+    row = db.execute(
+        "SELECT (date_trunc('month',%s::timestamptz AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') AS m",
+        (beijing("2026-11-30 23:59"),),
+    ).fetchone()
+    assert row["m"] == beijing("2026-11-01 00:00")
+    row = db.execute(
+        "SELECT (date_trunc('month',%s::timestamptz AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') AS m",
+        (beijing("2026-12-01 00:00"),),
+    ).fetchone()
+    assert row["m"] == beijing("2026-12-01 00:00")

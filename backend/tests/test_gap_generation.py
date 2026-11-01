@@ -17,6 +17,8 @@ from test_ocr_only import material
 from test_past_exam_import import EXAMS, finish_job
 
 BOOK = {"textbook": "Synthetic", "authors": "Test", "edition": "Test"}
+from app import cost_control
+
 PARAGRAPH = (
     "冈崎片段是DNA复制过程中滞后链上不连续合成的短DNA片段。引物酶先合成短的RNA引物，"
     "随后DNA聚合酶沿着引物延伸新生链。当延伸到前一个片段时，核酸酶切除RNA引物，"
@@ -234,6 +236,41 @@ def test_bucket_gap_deducts_work_already_on_its_way(db, corpus, setup_ai):
     after = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
     key = (job["payload"]["subject"], job["payload"]["question_type"])
     assert after[key] == gaps[key] - 1
+
+
+def test_temporary_bank_target_gives_five_per_bucket_forty_in_all(db, corpus, setup_ai, monkeypatch):
+    monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", "5")
+    gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
+    assert len(gaps) == 8 and set(gaps.values()) == {5} and sum(gaps.values()) == 40
+    pei.import_items(db)
+    gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
+    assert gaps[("biochemistry", "term")] == 5 - 1  # the imported past-exam term is counted
+    job = gen.plan_gap(db, setup_ai)
+    assert job is not None
+    key = (job["payload"]["subject"], job["payload"]["question_type"])
+    assert {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}[key] == gaps[key] - 1
+
+
+def test_bank_target_unset_or_invalid_keeps_the_two_day_reserve(db, corpus, setup_ai, monkeypatch):
+    for value in (None, "", "0", "-3", "abc"):
+        if value is None:
+            monkeypatch.delenv("AI_BANK_TARGET_PER_BUCKET", raising=False)
+        else:
+            monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", value)
+        gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
+        assert gaps[("biochemistry", "single_choice")] == 36
+
+
+def test_a_stocked_bucket_is_not_fed_more_past_exam_work(db, corpus, setup_ai, monkeypatch):
+    pei.import_items(db)
+    monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", "1")
+    # one term/short answer item is already awaiting its answer in the same bucket? make the target tiny
+    assert cost_control.bucket_supply(db, "biochemistry", "term") == 0
+    queued = pei.plan(db, setup_ai)
+    assert queued >= 1
+    assert cost_control.bucket_supply(db, "biochemistry", "term") + cost_control.bucket_supply(db, "biochemistry", "short_answer") >= 1
+    again = pei.plan(db, setup_ai)  # buckets now at target: nothing more queued
+    assert again == 0
 
 
 # ---- single choice: distractor proof + second-correct-option check ----------

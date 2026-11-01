@@ -16,6 +16,7 @@ from collections import Counter, defaultdict
 from psycopg.types.json import Jsonb
 from pydantic import Field, StrictBool, StrictInt
 
+from app import cost_control
 from app.ai_jobs import content_sha, enqueue
 from app.auto_execution import MAX_EVIDENCE_CHARS, MAX_EVIDENCE_UNITS  # one definition, enforced at the call
 from app.candidate_review import create_packet, snapshot_unit
@@ -562,6 +563,9 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
     ).fetchall():
         if queued >= room:
             break
+        target = cost_control.bank_target()
+        if target and cost_control.bucket_supply(conn, item["subject"], item["question_type"]) >= target:
+            continue  # temporary first-batch limit: this bucket is already stocked
         if _enqueue_item(conn, uid, item) == "queued":
             queued += 1
     return queued

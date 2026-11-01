@@ -25,7 +25,7 @@ from pathlib import Path
 from psycopg.types.json import Jsonb
 from pydantic import ValidationError
 
-from app import past_exam_import as pei
+from app import cost_control, past_exam_import as pei
 from app.auto_generation import select_exam_style
 from app.candidate_review import create_packet, snapshot_unit
 from app.exam_authoring import issues as exam_issues
@@ -220,6 +220,9 @@ def import_proposals(conn, path=None):
         subject, kind = question.get("subject"), question.get("question_type")
         if subject not in SUBJECTS.values() or kind not in ("single_choice", "fill_blank") or not _has_textbook(conn, subject):
             continue  # nothing to bind to yet; try again once the sources are loaded
+        target = cost_control.bank_target()
+        if target and cost_control.bucket_supply(conn, subject, kind) >= target:
+            continue  # temporary first-batch limit: this bucket is already stocked
         attempts += 1
         qid, reason = _build_candidate(conn, record)
         if reason in TRANSIENT:

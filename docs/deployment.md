@@ -69,6 +69,59 @@ worker 真正开始调用模型，需要同时满足：
 
 `deploy/railway-automation/Dockerfile` 内置的 `DEEPSEEK_*=0`、`AI_AUTOMATION_ENABLED=0` 是安全默认值，需要时由 Railway 服务变量覆盖。
 
+## 首批试跑：临时题库目标量
+
+`AI_BANK_TARGET_PER_BUCKET`（**临时**，试跑完成后删除）：设为正整数 N，则每个「科目 × 题型」补到 N 题（现有 + 流水线中 + 在途请求）；真题入库和旧资料复用也会在该格已够数时停止排队。设为 `5` 即 8 格 × 5 = 40 题。不设置、为空、0、负数或非数字，一律按正常规则补到两天储备（`STARTUP_RESERVE_DAYS = 2`）。月上限 90 元、判分预留 15 元不受影响。
+
+## 日期逻辑（项目至 2026-12-21）
+
+2026 年节假日日历已核实（国务院通知），11 月 1 日至 12 月 21 日没有法定节假日；`tests/test_cost_control.py` 逐半小时核对这段时间内低峰判断（`cost_control.is_peak`）与计费模块（`cny_billing.period`）一致，且不会出现「未知」档。月/日统计窗口按北京时间切分，跨 12 月 1 日已测。CNY 价格每次随调用刷新 24 小时有效期，与日期无关。不需要 2027 年日历。
+
+## 正式站切换（第 10 步，只读检查结果，2026-11-01）
+
+> 本节只来自只读检查（Railway 只读接口 + 本地模拟），**没有改动正式站**。
+
+### 正式站现状
+
+- 项目 `xiao-ustc-quiz`，环境 `production`，服务 `quiz-backend` + `Postgres`（Postgres 18 镜像）。
+- 构建：`backend/Dockerfile`，源仓库 `Sakuraone0424/text`；**preDeploy = `python migrate.py`**（已核实）。
+- 服务变量只有三项：`APP_PASSWORD`、`DATABASE_URL`、`SESSION_SECRET`。没有任何 `QUIZ_*`、`AI_*`、`DEEPSEEK_*`。
+- 最近一次部署是 2026-10-27 的「redeploy」（无提交信息，实际运行的提交无法从 Railway 看出）；9 月的部署来自 `main`（最新 `0888ad9`，`main` 现在只有迁移 001–002）。**正式站数据库已应用哪些迁移，必须查 `schema_migrations` 才能确定**（见下）。
+
+### a. 旧代码/旧库能否安全执行迁移 022–030
+
+结论：**可以，没有破坏性改动**，前提是先备份。
+
+- 022–030 只有两处非「新增」：022 把 `paper_items_v2` 的 `position` 检查从 1–28 放宽为 1–60（旧行全部满足新约束，不改任何历史行）；028 替换触发器函数 `protect_reviewed_question()` 并把 `auto_question_states.policy_version` 默认值改为 `auto-evidence/2`（只影响新行）；030 给 `paper_items_v2` 加带默认值的 `is_reused` 列。其余都是新表。没有 DROP TABLE/COLUMN、DELETE、TRUNCATE、UPDATE 历史数据。
+- `migrate.py` 在**一个事务**里按顺序应用所有未应用的迁移，已应用的文件校验 sha256（被改过会拒绝）。失败则整体回滚，不会留下半套结构。
+- 本地模拟（临时 schema，不碰任何真实库）：从只有 001–002 的库（`main` 的结构）和从 001–021 的库（28 题分支结构）出发，一次应用全部 30 个迁移均成功（0.26 秒 / 0.04 秒），重复运行为空操作。
+- 注意：从 001–002 直接到 030 会一次性建立 003–021 的全部表，包括 `reviewed_questions`、`papers_v2` 等。旧的 `questions/papers/attempts/answers` 表（001–002）保持不动，但新代码不再读它们。
+- 022 在 `paper_items_v2` 上短暂持锁，数据量小，可忽略。
+- 切换前请在正式库执行（只读）：`SELECT name FROM schema_migrations ORDER BY name;` 并把结果交给我核对；如无该表说明正式站从未跑过 `migrate.py`。
+
+### b. 旧 28 题历史在新代码下能否显示
+
+结论：**能**，针对「库里已有 `papers_v2` 的 28 题」。`tests/test_training_spec_v2.py::test_stored_28q_paper_stays_readable_after_v2_default` 验证：旧卷快照不可变，新规格成为默认后旧卷仍按 28 题 / 150 分读出；新卷不会退回 28 题（`test_daily_60q_scheduler.py`）。
+- 但如果正式站仍是 `main` 时代（只有 001–002 的 `papers/questions` 表），那里的历史**不会**出现在新界面：新代码只读 `papers_v2` 系列。这部分是否存在、有多少条，需要查表确认（`SELECT count(*) FROM papers;`）。若需要保留，须另写一次性只读导入，**先问你**。
+
+### c. 切换所需环境变量与服务
+
+服务：保持现有 `quiz-backend` + `Postgres`；另外新建一个 AI worker 服务（`deploy/railway-automation/Dockerfile` + `worker.railway.json`），与 QA 相同。
+
+`quiz-backend` 需新增：`QUIZ_DAILY_SPECIFICATION=xiaohan-60q-150pt-v2`、`QUIZ_AUTO_GRADE_ON_SUBMIT=1`、`DEEPSEEK_API_KEY`、`DEEPSEEK_API_AUTHORIZED=1`、`DEEPSEEK_PRIVATE_DATA_AUTHORIZED=1`；拍照作答保持关闭（不设 `QUIZ_PHOTO_ANSWERS_ENABLED`）。
+worker 需要：`DATABASE_URL`、`AI_AUTOMATION_ENABLED=1`、`AI_QUEUE_AUTOPLAN=1`、`AI_CALLS_PER_RUN`（默认 2）、上面的 DeepSeek 三项、`QUIZ_DB_SCHEMA`，以及思考档位 `AI_GENERATION_THINKING` / `AI_REVIEW_THINKING` / `AI_GRADING_THINKING`（可选）。**不要设置** `AI_FULL_CORPUS_ENABLED`。教材/真题原文文件需随 worker 镜像（沿用 QA 的做法）。
+
+### 风险点
+
+1. **阻断：部署目标守卫会拒绝正式站。** `app/db.py` 每次连库都调用 `verify_isolated_target()`，在 Railway 上遇到 `RAILWAY_PROJECT_ID == c8ace6c2-…`（正式项目）或项目名 `xiao-ustc-quiz` 即抛 `PermissionError("Original project is protected")`。不改代码，新版本在正式站连不上库，连 preDeploy 的 `migrate.py` 也会失败（失败即不部署，旧版本继续运行，不会损坏数据）。需要你明确批准后修改这一守卫（第 11 步），并把 `PROTECTED_*`、`TARGET`、`SOURCE_SCHEMA` 改为正式站的固定值。
+2. **阻断：`auto_worker.main` 要求 `QUIZ_DB_SCHEMA` 以 `source_staging_` 开头**，且 `deployment_target` 要求 `QUIZ_DB_SCHEMA` 等于固定的 staging 名称。正式库没有该 schema，需放宽（同第 11 步）。
+3. 一次事务应用 28 个迁移，任何一步失败整体回滚，但**先做 Postgres 备份/快照**（Railway 的 Postgres 卷备份）再触发部署。
+4. 迁移不可回退（只追加）；回滚代码后新增的表仍在，旧代码会忽略它们，但 022 放宽后的位置约束不会还原（无害）。
+5. 正式站目前不知实际运行的提交；若它比 `main` 新，请以 `schema_migrations` 为准。
+6. 触发方式：正式服务的源分支未在只读配置里显示；**合并到 `main` 可能自动触发正式站部署**。当前只合并到 `feat/60q-v2-spec`，不碰 `main`。
+7. 正式站无任何 DeepSeek 变量：切换前不会产生任何模型费用；切换后首批用 `AI_BANK_TARGET_PER_BUCKET=5` 限量。
+8. `APP_PASSWORD` / `SESSION_SECRET` 保持不变，已登录会话不受影响。
+
 ## 回滚
 
 Railway 保留上一次部署，可在部署列表中一键回退；数据库变更只追加，旧 28 题记录只读保留。
