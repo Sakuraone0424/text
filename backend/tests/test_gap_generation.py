@@ -78,7 +78,8 @@ def test_an_oversized_anchor_paragraph_is_refused_not_trimmed(db, corpus):
     assert gen.assemble_payload(db, "biochemistry", "term", unit, "冈" * 30, None) is None
 
 
-def test_worker_never_sweeps_the_corpus_unless_the_flag_is_on(db, corpus, setup_ai, monkeypatch):
+def patch_worker(db, monkeypatch, run_once=lambda *a, **k: False):
+    """Run auto_worker.main() against the test database with every model call faked."""
     calls = []
 
     @contextmanager
@@ -95,13 +96,17 @@ def test_worker_never_sweeps_the_corpus_unless_the_flag_is_on(db, corpus, setup_
     monkeypatch.setattr(auto_worker, "integrations_tick", lambda: None)
     monkeypatch.setattr(auto_worker.auto_insights, "plan", lambda conn, uid: None)
     monkeypatch.setattr(auto_worker.model_router, "authorized", lambda private=False: None)
-    monkeypatch.setattr(auto_worker.ai_jobs, "run_once", lambda *a, **k: False)
+    monkeypatch.setattr(auto_worker.ai_jobs, "run_once", run_once)
     monkeypatch.setattr("app.deployment_target.verify_isolated_target", lambda: None)
     monkeypatch.setenv("QUIZ_SERVICE_ROLE", "api")
     for key, value in dict(AI_AUTOMATION_ENABLED="1", QUIZ_DB_SCHEMA="source_staging_x",
                            DEEPSEEK_PRIVATE_DATA_AUTHORIZED="1", AI_QUEUE_AUTOPLAN="1").items():
         monkeypatch.setenv(key, value)
+    return calls
 
+
+def test_worker_never_sweeps_the_corpus_unless_the_flag_is_on(db, corpus, setup_ai, monkeypatch):
+    calls = patch_worker(db, monkeypatch)
     auto_worker.main()  # AI_FULL_CORPUS_ENABLED is unset
     assert calls == []
     # ...yet bounded, per-question planning still happened.
@@ -111,6 +116,41 @@ def test_worker_never_sweeps_the_corpus_unless_the_flag_is_on(db, corpus, setup_
     monkeypatch.setenv("AI_FULL_CORPUS_ENABLED", "1")  # control: the flag really gates the sweeps
     auto_worker.main()
     assert set(calls) == {"knowledge", "exams", "knowledge_generation"}
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [(None, 3), ("", 3), ("abc", 3), ("1", 1), ("5", 5), ("10", 10), ("11", 10), ("99", 10), ("0", 1), ("-4", 1), ("2.5", 3)],
+)
+def test_calls_per_run_is_bounded_and_defaults_to_three(value, expected):
+    env = {} if value is None else {"AI_CALLS_PER_RUN": value}
+    assert auto_worker.calls_per_run(env) == expected
+
+
+@pytest.mark.parametrize("value,expected", [(None, 3), ("5", 5), ("99", 10), ("junk", 3)])
+def test_one_run_makes_no_more_calls_than_the_limit_and_dispatches_between_them(
+    db, corpus, setup_ai, monkeypatch, value, expected
+):
+    seen = []
+    patch_worker(db, monkeypatch, run_once=lambda *a, **k: seen.append("call") or True)
+    monkeypatch.setattr(auto_worker, "dispatch_completed", lambda conn, **k: seen.append("dispatch"))
+    if value is None:
+        monkeypatch.delenv("AI_CALLS_PER_RUN", raising=False)
+    else:
+        monkeypatch.setenv("AI_CALLS_PER_RUN", value)
+    auto_worker.main()
+    assert seen.count("call") == expected
+    # every call is followed by a dispatch, so its review jobs can run in the same run
+    assert all(seen[i + 1] == "dispatch" for i, x in enumerate(seen) if x == "call")
+
+
+def test_a_run_stops_early_when_nothing_can_be_claimed(db, corpus, setup_ai, monkeypatch):
+    results = iter([True, False, True])
+    seen = []
+    patch_worker(db, monkeypatch, run_once=lambda *a, **k: seen.append(1) or next(results))
+    monkeypatch.setenv("AI_CALLS_PER_RUN", "10")
+    auto_worker.main()
+    assert len(seen) == 2
 
 
 # ---- weighting --------------------------------------------------------------

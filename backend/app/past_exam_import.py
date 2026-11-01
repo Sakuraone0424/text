@@ -305,14 +305,23 @@ def search_terms(text):
     return latin, grams
 
 
-def retrieve_evidence(conn, subject, text):
-    """Rank pinned, clean textbook paragraphs of this subject against one question."""
+PAGE_HINT_BOOST = 1.5
+
+
+def ranked_paragraphs(conn, subject, text, page_hints=None):
+    """Pinned, clean textbook paragraphs of this subject, best match first.
+
+    `page_hints` ({file_id: {ocr pages}}) only RAISES the score of paragraphs
+    on those pages; a paragraph that does not match the question's wording is
+    never admitted because of a page number.
+    Returns [(score, unit_id, printed_page, file_id, ocr_page)].
+    """
     latin, grams = search_terms(text)
     strong = sorted(latin | {g for g in grams if len(g) >= 3}, key=lambda t: (-len(t), t))[:60]
     if not strong:
         return []
     rows = conn.execute(
-        "SELECT u.id,u.text,u.printed_page,d.file_id,d.sha256 FROM source_units u "
+        "SELECT u.id,u.text,u.printed_page,u.ocr_global_page,d.file_id,d.sha256 FROM source_units u "
         "JOIN source_documents d ON d.id=u.document_id WHERE "
         + current_source_sql("d", kind="textbook")
         + " AND d.subject=%s AND u.quality_flags='[]'::jsonb "
@@ -333,10 +342,17 @@ def retrieve_evidence(conn, subject, text):
         if not pinned_source_bytes(row["file_id"], row["sha256"]):
             continue
         score = sum(len(t) for t in matched) / (len(row["text"]) ** 0.25)
-        ranked.append((-score, row["id"], row["printed_page"]))
-    ranked.sort()
+        if row["ocr_global_page"] in (page_hints or {}).get(row["file_id"], ()):
+            score *= PAGE_HINT_BOOST
+        ranked.append((score, row["id"], row["printed_page"], row["file_id"], row["ocr_global_page"]))
+    ranked.sort(key=lambda r: (-r[0], r[1]))
+    return ranked
+
+
+def retrieve_evidence(conn, subject, text, page_hints=None):
+    """The few paragraphs most relevant to ONE question, within the hard caps."""
     chosen, chars = [], 0
-    for _, uid, printed in ranked:
+    for _, uid, printed, _, _ in ranked_paragraphs(conn, subject, text, page_hints):
         try:
             unit = snapshot_unit(conn, uid)
         except ValueError:
@@ -423,6 +439,15 @@ INSTRUCTIONS = (
 )
 
 
+DRAFT_NOTICE = (
+    " The payload field unreviewed_reference_draft is an UNREVIEWED explanation copied from an old "
+    "study aid. It may be wrong, incomplete or from a different edition. The supplied textbook "
+    "units are the only authority: use the draft solely as a hint about what the answer should "
+    "cover, never quote it, never cite it as evidence, and if it disagrees with the textbook follow "
+    "the textbook (or return supported=false). Every rubric excerpt must still come from the units."
+)
+
+
 def _block(conn, item_id, reason):
     conn.execute(
         "UPDATE past_exam_items SET status='blocked',blocked_reason=%s,updated_at=clock_timestamp() WHERE id=%s",
@@ -442,13 +467,13 @@ def _style_unit(conn, item):
     return unit
 
 
-def _payload(conn, item, units):
+def _payload(conn, item, units, draft=None):
     bibliographies = {}
     for unit in units:
         if unit["file_id"] not in bibliographies:
             bibliographies[unit["file_id"]] = source_bibliography(conn, unit)
     kind = item["question_type"]
-    return dict(
+    payload = dict(
         origin=ORIGIN_PAST_EXAM,
         item_id=item["id"],
         stem_hash=item["stem_hash"],
@@ -464,17 +489,24 @@ def _payload(conn, item, units):
         schema=PastExamAnswer.model_json_schema(),
         instructions=INSTRUCTIONS,
     )
+    if draft:
+        payload["unreviewed_reference_draft"] = draft
+        payload["instructions"] = INSTRUCTIONS + DRAFT_NOTICE
+    return payload
 
 
 def _enqueue_item(conn, uid, item):
+    from app import legacy_reuse  # lazy: legacy_reuse imports this module
+
     text = item["stem"] + " " + " ".join(item["options"].values())
-    units = retrieve_evidence(conn, item["subject"], text)
+    units = retrieve_evidence(conn, item["subject"], text, legacy_reuse.page_hints(conn, item["id"]))
     if not units:
         _block(conn, item["id"], "no_textbook_evidence")
         return "blocked"
+    draft = legacy_reuse.reference_draft(conn, item["id"])
     while True:
         try:
-            payload = _payload(conn, item, units)
+            payload = _payload(conn, item, units, draft)
         except ValueError:
             _block(conn, item["id"], "textbook_or_exam_source_unavailable")
             return "blocked"
@@ -486,6 +518,9 @@ def _enqueue_item(conn, uid, item):
         except ValueError as exc:
             if str(exc) != "bounded_input_exceeded":
                 raise
+            if draft:  # the unreviewed hint is the first thing to give up
+                draft = None
+                continue
             if len(units) == 1:
                 _block(conn, item["id"], "evidence_payload_too_large")
                 return "blocked"

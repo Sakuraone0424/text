@@ -5,7 +5,7 @@ import os
 import sys
 from app.db import get_db
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
-from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import
+from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
 from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
@@ -192,8 +192,27 @@ def plan(conn, uid):
         auto_grading.schedule(conn, uid, row["id"])
     # Past-exam questions need no corpus-wide sweep: each request carries only
     # the few textbook paragraphs relevant to that one question.
+    legacy_reuse.plan(conn, uid)
     past_exam_import.plan(conn, uid)
     auto_generation.plan_gap(conn, uid)
+
+
+DEFAULT_CALLS_PER_RUN = 3
+MAX_CALLS_PER_RUN = 10
+
+
+def calls_per_run(env=None):
+    """Model calls one worker run may make: AI_CALLS_PER_RUN, default 3, 1..10.
+
+    Budget, concurrency and retry limits still apply to every call; this only
+    bounds how many a single cron run attempts.
+    """
+    raw = (os.environ if env is None else env).get("AI_CALLS_PER_RUN", "")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_CALLS_PER_RUN
+    return min(max(value, 1), MAX_CALLS_PER_RUN)
 
 
 def main():
@@ -254,7 +273,13 @@ def main():
         conn.execute(
             "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' AND j.error_code IN ('budget_exceeded','automation_stopped')"
         )
-    ai_jobs.run_once(get_db, execute)
+    for _ in range(calls_per_run()):
+        if not ai_jobs.run_once(get_db, execute):
+            break  # nothing claimable: queue empty, budget spent or retries pending
+        with get_db() as conn:
+            # Hand each finished result on at once so its review jobs can be
+            # claimed by the next call of this same run.
+            dispatch_completed(conn)
     with get_db() as conn:
         dispatch_completed(conn)
     integrations_tick()
