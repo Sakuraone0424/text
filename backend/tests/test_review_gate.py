@@ -1,4 +1,4 @@
-"""The release gate: two independent AI rounds, nothing else (no human sign-off).
+"""The release gate: free program checks + ONE independent AI review, no human sign-off.
 
 Fake model results only. Each test states the property it protects.
 """
@@ -7,6 +7,7 @@ from copy import deepcopy
 from uuid import uuid4
 
 import pytest
+from psycopg.errors import RaiseException
 from psycopg.types.json import Jsonb
 
 from app import auto_quality as quality, auto_worker, quiz_v2, source_policy, training_sessions
@@ -18,12 +19,12 @@ from test_gap_generation import corpus, review_jobs, tweak, written  # noqa: F40
 
 
 def fresh_choice(db, uid):
-    """A single-choice candidate with its two pending review jobs, plus a citable quote."""
+    """A single-choice candidate with its ONE pending review job, plus a citable quote."""
     written(db, uid)
-    jobs = review_jobs(db)
-    qid = jobs["answer"]["payload"]["question_id"]
+    job = review_jobs(db)["review"]
+    qid = job["payload"]["question_id"]
     quote = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]["evidence"][0]["excerpt"]
-    return qid, jobs, quote
+    return qid, job, quote
 
 
 def run(db, job, quote, **kwargs):
@@ -37,200 +38,231 @@ def state(db, qid):
 # ---- release condition -------------------------------------------------------------------
 
 
-def test_only_two_independent_passing_rounds_publish_a_question(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    assert jobs["science"]["id"] != jobs["answer"]["id"]
+def test_one_passing_review_plus_the_program_checks_publish_a_question(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    assert db.execute("SELECT count(*) AS n FROM ai_jobs WHERE kind IN ('science_review','answer_review')").fetchone()["n"] == 0
     assert db.execute("SELECT status FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["status"] != "published"
     assert not quality.ready(db, qid)
-    assert run(db, jobs["science"], quote)
-    assert not quality.ready(db, qid)  # one round is not enough, however good
-    assert db.execute("SELECT status FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["status"] != "published"
-    assert run(db, jobs["answer"], quote)
+    identity = db.execute("SELECT passed FROM auto_quality_events WHERE question_id=%s AND phase='identity'", (qid,)).fetchone()
+    assert identity["passed"]  # the free program checks already ran, before any model call
+    assert run(db, job, quote)
     assert quality.promote(db, qid) and quality.ready(db, qid)
     assert db.execute("SELECT status FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["status"] == "published"
 
 
-def test_each_round_needs_a_real_completed_model_call(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    science = synthetic_result(jobs["science"], db, quote=quote)
-    db.execute("UPDATE ai_jobs SET result=jsonb_set(result,'{real_api}','false') WHERE id=%s", (science["id"],))
-    stored = db.execute("SELECT * FROM ai_jobs WHERE id=%s", (science["id"],)).fetchone()
+def test_the_review_needs_a_real_completed_model_call(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    result = synthetic_result(job, db, quote=quote)
+    db.execute("UPDATE ai_jobs SET result=jsonb_set(result,'{real_api}','false') WHERE id=%s", (result["id"],))
+    stored = db.execute("SELECT * FROM ai_jobs WHERE id=%s", (result["id"],)).fetchone()
     with pytest.raises(ValueError, match="completed_actual_model_call_required"):
         quality.accept_round(db, stored)
     assert not quality.ready(db, qid)
 
 
-def test_the_blind_science_round_never_receives_the_answer_or_the_scoring(db, corpus, setup_ai):
-    qid, jobs, _ = fresh_choice(db, setup_ai)
+def test_the_review_sees_answer_and_scoring_but_not_the_authors_reasoning(db, corpus, setup_ai):
+    qid, job, _ = fresh_choice(db, setup_ai)
     q, refs, style = quality.evidence(db, qid)
-    sentinel = dict(answer="唯一答案标记XQ1", accepted_answers=["可接受答案标记XQ3"],
-                    rubric=[dict(description="评分标记XQ2", points=q["max_points"], knowledge_tags=[])],
-                    blanks=[])
+    payload = job["payload"]
+    assert set(payload) == {"phase", "content_sha256", "question_id", "question", "evidence", "style",
+                            "source_level", "schema", "instructions"}
+    assert {"answer", "rubric", "options", "stem"} <= set(payload["question"])
+    sent = json.dumps(payload, ensure_ascii=False)
+    generation = db.execute("SELECT * FROM ai_jobs WHERE kind='generation'").fetchone()
+    assert generation["payload"]["anchor_exact_excerpt"] not in {None, ""}
+    for author_only in ("anchor_exact_excerpt", "distractor_checks", "选项B与教材所述内容不符", "style_overlap", "source_bibliography"):
+        assert author_only not in sent, author_only
+    sentinel = dict(answer="唯一答案标记XQ1", rubric=[dict(description="评分标记XQ2", points=q["max_points"], knowledge_tags=[])])
     for kind in ("single_choice", "fill_blank", "term", "short_answer"):
         question = {**q, **sentinel, "question_type": kind, "options": q["options"] if kind == "single_choice" else {}}
-        science = quality.review_payload("science", qid, "x", question, refs, style, quality.CURRENT_CONTRACT)
-        assert set(science["question"]) == {"subject", "question_type", "stem", "options", "knowledge_tags"}
-        sent = json.dumps(science, ensure_ascii=False)
-        assert not any(mark in sent for mark in ("XQ1", "XQ2", "XQ3")), kind
-        answer = quality.review_payload("answer", qid, "x", question, refs, style, quality.CURRENT_CONTRACT)
-        assert "XQ1" in json.dumps(answer, ensure_ascii=False) and "XQ2" in json.dumps(answer, ensure_ascii=False)
-    assert "Ambiguity rule" in jobs["science"]["payload"]["instructions"]
-    assert "Ambiguity rule" not in jobs["answer"]["payload"]["instructions"]
+        full = json.dumps(quality.review_payload("review", qid, "x", question, refs, style), ensure_ascii=False)
+        assert "XQ1" in full and "XQ2" in full, kind  # the reviewer must be able to check them
 
 
-def test_the_two_rounds_share_no_conclusions_and_the_answer_round_has_no_style(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    science = synthetic_result(jobs["science"], db, quote=quote)
-    marker = science["result"]["response"]["rationale"]
-    assert marker not in json.dumps(jobs["answer"]["payload"], ensure_ascii=False)
-    assert jobs["answer"]["payload"]["style"] == [] and jobs["science"]["payload"]["style"]
+def test_the_review_job_is_recognised_and_recomputed_exactly(db, corpus, setup_ai):
+    qid, job, _ = fresh_choice(db, setup_ai)
+    assert quality.job_contract_version(job) == 9 and job["payload"]["instructions"].startswith("Single independent review")
+    q, refs, style = quality.evidence(db, qid)
+    assert quality.review_payload("review", qid, job["payload"]["content_sha256"], q, refs, style) == job["payload"]
 
 
-def test_new_review_jobs_use_the_current_prompt_contract_without_any_qa_switch(db, corpus, setup_ai, monkeypatch):
-    monkeypatch.delenv("QA_AUTOMATION_ENABLED", raising=False)
-    _, jobs, _ = fresh_choice(db, setup_ai)
-    assert quality.CURRENT_CONTRACT == 8
-    for job in jobs.values():
-        assert "Output contract:" in job["payload"]["instructions"]
-        assert "Boolean polarity" in job["payload"]["instructions"]
-        # recomputing from the stored job reproduces exactly what was sent
-        q, refs, style = quality.evidence(db, job["payload"]["question_id"])
-        again = quality.review_payload(job["payload"]["phase"], job["payload"]["question_id"],
-                                       job["payload"]["content_sha256"], q, refs, style, quality.job_contract_version(job))
-        assert again == job["payload"]
-    assert quality.job_contract_version(jobs["science"]) == 8  # the ambiguity rule is a science-round clause
+# ---- failures and contradictions block ---------------------------------------------------
 
 
-def test_a_job_issued_under_an_older_contract_is_still_judged_as_it_was_sent():
-    old = {"settings_snapshot": {}, "payload": {"instructions": "plain"}}
-    seven = {"settings_snapshot": {}, "payload": {"instructions": "x Output contract: y"}}
-    assert quality.job_contract_version(old) == 1 and quality.job_contract_version(seven) == 7
-
-
-# ---- failures and conflicts block ------------------------------------------------------
-
-
-@pytest.mark.parametrize("failing,passing", [("science", "answer"), ("answer", "science")])
-def test_one_failing_round_blocks_even_when_the_other_passes(db, corpus, setup_ai, failing, passing):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    assert not run(db, jobs[failing], quote, passed=False)
+def test_a_failing_review_blocks_and_nothing_publishes(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    assert not run(db, job, quote, passed=False)
     assert state(db, qid)["status"] == "blocked"
-    run(db, jobs[passing], quote)
     assert not quality.ready(db, qid)
     with pytest.raises(ValueError):
         quality.promote(db, qid)
     assert db.execute("SELECT status FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["status"] != "published"
 
 
-def test_the_blind_round_choosing_another_option_conflicts_with_the_key(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    science = synthetic_result(jobs["science"], db, quote=quote)
-    science = tweak(db, science, ["response", "independent_choice"], "C")
-    assert not quality.accept_round(db, science)
-    assert "independent_answer_conflict" in state(db, qid)["reason"]
+@pytest.mark.parametrize(
+    "path,value,reason",
+    [
+        (["response", "unresolved"], ["a problem the reviewer itself reported"], "unresolved_quality_findings"),
+        (["response", "checks", "uniqueness"], False, "unresolved_quality_findings"),
+        (["response", "passed"], False, "unresolved_quality_findings"),
+        (["response", "independent_choice"], "C", "independent_answer_conflict"),
+        (["response", "independent_choice"], None, "independent_answer_conflict"),
+    ],
+    ids=["passed-but-unresolved", "passed-but-check-false", "checks-true-but-not-passed", "other-option", "no-unique-option"],
+)
+def test_a_self_contradicting_or_non_unique_verdict_blocks(db, corpus, setup_ai, path, value, reason):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    review = tweak(db, synthetic_result(job, db, quote=quote), path, value)
+    assert not quality.accept_round(db, review)
+    assert reason in state(db, qid)["reason"]
 
 
-def test_a_blind_round_that_cannot_pick_one_option_blocks(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    science = synthetic_result(jobs["science"], db, quote=quote)
-    db.execute("UPDATE ai_jobs SET result=jsonb_set(result,'{response,independent_choice}','null') WHERE id=%s", (science["id"],))
-    science = db.execute("SELECT * FROM ai_jobs WHERE id=%s", (science["id"],)).fetchone()
-    assert not quality.accept_round(db, science)
-    assert "independent_answer_conflict" in state(db, qid)["reason"]
-
-
-@pytest.mark.parametrize("phase", ["science", "answer"])
-def test_a_quote_that_is_not_in_the_sent_text_blocks(db, corpus, setup_ai, phase):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    assert not run(db, jobs[phase], "评审凭空写出的教材原文，数据库里根本不存在")
+def test_a_quote_that_is_not_in_the_sent_text_blocks(db, corpus, setup_ai):
+    qid, job, _ = fresh_choice(db, setup_ai)
+    assert not run(db, job, "评审凭空写出的教材原文，数据库里根本不存在")
     assert "invented_quote" in state(db, qid)["reason"]
 
 
+def test_a_rubric_point_left_unsupported_blocks(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    review = tweak(db, synthetic_result(job, db, quote=quote), ["response", "claims"], [])
+    with pytest.raises(ValueError):  # a review with no claim at all is not even a valid finding
+        quality.accept_round(db, review)
+    review = tweak(db, synthetic_result(job, db, quote=quote), ["response", "claims", "0", "criterion_indices"], [])
+    assert not quality.accept_round(db, review)
+    assert "rubric_not_fully_evidenced" in state(db, qid)["reason"]
+
+
+# ---- the free program checks still gate everything ----------------------------------------
+
+
+def test_a_duplicate_of_a_published_question_is_stopped_by_the_free_checks_before_any_model_call(db, corpus, setup_ai):
+    first, job, quote = fresh_choice(db, setup_ai)
+    assert run(db, job, quote) and quality.promote(db, first)
+    old = db.execute("SELECT * FROM candidate_review_packets WHERE question_id=%s", (first,)).fetchone()
+    second = create_packet(db, dict(
+        candidate_key="duplicate-of-the-first", batch_key="synthetic", question=old["question_snapshot"],
+        ai_analysis=old["ai_analysis"],
+        style_sources=[dict(unit_id=u["unit_id"], year=u.get("year"), relationship="same style") for u in old["style_snapshot"]],
+    ))
+    assert second != first
+    assert quality.schedule_checks(db, setup_ai, second) == []  # no model call is queued
+    assert "duplicate_ready_question" in state(db, second)["reason"] and state(db, second)["status"] == "blocked"
+    assert db.execute("SELECT count(*) AS n FROM ai_jobs WHERE kind='quality_review'").fetchone()["n"] == 1
+
+
 def test_a_citation_that_no_longer_matches_the_source_text_voids_a_finished_approval(db, corpus, setup_ai, monkeypatch):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    run(db, jobs["science"], quote), run(db, jobs["answer"], quote)
-    assert quality.promote(db, qid) and quality.ready(db, qid)
+    qid, job, quote = fresh_choice(db, setup_ai)
+    assert run(db, job, quote) and quality.promote(db, qid) and quality.ready(db, qid)
     real = quality.snapshot_unit
     monkeypatch.setattr(quality, "snapshot_unit", lambda conn, uid: {**real(conn, uid), "text": "教材原文已经变成了别的内容"})
     assert not quality.ready(db, qid)
 
 
-def test_a_failed_round_cannot_be_rerolled_on_the_same_content(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    assert not run(db, jobs["science"], quote, passed=False)
-    again = quality.schedule_checks(db, setup_ai, qid)
-    assert {j["id"] for j in again} == {jobs["science"]["id"], jobs["answer"]["id"]}
-    assert db.execute("SELECT count(*) AS n FROM ai_jobs WHERE kind IN ('science_review','answer_review')").fetchone()["n"] == 2
+def test_the_database_refuses_to_publish_without_the_current_checks_and_review(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    db.execute("UPDATE auto_question_states SET status='ready' WHERE question_id=%s", (qid,))
+    with pytest.raises(RaiseException, match="program checks and one passed independent review"):
+        db.execute("UPDATE reviewed_questions SET status='published' WHERE id=%s", (qid,))
 
 
-# ---- changing the question voids earlier results ---------------------------------------
+def test_events_from_the_retired_two_round_flow_do_not_qualify(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    sha = job["payload"]["content_sha256"]
+    for phase in ("science", "answer"):  # exactly what the old gate required
+        db.execute(
+            "INSERT INTO auto_quality_events(question_id,content_sha256,policy_version,phase,run_key,job_id,evidence_snapshot,result,passed) "
+            "VALUES (%s,%s,'auto-evidence/1',%s,%s,%s,'[]','{}',true)", (qid, sha, phase, f"old:{phase}", job["id"]))
+    db.execute("UPDATE auto_question_states SET status='ready' WHERE question_id=%s", (qid,))
+    assert not quality.ready(db, qid)
+    with pytest.raises(RaiseException):
+        db.execute("UPDATE reviewed_questions SET status='published' WHERE id=%s", (qid,))
+
+
+# ---- changing the question voids earlier results ------------------------------------------
 
 
 def test_an_approved_question_cannot_be_edited_in_place(db, corpus, setup_ai):
-    from psycopg.errors import RaiseException
-
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    run(db, jobs["science"], quote), run(db, jobs["answer"], quote)
-    assert quality.promote(db, qid)
+    qid, job, quote = fresh_choice(db, setup_ai)
+    assert run(db, job, quote) and quality.promote(db, qid)
     with pytest.raises(RaiseException, match="immutable"):
         db.execute("UPDATE reviewed_questions SET content=jsonb_set(content,'{stem}',%s) WHERE id=%s",
                    (Jsonb("改动之后的题干：下列哪种酶封闭缺口？"), qid))
 
 
 def test_approval_is_tied_to_the_exact_content_it_was_given_for(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    run(db, jobs["science"], quote), run(db, jobs["answer"], quote)
-    assert quality.promote(db, qid) and quality.ready(db, qid)
+    qid, job, quote = fresh_choice(db, setup_ai)
+    assert run(db, job, quote) and quality.promote(db, qid) and quality.ready(db, qid)
     db.execute("UPDATE auto_question_states SET content_sha256=%s WHERE question_id=%s", ("0" * 64, qid))
     assert not quality.ready(db, qid)  # the recorded approval is for different content
     assert quality.promote(db, qid) is False
     assert state(db, qid) == {"status": "blocked", "reason": "incomplete_or_stale_rounds"}
 
 
+def test_a_failed_review_cannot_be_rerolled_on_the_same_content(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    assert not run(db, job, quote, passed=False)
+    again = quality.schedule_checks(db, setup_ai, qid)
+    assert [j["id"] for j in again] == [job["id"]]
+    assert db.execute("SELECT count(*) AS n FROM ai_jobs WHERE kind='quality_review'").fetchone()["n"] == 1
+
+
 def test_a_repaired_version_starts_with_no_approval_and_the_old_one_is_retired(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    run(db, jobs["science"], quote, passed=False)
+    qid, job, quote = fresh_choice(db, setup_ai)
+    run(db, job, quote, passed=False)
     content = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]
     revised = {**content, "stem": "修订之后的题干：下列哪种酶负责封闭相邻片段之间的缺口？"}
-    new = quality.repair(db, qid, revised, "Reworded the stem so that the unique answer is unambiguous.")
-    assert new is None or new != qid
-    new_id = db.execute("SELECT question_id FROM auto_question_states WHERE reason IS NULL OR status<>'retired' ORDER BY question_id DESC LIMIT 1").fetchone()["question_id"]
-    assert new_id != qid
-    assert state(db, qid)["status"] == "retired" and not quality.ready(db, qid)
-    assert not quality.ready(db, new_id)
-    assert db.execute("SELECT count(*) AS n FROM auto_quality_events WHERE question_id=%s AND phase IN ('science','answer')", (new_id,)).fetchone()["n"] == 0
+    quality.repair(db, qid, revised, "Reworded the stem so that the unique answer is unambiguous.")
+    new_id = db.execute("SELECT max(question_id) AS q FROM auto_question_states").fetchone()["q"]
+    assert new_id != qid and state(db, qid)["status"] == "retired"
+    assert not quality.ready(db, qid) and not quality.ready(db, new_id)
+    assert db.execute("SELECT count(*) AS n FROM auto_quality_events WHERE question_id=%s AND phase='review'", (new_id,)).fetchone()["n"] == 0
     assert state(db, new_id)["status"] == "candidate"
 
 
-# ---- bounded automatic retries ---------------------------------------------------------
+# ---- exactly one automatic repair, then discard -------------------------------------------
 
 
 def repair_jobs(db):
     return db.execute("SELECT * FROM ai_jobs WHERE kind='repair'").fetchall()
 
 
-def test_a_blocked_question_gets_a_limited_number_of_automatic_repairs(db, corpus, setup_ai):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
-    assert not run(db, jobs["answer"], quote, passed=False)
+def test_a_blocked_question_gets_one_automatic_repair(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    assert quality.MAX_REPAIRS == 1
+    assert not run(db, job, quote, passed=False)
     auto_worker.plan(db, setup_ai)
     assert [j["payload"]["question_id"] for j in repair_jobs(db)] == [qid]
+    assert state(db, qid)["status"] != "retired"
+    content = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]
+    quality.repair(db, qid, {**content, "stem": "第一次修订后的题干：下列哪种酶封闭缺口？"}, "Reworded once, as the single allowed repair.")
+    with pytest.raises(ValueError, match="repair_limit"):  # the new version has used the allowance
+        new_id = db.execute("SELECT max(question_id) AS q FROM auto_question_states").fetchone()["q"]
+        quality.repair(db, new_id, {**content, "stem": "第二次修订后的题干：下列哪种酶封闭缺口？"}, "A second repair is not allowed.")
+
+
+def test_a_version_that_fails_after_its_repair_is_discarded(db, corpus, setup_ai):
+    qid, job, quote = fresh_choice(db, setup_ai)
+    run(db, job, quote, passed=False)
     db.execute("DELETE FROM ai_jobs WHERE kind='repair'")
-    db.execute("UPDATE auto_question_states SET status='blocked',revision_count=2 WHERE question_id=%s", (qid,))
+    db.execute("UPDATE auto_question_states SET status='blocked',reason='unresolved_quality_findings',revision_count=1 WHERE question_id=%s", (qid,))
     auto_worker.plan(db, setup_ai)
-    assert repair_jobs(db) == []  # budget spent: it stays blocked
-    with pytest.raises(ValueError, match="repair_limit"):
-        quality.repair(db, qid, {}, "x" * 30)
+    assert repair_jobs(db) == []
+    row = state(db, qid)
+    assert row["status"] == "retired" and row["reason"].startswith("discarded:")
+    assert not quality.ready(db, qid)
 
 
 @pytest.mark.parametrize("reason", ["unresolvable_ocr_or_image_dependency", "source_file_integrity_failed"])
-def test_defects_a_rewrite_cannot_fix_are_never_retried(db, corpus, setup_ai, reason):
-    qid, jobs, quote = fresh_choice(db, setup_ai)
+def test_defects_a_rewrite_cannot_fix_are_discarded_not_retried(db, corpus, setup_ai, reason):
+    qid, job, quote = fresh_choice(db, setup_ai)
     db.execute("UPDATE auto_question_states SET status='blocked',reason=%s WHERE question_id=%s", (reason, qid))
     auto_worker.plan(db, setup_ai)
     assert repair_jobs(db) == []
+    assert state(db, qid)["status"] == "retired"
 
 
-# ---- no human anywhere on the path -----------------------------------------------------
+# ---- no human anywhere on the path --------------------------------------------------------
 
 
 def test_a_full_60_question_bank_reaches_a_paper_with_no_human_record(db, tmp_path, setup_ai, monkeypatch):
@@ -266,8 +298,8 @@ def test_a_full_60_question_bank_reaches_a_paper_with_no_human_record(db, tmp_pa
                 if kind == "fill_blank":
                     q.update(stem=q["stem"] + " ____", accepted_answers=["fixture solution"])
                 qid = create_packet(db, p)
-                for job in quality.schedule_checks(db, setup_ai, qid):
-                    assert quality.accept_round(db, synthetic_result(job, db))
+                (review,) = quality.schedule_checks(db, setup_ai, qid)
+                assert quality.accept_round(db, synthetic_result(review, db))
                 assert quality.promote(db, qid)
     spec = {"specification": SPECIFICATION, "quotas": default_blueprint()["quotas"]}
     from app.question_quality import Blueprint

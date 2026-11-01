@@ -757,6 +757,25 @@ def assert_stem_preserved(conn, qid, previous, revised):
         raise ValueError("repair_must_preserve_past_exam_stem")
 
 
+def stem_unchanged(conn, qid, question):
+    """Free check: a question taken from a past exam still carries the original wording."""
+    row = conn.execute(
+        "SELECT i.stem,i.options FROM question_origins o JOIN past_exam_items i ON i.id=o.past_exam_item_id "
+        "WHERE o.question_id=%s AND o.origin=%s",
+        (qid, ORIGIN_PAST_EXAM),
+    ).fetchone()
+    return row is None or (row["stem"] == question["stem"] and row["options"] == question.get("options", {}))
+
+
+def mark_discarded(conn, question_ids):
+    """Past-exam items whose question was discarded after its single repair."""
+    conn.execute(
+        "UPDATE past_exam_items SET status='blocked',blocked_reason='review_failed',updated_at=clock_timestamp() "
+        "WHERE question_id=ANY(%s) AND status='packet_created'",
+        (list(question_ids),),
+    )
+
+
 def concept_keys(conn, question_ids):
     if not question_ids:
         return {}

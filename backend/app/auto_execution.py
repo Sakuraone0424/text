@@ -29,7 +29,7 @@ MAX_EVIDENCE_UNITS = 4
 MAX_EVIDENCE_CHARS = 5000
 MAX_PAYLOAD_BYTES = 24000
 KINDS = frozenset(
-    {"compatibility", "generation", "science_review", "answer_review", "repair", "grading"}
+    {"compatibility", "generation", "quality_review", "repair", "grading"}
 )
 TOKEN_LIMITS = (128, 32768)
 

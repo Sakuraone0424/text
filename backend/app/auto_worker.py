@@ -81,7 +81,11 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
     for job in rows:
         try:
             with conn.transaction():
-                if job["kind"] in ("science_review", "answer_review"):
+                if job["kind"] == "quality_review":
+                    if auto_quality.accept_round(conn, job):
+                        auto_quality.promote(conn, job["payload"]["question_id"])
+                elif job["kind"] in ("science_review", "answer_review"):
+                    # Retired two-round flow, kept only so old stored jobs can be read.
                     auto_quality.accept_round(conn, job)
                     phases = conn.execute(
                         "SELECT count(DISTINCT phase) AS n FROM auto_quality_events WHERE question_id=%s AND content_sha256=%s AND passed AND phase IN ('science','answer')",
@@ -127,7 +131,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                 "UPDATE ai_jobs SET state='blocked',error_code='invalid_or_uncertain_result' WHERE id=%s",
                 (job["id"],),
             )
-            if job["kind"] in ("science_review", "answer_review"):
+            if job["kind"] in ("quality_review", "science_review", "answer_review"):
                 conn.execute(
                     "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason='invalid_or_uncertain_result' WHERE question_id=%s",
                     (job["payload"]["question_id"],),
@@ -159,12 +163,14 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
 
 def plan(conn, uid):
     auto_quality.retire_stale(conn)
+    auto_quality.discard_unfixable(conn)
     for row in conn.execute(
         "SELECT p.question_id FROM candidate_review_packets p LEFT JOIN auto_question_states s ON s.question_id=p.question_id WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) AND (s.question_id IS NULL OR s.status='candidate') ORDER BY p.question_id LIMIT 10"
     ).fetchall():
         auto_quality.schedule_checks(conn, uid, row["question_id"])
     for row in conn.execute(
-        "SELECT question_id FROM auto_question_states WHERE status='blocked' AND revision_count<2 AND reason NOT IN ('unresolvable_ocr_or_image_dependency','source_file_integrity_failed') ORDER BY question_id LIMIT 3"
+        "SELECT question_id FROM auto_question_states WHERE status='blocked' AND revision_count<%s AND reason<>ALL(%s) ORDER BY question_id LIMIT 3",
+        (auto_quality.MAX_REPAIRS, list(auto_quality.UNREPAIRABLE)),
     ).fetchall():
         try:
             q, refs, style = auto_quality.evidence(conn, row["question_id"])
@@ -175,7 +181,7 @@ def plan(conn, uid):
             question=q,
             evidence=refs,
             style=style,
-            instructions="Repair the question using only the supplied actual excerpts. Return JSON {question: complete Question object, reason: detailed correction rationale}. No invented citation, no human approval. A new version will undergo both independent rounds again.",
+            instructions="Repair the question using only the supplied actual excerpts. Return JSON {question: complete Question object, reason: detailed correction rationale}. No invented citation, no human approval. A new version will undergo the independent review again.",
             schema=auto_quality.Question.model_json_schema(),
         )
         ai_jobs.enqueue(

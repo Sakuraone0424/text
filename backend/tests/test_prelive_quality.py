@@ -153,7 +153,7 @@ def test_timeout_and_partial_batch_never_approve_formal_questions(db, monkeypatc
 
     def fake(job):
         calls.append(job["kind"])
-        if job["kind"] == "science_review":
+        if job["kind"] == "quality_review":
             raise TimeoutError("synthetic timeout")
         return {"real_api": False, "response": {"malformed": "synthetic"}, "usage": {}}
 
@@ -164,22 +164,25 @@ def test_timeout_and_partial_batch_never_approve_formal_questions(db, monkeypatc
     def conn():
         yield db
 
-    assert ai_jobs.run_once(conn, fake)
-    assert ai_jobs.run_once(conn, fake)
+    assert ai_jobs.run_once(conn, fake)  # the single review call times out
     rows = db.execute("select * from ai_jobs order by id").fetchall()
-    assert any(r["state"] in ("retrying", "blocked") for r in rows)
-    assert any(
-        r["state"] == "succeeded" and r["result"]["real_api"] is False for r in rows
+    assert [r["state"] for r in rows] == ["retrying"]
+    assert not ai_jobs.run_once(conn, fake)  # the retry is not due yet: nothing else runs
+    # A result that is not a real completed model call is refused outright.
+    from psycopg.types.json import Jsonb
+
+    db.execute(
+        "UPDATE ai_jobs SET state='succeeded',result=%s",
+        (Jsonb({"real_api": False, "response": {"malformed": "synthetic"}, "usage": {}}),),
     )
-    for r in rows:
-        if r["state"] == "succeeded":
-            with pytest.raises(ValueError, match="actual_model"):
-                auto_quality.accept_round(db, r)
+    (stored,) = db.execute("select * from ai_jobs").fetchall()
+    with pytest.raises(ValueError, match="actual_model"):
+        auto_quality.accept_round(db, stored)
     assert not auto_quality.ready(db, qid)
     assert (
         db.execute(
-            "select count(*) AS n from auto_quality_events where phase in ('science','answer')"
+            "select count(*) AS n from auto_quality_events where phase in ('science','answer','review')"
         ).fetchone()["n"]
         == 0
     )
-    assert len(planned) == 2 and len(calls) == 2
+    assert len(planned) == 1 and len(calls) == 1

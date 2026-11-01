@@ -315,8 +315,9 @@ def test_a_bare_question_without_the_wrapper_is_refused(db, corpus, setup_ai):
 
 
 def review_jobs(db):
-    return {j["payload"]["phase"]: j for j in db.execute(
-        "SELECT * FROM ai_jobs WHERE kind IN ('science_review','answer_review') ORDER BY id").fetchall()}
+    """The one independent review job of the newest candidate, keyed like the old rounds."""
+    (job,) = db.execute("SELECT * FROM ai_jobs WHERE kind='quality_review' ORDER BY id").fetchall()
+    return {"review": job}
 
 
 def tweak(db, job, path, value):
@@ -324,33 +325,32 @@ def tweak(db, job, path, value):
     return db.execute("SELECT * FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()
 
 
-def answer_round(db, uid, edit=None):
+def review_round(db, uid, edit=None):
+    """Write a single-choice candidate, answer its one review (optionally edited); return (qid, job)."""
     written(db, uid)
-    jobs = review_jobs(db)
-    qid = jobs["answer"]["payload"]["question_id"]
+    job = review_jobs(db)["review"]
+    qid = job["payload"]["question_id"]
     # A reviewer quotes ONE cited span; the helper's default would paste all of them.
     quote = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]["evidence"][0]["excerpt"]
-    science = synthetic_result(jobs["science"], db, quote=quote)
-    answer = synthetic_result(jobs["answer"], db, quote=quote)
-    if edit:
-        answer = edit(answer)
-    assert auto_quality.accept_round(db, science)
-    return qid, answer
+    result = synthetic_result(job, db, quote=quote)
+    return qid, (edit(result) if edit else result)
 
 
-def test_answer_round_payload_demands_option_checks_only_for_single_choice(db, corpus, setup_ai):
+def test_review_payload_demands_option_checks_only_for_single_choice(db, corpus, setup_ai):
     written(db, setup_ai)
-    answer = review_jobs(db)["answer"]["payload"]
-    assert {"option_checks", "other_correct_options"} <= set(answer["schema"]["properties"])
-    assert "SECOND correct option" in answer["instructions"]
-    science = review_jobs(db)["science"]["payload"]
-    assert "option_checks" not in science["schema"]["properties"]  # blind round unchanged
+    review = review_jobs(db)["review"]["payload"]
+    assert {"option_checks", "other_correct_options"} <= set(review["schema"]["properties"])
+    assert "SECOND correct option" in review["instructions"]
+    qid = review["question_id"]
+    q, refs, style = auto_quality.evidence(db, qid)
+    other = auto_quality.review_payload("review", qid, "x", {**q, "question_type": "term", "options": {}}, refs, style)
+    assert "option_checks" not in other["schema"]["properties"]
     assert "option_checks" not in auto_quality.Finding.model_json_schema()["properties"]
 
 
-def test_answer_round_with_every_option_checked_passes_and_makes_it_ready(db, corpus, setup_ai):
-    qid, answer = answer_round(db, setup_ai)
-    assert auto_quality.accept_round(db, answer)
+def test_review_with_every_option_checked_passes_and_makes_it_ready(db, corpus, setup_ai):
+    qid, review = review_round(db, setup_ai)
+    assert auto_quality.accept_round(db, review)
     assert auto_quality.promote(db, qid) and auto_quality.ready(db, qid)
 
 
@@ -359,8 +359,8 @@ def test_a_second_correct_option_blocks_the_question(db, corpus, setup_ai):
         job = tweak(db, job, ["response", "option_checks", "C", "verdict"], "correct")
         return tweak(db, job, ["response", "other_correct_options"], ["C"])
 
-    qid, answer = answer_round(db, setup_ai, edit)
-    assert not auto_quality.accept_round(db, answer)
+    qid, review = review_round(db, setup_ai, edit)
+    assert not auto_quality.accept_round(db, review)
     row = db.execute("SELECT status,reason FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()
     assert row["status"] == "blocked" and "second_correct_option" in row["reason"]
     with pytest.raises(ValueError, match="not_in_complete_checking_state"):
@@ -372,8 +372,8 @@ def test_reviewer_cannot_hide_a_second_correct_option_in_one_field(db, corpus, s
     def edit(job):  # verdict says C is correct, the declared list says nobody else is
         return tweak(db, job, ["response", "option_checks", "C", "verdict"], "correct")
 
-    qid, answer = answer_round(db, setup_ai, edit)
-    assert not auto_quality.accept_round(db, answer)
+    qid, review = review_round(db, setup_ai, edit)
+    assert not auto_quality.accept_round(db, review)
     reason = db.execute("SELECT reason FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()["reason"]
     assert "second_correct_option" in reason and "option_verdicts_inconsistent" in reason
 
@@ -383,20 +383,20 @@ def test_key_not_confirmed_or_unquoted_option_blocks(db, corpus, setup_ai):
         job = tweak(db, job, ["response", "option_checks", "A", "verdict"], "wrong")
         return tweak(db, job, ["response", "option_checks", "D", "excerpt"], "评审凭空写出的原文引用")
 
-    qid, answer = answer_round(db, setup_ai, edit)
-    assert not auto_quality.accept_round(db, answer)
+    qid, review = review_round(db, setup_ai, edit)
+    assert not auto_quality.accept_round(db, review)
     reason = db.execute("SELECT reason FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()["reason"]
     assert "answer_key_not_confirmed_correct" in reason and "invented_quote" in reason
 
 
-def test_answer_round_without_option_checks_is_not_accepted(db, corpus, setup_ai):
+def test_review_without_option_checks_is_not_accepted(db, corpus, setup_ai):
     def edit(job):
         db.execute("UPDATE ai_jobs SET result=result #- '{response,option_checks}' WHERE id=%s", (job["id"],))
         return db.execute("SELECT * FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()
 
-    _, answer = answer_round(db, setup_ai, edit)
+    _, review = review_round(db, setup_ai, edit)
     with pytest.raises(ValueError):
-        auto_quality.accept_round(db, answer)
+        auto_quality.accept_round(db, review)
 
 
 def test_incomplete_option_checks_block(db, corpus, setup_ai):
@@ -404,7 +404,7 @@ def test_incomplete_option_checks_block(db, corpus, setup_ai):
         db.execute("UPDATE ai_jobs SET result=result #- '{response,option_checks,B}' WHERE id=%s", (job["id"],))
         return db.execute("SELECT * FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()
 
-    qid, answer = answer_round(db, setup_ai, edit)
-    assert not auto_quality.accept_round(db, answer)
+    qid, review = review_round(db, setup_ai, edit)
+    assert not auto_quality.accept_round(db, review)
     assert "option_checks_incomplete" in db.execute(
         "SELECT reason FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()["reason"]

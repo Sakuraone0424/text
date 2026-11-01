@@ -215,7 +215,7 @@ def test_the_real_installed_sdk_body_passes_the_guard_for_an_ordinary_job(lease,
 
     from deepseek_harness import DeepSeekHarness
 
-    job = lease("science_review")
+    job = lease("quality_review")
     guard = execution_guard(job)
     s = job["settings_snapshot"]
     bodies = []

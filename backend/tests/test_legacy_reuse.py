@@ -115,16 +115,15 @@ def test_proposal_is_rebound_to_the_database_and_no_old_state_survives(db, books
     assert (row["draft_id"], row["status"], row["question_id"]) == ("D-1", "imported", packet["question_id"])
 
 
-def test_imported_proposal_still_needs_both_fresh_review_rounds(db, books, tmp_path, setup_ai):
+def test_imported_proposal_still_needs_a_fresh_independent_review(db, books, tmp_path, setup_ai):
     path = write(tmp_path, "p.json", [proposal("D-1", KINASE[:60], books)])
     lr.import_proposals(db, path)
     qid = packets(db)[0]["question_id"]
     assert not auto_quality.ready(db, qid)  # nothing is approved by being imported
-    jobs = {j["payload"]["phase"]: j for j in auto_quality.schedule_checks(db, setup_ai, qid)}
+    (job,) = auto_quality.schedule_checks(db, setup_ai, qid)
     quote = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]["evidence"][0]["excerpt"]
-    assert auto_quality.accept_round(db, synthetic_result(jobs["science"], db, quote=quote))
     assert not auto_quality.ready(db, qid)
-    assert auto_quality.accept_round(db, synthetic_result(jobs["answer"], db, quote=quote))
+    assert auto_quality.accept_round(db, synthetic_result(job, db, quote=quote))
     assert auto_quality.promote(db, qid) and auto_quality.ready(db, qid)
 
 
@@ -369,7 +368,7 @@ def test_draft_is_dropped_before_any_textbook_paragraph_when_the_request_is_too_
     assert sizes[0][0] is True and sizes[1][0] is False and sizes[0][1] == sizes[1][1]
 
 
-def test_review_rounds_never_see_the_draft(db, books, setup_ai):
+def test_the_review_never_sees_the_draft(db, books, setup_ai):
     term = hinted_term(db)
     pei.plan(db, setup_ai)
     for job in queued_jobs(db).values():
@@ -377,8 +376,8 @@ def test_review_rounds_never_see_the_draft(db, books, setup_ai):
     auto_worker.dispatch_completed(db)
     qid = db.execute("SELECT question_id FROM past_exam_items WHERE id=%s", (term["id"],)).fetchone()["question_id"]
     assert qid is not None
-    reviews = db.execute("SELECT * FROM ai_jobs WHERE kind IN ('science_review','answer_review') ORDER BY id").fetchall()
-    assert len(reviews) >= 2
+    reviews = db.execute("SELECT * FROM ai_jobs WHERE kind='quality_review' ORDER BY id").fetchall()
+    assert len(reviews) >= 1
     sent = json.dumps([r["payload"] for r in reviews], ensure_ascii=False)
     assert MARK not in sent and "unreviewed_reference_draft" not in sent and "摘要" not in sent
     stored = json.dumps([dict(p) for p in packets(db)], ensure_ascii=False, default=str)

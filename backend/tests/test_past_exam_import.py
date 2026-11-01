@@ -251,13 +251,13 @@ def review_result(db, job):
 
 
 def run_to_ready(db, corpus_user):
-    """Plan, answer (fake), dispatch, review twice (fake), dispatch again."""
+    """Plan, answer (fake), dispatch, review once (fake), dispatch again."""
     pei.plan(db, corpus_user)
     for job in queued_jobs(db).values():
         finish_job(db, job, model_result(job))
     auto_worker.dispatch_completed(db)
     for job in db.execute(
-        "SELECT * FROM ai_jobs WHERE kind IN ('science_review','answer_review') AND state='pending'"
+        "SELECT * FROM ai_jobs WHERE kind='quality_review' AND state='pending'"
     ).fetchall():
         finish_job(db, job, review_result(db, job))
     auto_worker.dispatch_completed(db)
@@ -298,7 +298,7 @@ def test_end_to_end_with_fake_model_term_and_short_answer(db, corpus, setup_ai):
         assert origin["origin"] == "past_exam" and origin["past_exam_item_id"] == item["id"]
         assert any(k.startswith("unit:") for k in origin["concept_keys"])
         assert "concept:冈崎片段" in origin["concept_keys"]
-        # Only the ordinary two independent rounds make it ready.
+        # Only the one independent review (plus the free program checks) makes it ready.
         assert auto_quality.ready(db, item["question_id"])
 
 
@@ -407,3 +407,26 @@ def test_a_paper_never_contains_two_questions_on_the_same_knowledge_point(db, qu
         "SELECT question_id FROM paper_items_v2 WHERE paper_id=%s", (paper["paper_id"],)).fetchall()}
     assert len(picked) == 60
     assert len(picked & {first, second}) == 1
+
+
+def test_free_check_blocks_a_past_exam_question_whose_stem_no_longer_matches_the_original(db, corpus, setup_ai):
+    pei.import_items(db)
+    run_to_ready(db, setup_ai)
+    item = items(db)[("term", "1")]
+    assert auto_quality.ready(db, item["question_id"])
+    db.execute("UPDATE past_exam_items SET stem=%s WHERE id=%s", ("另一个被改写过的题干", item["id"]))
+    assert not auto_quality.ready(db, item["question_id"])  # the program check, not a model, catches it
+
+
+def test_a_past_exam_question_discarded_after_its_repair_is_reported_as_review_failed(db, corpus, setup_ai):
+    pei.import_items(db)
+    pei.plan(db, setup_ai)
+    for job in queued_jobs(db).values():
+        finish_job(db, job, model_result(job))
+    auto_worker.dispatch_completed(db)
+    item = items(db)[("term", "1")]
+    db.execute("UPDATE auto_question_states SET status='blocked',reason='unresolved_quality_findings',revision_count=1 WHERE question_id=%s",
+               (item["question_id"],))
+    assert auto_quality.discard_unfixable(db) == [item["question_id"]]
+    row = items(db)[("term", "1")]
+    assert (row["status"], row["blocked_reason"]) == ("blocked", "review_failed")
