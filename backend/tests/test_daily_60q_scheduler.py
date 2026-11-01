@@ -1,4 +1,4 @@
-"""The existing 20:00 automatic scheduler can prepare v2, but never silently fall back."""
+"""The 20:00 automatic scheduler prepares v2 by default and never falls back to 28."""
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -9,10 +9,23 @@ from app import automation, training_spec_v2 as v2
 from app.training_spec import SPECIFICATION as V1_SPECIFICATION
 
 
-def test_legacy_production_default_unchanged():
-    plan = automation.selected_daily_blueprint({})
-    assert plan.specification == V1_SPECIFICATION
-    assert sum(plan.quotas["biochemistry"].values()) == 14
+@pytest.mark.parametrize("env", [{}, {"QUIZ_DAILY_SPECIFICATION": ""}])
+def test_unset_specification_defaults_to_sixty_v2(env):
+    plan = automation.selected_daily_blueprint(env)
+    assert plan.specification == v2.SPECIFICATION
+    for subject in v2.SUBJECTS:
+        assert plan.quotas[subject] == {
+            "single_choice": 18, "fill_blank": 7, "term": 4, "short_answer": 1,
+        }
+    assert plan.points == {"single_choice": 2, "fill_blank": 2, "term": 4, "short_answer": 9}
+    assert sum(
+        n * plan.points[k] for q in plan.quotas.values() for k, n in q.items()
+    ) == 150
+
+
+def test_retired_28q_specification_cannot_be_selected_for_new_papers():
+    with pytest.raises(ValueError, match="unknown_daily_training_specification"):
+        automation.selected_daily_blueprint({"QUIZ_DAILY_SPECIFICATION": V1_SPECIFICATION})
 
 
 def test_explicit_new_daily_contract_uses_sixty_150_and_3600_seconds():
@@ -66,7 +79,8 @@ def test_good_v2_paper_is_retained_untouched():
     assert automation.verified_daily_paper_response(result, blueprint) is result
 
 
-def test_legacy_paper_can_be_returned_without_new_spec_override():
+def test_default_daily_plan_never_reports_an_old_28q_paper_as_success():
     blueprint = automation.selected_daily_blueprint({})
     result = {"mode": "reviewed_28", "paper_id": 5}
-    assert automation.verified_daily_paper_response(result, blueprint) is result
+    with pytest.raises(ValueError, match="daily_60q_paper_not_proven"):
+        automation.verified_daily_paper_response(result, blueprint)

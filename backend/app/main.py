@@ -106,15 +106,23 @@ def db_health():
             required = {p.name for p in (BASE_DIR.parent / "sql").glob("*.sql")}
             if not required.issubset(applied):
                 raise HTTPException(503, "V2 schema migrations are incomplete")
+        from app.automation import selected_daily_blueprint
+        from app import training_spec_v2
+
+        try:
+            spec = selected_daily_blueprint(os.environ).specification
+        except ValueError:
+            raise HTTPException(503, "Unknown QUIZ_DAILY_SPECIFICATION")
         return {
             "status": "healthy",
             "database": "connected",
             "schema": "dynamic-v1",
             "migration_count": len(applied),
             "formal_training": {
-                "questions": (60 if os.environ.get("QUIZ_DAILY_SPECIFICATION") == "xiaohan-60q-150pt-v2" else 28),
-                "points": 150,
-                "duration_seconds": 3600,
+                "specification": spec,
+                "questions": training_spec_v2.TOTAL_QUESTIONS,
+                "points": training_spec_v2.TOTAL_POINTS,
+                "duration_seconds": training_spec_v2.DURATION_SECONDS,
             },
         }
     except HTTPException:

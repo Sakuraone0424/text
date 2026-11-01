@@ -591,7 +591,8 @@ def test_public_contract_exposes_only_v2_training_and_schema_readiness(client):
     assert "/v2/papers" in schema["paths"] and "/history" in schema["paths"]
     health = client.get("/db/health").json()
     assert health["formal_training"] == {
-        "questions": 28,
+        "specification": "xiaohan-60q-150pt-v2",
+        "questions": 60,
         "points": 150,
         "duration_seconds": 3600,
     }

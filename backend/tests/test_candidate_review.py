@@ -339,7 +339,7 @@ def test_source_context_stays_in_same_version_and_is_private(db, reviewer, packe
 
 def test_complete_quota_preview_is_read_only(db, reviewer, packet):
     from app.question_quality import Question
-    from app.training_spec import COUNTS, SUBJECTS, POINTS
+    from app.training_spec_v2 import COUNTS, SUBJECTS, POINTS
     from psycopg.types.json import Jsonb
 
     # This fixture checks preview arithmetic/side effects only, not source approval.
@@ -391,7 +391,7 @@ def test_complete_quota_preview_is_read_only(db, reviewer, packet):
     assert response.status_code == 200
     result = response.json()
     assert (
-        len(result["items"]) == 28
+        len(result["items"]) == 60
         and result["points"] == 150
         and result["duration_seconds"] == 3600
         and not result["published"]

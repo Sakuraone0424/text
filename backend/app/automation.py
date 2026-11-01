@@ -6,20 +6,18 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 from app.training_sessions import server_now
 from app.question_quality import Blueprint
-from app.training_spec import default_blueprint
 from app import training_spec_v2
 from app.quiz_v2 import create_paper, BankShortage, PreparationPaused
 
 
 def selected_daily_blueprint(env):
-    """Opt-in to 60q without changing any existing 28q production service.
+    """New daily papers always use the 60q/150pt v2 specification.
 
-    An unknown or mistyped specification fails closed. Never silently prepare
-    an old exam under the new product name.
+    An unset variable means v2. Any other value (including the retired 28q
+    ID) fails closed rather than preparing an old exam. Historical 28q papers
+    keep their own stored blueprint and are never re-planned here.
     """
-    spec = env.get("QUIZ_DAILY_SPECIFICATION", "")
-    if not spec:
-        return Blueprint.model_validate(default_blueprint())
+    spec = env.get("QUIZ_DAILY_SPECIFICATION", "") or training_spec_v2.SPECIFICATION
     if spec == training_spec_v2.SPECIFICATION:
         return Blueprint.model_validate(training_spec_v2.default_blueprint())
     raise ValueError("unknown_daily_training_specification")

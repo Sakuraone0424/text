@@ -124,3 +124,34 @@ def test_empty_verified_bank_rejects_sixty_without_creating_paper(client, db):
     data = response.json()
     assert "insufficient_reviewed_bank" in str(data)
     assert db.execute("SELECT count(*) AS n FROM papers_v2").fetchone()["n"] == 0
+
+
+def test_stored_28q_paper_stays_readable_after_v2_default(client, db, bank, blueprint):
+    """New papers default to v2, but an existing 28q paper keeps its own rules."""
+    from app import quiz_v2 as q
+    from app.common import ensure_user
+    from app.question_quality import Blueprint
+    from test_api_v2 import LEARNER
+
+    uid = ensure_user(db, "test-owner")
+    legacy_blueprint = Blueprint(specification=legacy.SPECIFICATION, quotas=blueprint.quotas)
+    created = q.create_paper(db, uid, legacy_blueprint)
+    pid = created["paper_id"]
+
+    opened = client.get(f"/v2/papers/{pid}", headers=LEARNER).json()
+    assert opened["count"] == 28
+    assert opened["mode"] == "reviewed_28"
+    assert opened["max_points"] == 150
+    assert opened["blueprint"]["specification"] == legacy.SPECIFICATION
+
+    # A default (v2) request on the same day resumes the stored 28q paper
+    # instead of overwriting or regrading it.
+    resumed = client.post("/v2/papers", headers=LEARNER, json=v2.default_blueprint()).json()
+    assert resumed["paper_id"] == pid and resumed["count"] == 28
+
+    from app import training_sessions as sessions
+
+    sessions.start(db, uid, pid)
+    q.submit(db, uid, pid, {})
+    training = client.get("/v2/history", headers=LEARNER).json()["training"]
+    assert [item["mode"] for item in training if item["paper_id"] == pid] == ["reviewed_28"]

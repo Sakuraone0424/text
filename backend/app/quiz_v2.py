@@ -1,4 +1,4 @@
-"""Reviewed 28-question workflow; deliberately independent of legacy records."""
+"""Reviewed paper workflow: new papers are 60q v2; stored 28q papers stay readable."""
 
 import json
 import os
