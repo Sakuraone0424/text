@@ -77,6 +77,99 @@ worker 真正开始调用模型，需要同时满足：
 
 2026 年节假日日历已核实（国务院通知），11 月 1 日至 12 月 21 日没有法定节假日；`tests/test_cost_control.py` 逐半小时核对这段时间内低峰判断（`cost_control.is_peak`）与计费模块（`cny_billing.period`）一致，且不会出现「未知」档。月/日统计窗口按北京时间切分，跨 12 月 1 日已测。CNY 价格每次随调用刷新 24 小时有效期，与日期无关。不需要 2027 年日历。
 
+## 第 8 步：QA 配置清单（由用户在 Railway 后台操作）
+
+QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811b-4e02-ba42-89cb3e19f2cb`），网站服务 `training-api-qa`（`b2cbe2fd-cc60-49ec-b52f-68f5fd35aa07`）。
+
+**先看三个必须知道的点**
+
+1. **新 worker 会被守卫拒绝（需一处小代码改动，待批准）**：`deployment_target.verify_isolated_target()` 在 QA 档案下要求 `RAILWAY_SERVICE_ID` 等于钉死的 `b2cbe2fd-…`。新建的 worker 服务有自己的服务 ID，会报 `Railway target identity mismatch: SERVICE`。办法：允许 QA 档案的服务 ID 为 `{b2cbe2fd-…, <worker 服务 ID>}` 两个固定值（约 10 行 + 测试）。流程：先建 worker 服务、**先不要部署**，把它的服务 ID 发给我 → 我改代码、过 CI、合并 → 再部署。无需改代码的替代做法（不推荐）：在 `training-api-qa` 的启动命令里同时跑循环 `python -m app.auto_worker`，网站与 worker 互相影响且镜像里没有旧资料 JSON。
+2. **网站和 worker 都要 `DEEPSEEK_API_KEY`**：排队兼容性探测、刷新官方目录在网站进程里检查密钥；真正调用模型的在 worker。
+3. **网站要 `QUIZ_PUBLIC_ORIGIN`**：模型设置页的 POST 会校验 Origin，Railway 代理后网站看到的是 `http://`，不设会 403。
+
+### a) `training-api-qa`
+
+构建与启动（Settings）：
+- Source：仓库 `Sakuraone0424/text`，分支 **`feat/60q-v2-spec`**（合并提交 `33ccbc3`；不再固定在 `d2b6a01`）。
+- Builder：由 RAILPACK 改为 **Dockerfile**，路径 `backend/Dockerfile`（仓库根 `railway.json` 已写明；Dashboard 里不要再覆盖）。
+- Start Command：保持 `python migrate.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT`（Dockerfile 的 CMD 只启 uvicorn，迁移靠这条）。
+- Healthcheck Path：`/health`（`railway.json` 已有）。
+
+变量：
+
+| 动作 | 变量 | 值 |
+|---|---|---|
+| 新增 | `DEEPSEEK_API_KEY` | 密钥，用户自己填 |
+| 新增 | `QUIZ_PUBLIC_ORIGIN` | `https://<training-api-qa 的公网域名>`（https，无路径、无结尾斜杠） |
+| 新增 | `AI_MONTHLY_CAP_CNY` | `90` |
+| 新增 | `AI_GRADING_RESERVE_CNY` | `15` |
+| 改 | `QUIZ_DAILY_SPECIFICATION` | `xiaohan-60q-150pt-v2`（否则 `/db/health` 返回 503） |
+| 改 | `QUIZ_AUTO_GRADE_ON_SUBMIT` | `1` |
+| 改 | `AI_AUTOMATION_ENABLED` | `1`（网站的判分排队也检查它，保持 1） |
+| 改 | `DEEPSEEK_API_AUTHORIZED` / `DEEPSEEK_PRIVATE_DATA_AUTHORIZED` | `1` / `1` |
+| 改 | `QUIZ_DAILY_PREP_ENABLED` | `0`（第 8–8.5 步期间不自动出卷；第 9 步前再改 `1`） |
+| 核对 | `QUIZ_DEPLOYMENT_PROFILE` | `ustc-exam-ocr-qa` |
+| 核对 | `QUIZ_ISOLATED_TARGET_APPROVED` | `1` |
+| 核对 | `QUIZ_REQUIRE_RAILWAY_IDENTITY` | `1` |
+| 核对 | `QUIZ_APPROVED_RAILWAY_PROJECT_ID` | `0ff7ff18-e746-42db-8eb2-b515306fa473` |
+| 核对 | `QUIZ_APPROVED_RAILWAY_ENVIRONMENT_ID` | `246e3b1c-811b-4e02-ba42-89cb3e19f2cb` |
+| 核对 | `QUIZ_APPROVED_RAILWAY_SERVICE_ID` | `b2cbe2fd-cc60-49ec-b52f-68f5fd35aa07` |
+| 核对 | `QUIZ_DB_SCHEMA` | `source_staging_ocr_20261030`（该 schema 必须已存在） |
+| 不动 | `APP_PASSWORD`、`SESSION_SECRET`、`QUIZ_API_KEY`、`QUIZ_USERNAME`、`DATABASE_URL`、`QUIZ_APPROVED_DB_HOST/NAME/PORT/SYSTEM_ID/USER` | |
+| 删除 | `QA_IMPORT_ENABLED`、`QA_EXPECTED_PRIVATE_DB_HOST` | 读取它们的代码已在第 1.5 步删除 |
+| 不要设置 | `AI_FULL_CORPUS_ENABLED`、`QUIZ_PHOTO_ANSWERS_ENABLED` | |
+
+### b) 新 worker 服务
+
+- 名称建议 `training-worker-qa`，同项目同环境（qa），源同上（`feat/60q-v2-spec`）。
+- 配置文件：`deploy/railway-automation/worker.railway.json`（Settings → Config-as-code 路径填 `/deploy/railway-automation/worker.railway.json`）。其内容：builder `DOCKERFILE`，`dockerfilePath` = `deploy/railway-automation/Dockerfile`，`startCommand` = `python -m app.auto_worker`，`cronSchedule` = `*/5 * * * *`，`restartPolicyType` = `NEVER`。无 `railway.json` 健康检查（cron 任务）。
+- 该 Dockerfile 含 worker 需要的全部文件：`app/`、`sql/`、`harness/`、`config/`、两个旧资料 JSON、`migrate.py`。
+- 变量：
+
+| 变量 | 值 |
+|---|---|
+| `DATABASE_URL` | `${{training-api-qa.DATABASE_URL}}` |
+| `QUIZ_DB_SCHEMA` | `${{training-api-qa.QUIZ_DB_SCHEMA}}` |
+| `QUIZ_APPROVED_DB_HOST` / `_PORT` / `_NAME` / `_USER` / `_SYSTEM_ID` | `${{training-api-qa.QUIZ_APPROVED_DB_HOST}}` 等，逐个引用 |
+| `QUIZ_APPROVED_RAILWAY_PROJECT_ID` / `_ENVIRONMENT_ID` | `${{training-api-qa.QUIZ_APPROVED_RAILWAY_PROJECT_ID}}`、`${{training-api-qa.QUIZ_APPROVED_RAILWAY_ENVIRONMENT_ID}}` |
+| `QUIZ_APPROVED_RAILWAY_SERVICE_ID` | **填 worker 自己的服务 ID**（Settings 里复制；配合上面第 1 点的代码改动） |
+| `QUIZ_DEPLOYMENT_PROFILE` | `ustc-exam-ocr-qa` |
+| `QUIZ_ISOLATED_TARGET_APPROVED` | `1` |
+| `QUIZ_DAILY_SPECIFICATION` | `${{training-api-qa.QUIZ_DAILY_SPECIFICATION}}` |
+| `AI_AUTOMATION_ENABLED` | `1` |
+| `DEEPSEEK_API_AUTHORIZED` / `DEEPSEEK_PRIVATE_DATA_AUTHORIZED` | `1` / `1` |
+| `DEEPSEEK_API_KEY` | 密钥，用户自己填 |
+| `AI_QUEUE_AUTOPLAN` | **先 `0`**（探测期间不自动规划出题），探测通过后改 `1` |
+| `AI_CALLS_PER_RUN` | `2` |
+| `AI_BANK_TARGET_PER_BUCKET` | `5`（见 d） |
+| `AI_MONTHLY_CAP_CNY` / `AI_GRADING_RESERVE_CNY` | `90` / `15` |
+| 不要设置 | `AI_FULL_CORPUS_ENABLED`、`QUIZ_PHOTO_ANSWERS_ENABLED`、`QUIZ_DAILY_PREP_ENABLED`（镜像默认 0） |
+
+`RAILWAY_*` 由 Railway 自动注入，不必手填。
+
+### c) 网站上的 AI 设置（`https://<QA 域名>/static/model.html`，用 `APP_PASSWORD` 登录）
+
+1. 「模型」选 `deepseek-flash`，「思考强度」选 `high`（判分沿用此档；出题关 thinking、审核 low 由程序按任务类型决定），「自动发现」勾选，「自动升级」不勾 → 点「保存设置」。若模型列表为空，先点「刷新官方目录」。
+2. 预算与开关 → 点「保存预算与停止开关」：勾选「启用单任务/每日/每月费用额度」；**单任务（含重试）预算**至少要大于一次调用的最坏估计（`(32000 × 峰值输入单价 + 输出上限 × 峰值输出单价) ÷ 100 万`），建议先填 `1`；**每日人民币预算** `15`；**每月人民币预算** `90`；**不要勾「首次试验累计预算」**（`trial-active` 取消勾选，否则累计试验额度会挡住任务）；单任务输出 Token 上限 `8192`，重试次数上限 `2`，最大并发 `1`；「停止AI任务」**取消勾选**（探测需要它为未停止）。
+3. 价格核实：页面没有单独按钮。价格由 worker 在每次运行时自动从官方价格页抓取（已 12 小时内核实过则跳过），有效期 24 小时。确认方法：登录后打开 `/v2/model/billing`，应看到当前人民币价格版本和 `verified_at`。如需立刻手动触发：登录状态下在浏览器控制台执行 `fetch('/v2/model/prices/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',credentials:'same-origin'}).then(r=>r.json()).then(console.log)`（手机上不方便时等 worker 下一次运行即可；是否补一个页面按钮由你决定）。
+4. 兼容性探测：展开「首次兼容性检查」，「请求档位」依次选 `off`、`low`、`high`，每次点「排队兼容性探测」。探测只发送合成算术，不发教材；由 worker 在下一次 5 分钟运行里执行（所以 worker 必须已部署、价格已核实）。三档都通过后（页面「能力」处显示通过）再进入下一步。
+5. 探测通过后，把 worker 的 `AI_QUEUE_AUTOPLAN` 改为 `1`。
+
+### d) 首批试跑变量
+
+`AI_BANK_TARGET_PER_BUCKET=5` 只加在 **worker 服务**（出题规划在 worker 里执行；网站不读它）。试跑完成后删除该变量。
+
+### e) 顺序与验收
+
+1. 先在 `training-api-qa` 改好 Source / Builder / 变量（a），**先不要触发部署**（Railway 会把变量改动暂存，点 Deploy 才生效）。
+2. 创建 worker 服务（b），配置变量、**不部署**，把 worker 服务 ID 发给我；我改守卫、过 CI、合并，之后你再部署。
+3. 先部署 `training-api-qa`：preDeploy 阶段无；启动命令里的 `python migrate.py` 先跑迁移，再启动 uvicorn。验收：
+   - `GET /health` → `{"status":"healthy"}`；
+   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 30，`formal_training` = `{"specification":"xiaohan-60q-150pt-v2","questions":60,"points":150,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
+   - 登录后 `GET /v2/model/spend` 返回今日/本月、上限 90、预留 15。
+4. 再部署 worker：日志出现正常结束（cron 任务每 5 分钟起一次、`restartPolicyType: NEVER`）；若报 `Railway target identity mismatch: SERVICE`，说明第 1 点的代码改动还没合并。
+5. 做 c) 的设置与探测，再把 `AI_QUEUE_AUTOPLAN` 改 `1`，然后通知我做第 8.5 步。
+
 ## 正式站切换（第 10 步：搬家方案，仅方案，尚未执行）
 
 > 状态：**只有方案，没有动手**。正式站没有改过任何东西。守卫改动、搬家脚本都等你「第 10 步」通知后才在单独分支（`prod-move/…`，不合并进 `feat/60q-v2-spec`）上实现。
