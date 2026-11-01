@@ -120,14 +120,14 @@ def test_worker_never_sweeps_the_corpus_unless_the_flag_is_on(db, corpus, setup_
 
 @pytest.mark.parametrize(
     "value,expected",
-    [(None, 3), ("", 3), ("abc", 3), ("1", 1), ("5", 5), ("10", 10), ("11", 10), ("99", 10), ("0", 1), ("-4", 1), ("2.5", 3)],
+    [(None, 2), ("", 2), ("abc", 2), ("1", 1), ("5", 5), ("10", 10), ("11", 10), ("99", 10), ("0", 1), ("-4", 1), ("2.5", 2)],
 )
-def test_calls_per_run_is_bounded_and_defaults_to_three(value, expected):
+def test_calls_per_run_is_bounded_and_defaults_to_two(value, expected):
     env = {} if value is None else {"AI_CALLS_PER_RUN": value}
     assert auto_worker.calls_per_run(env) == expected
 
 
-@pytest.mark.parametrize("value,expected", [(None, 3), ("5", 5), ("99", 10), ("junk", 3)])
+@pytest.mark.parametrize("value,expected", [(None, 2), ("5", 5), ("99", 10), ("junk", 2)])
 def test_one_run_makes_no_more_calls_than_the_limit_and_dispatches_between_them(
     db, corpus, setup_ai, monkeypatch, value, expected
 ):

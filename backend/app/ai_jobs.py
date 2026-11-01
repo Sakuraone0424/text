@@ -52,6 +52,13 @@ def enqueue(conn, user_id, key, kind, payload):
             raise ValueError("idempotency_conflict")
         return old
     s = model_router.snapshot(conn, user_id)
+    from app import cost_control
+
+    level = cost_control.effort_for(kind)
+    if level and level != s["effort"]:
+        if level not in s["capabilities"].get("efforts", []):
+            raise ValueError("model_effort_not_compatibility_verified")
+        s["effort"] = level
     inserted = conn.execute(
         "INSERT INTO ai_jobs(job_key,user_id,kind,settings_snapshot,payload) VALUES(%s,%s,%s,%s,%s) ON CONFLICT(job_key) DO NOTHING RETURNING *",
         (key, user_id, kind, Jsonb(s), Jsonb(payload)),
@@ -75,11 +82,14 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     for lost in expired:
         if lost["settings_snapshot"].get("billing_currency") == "CNY":
             cny_billing.settle(conn, lost, None, TimeoutError())
+    from app import cost_control
+
+    # Question writing, review and repair wait for off-peak hours; grading never does.
     job = conn.execute(
         "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp()"
         + scope_filter
-        + " ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id FOR UPDATE SKIP LOCKED LIMIT 1",
-        (scope_id,) if scope_id else (),
+        + " AND NOT kind=ANY(%s) ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id FOR UPDATE SKIP LOCKED LIMIT 1",
+        ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(),),
     ).fetchone()
     if not job:
         return None
@@ -124,6 +134,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         reason = "budget_exceeded"
     if s.get("billing_currency") != "CNY":
         reason = "legacy_currency_job_requires_requeue"
+    reason = reason or cost_control.cap_reason(conn, uid, job["kind"], amount)
     from app.limited_trial import claim_reason
 
     trial_reason = claim_reason(conn, job, amount)

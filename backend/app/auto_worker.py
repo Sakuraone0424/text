@@ -203,7 +203,14 @@ def plan(conn, uid):
     auto_generation.plan_gap(conn, uid)
 
 
-DEFAULT_CALLS_PER_RUN = 3
+# Sizing: about 160 calls a day (60 questions at ~75% review pass rate = ~80 written
+# + ~80 reviewed), only in off-peak hours, one worker run every 5 minutes.
+#   weekday off-peak = 24h - (3h + 4h peak) = 17h -> 17 * 12 = 204 runs
+#   160 calls * 1.25 (retries / failures) = 200 calls -> 200 / 204 ~ 1 call per run
+# Default 2: a write is followed by its review in the same run, and the backlog left
+# by a 4-hour peak window (up to ~48 runs) clears at twice that rate. Weekends and
+# holidays (24h off-peak) have far more headroom. Raise it with AI_CALLS_PER_RUN.
+DEFAULT_CALLS_PER_RUN = 2
 MAX_CALLS_PER_RUN = 10
 
 

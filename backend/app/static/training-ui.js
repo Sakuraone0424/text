@@ -352,7 +352,13 @@
       read("/v2/history"),
       read("/v2/stats/weekly"),
       read("/v2/memory/due"),
+      read("/v2/model/spend"),
     ]);
+    const banner = byId("quota-banner");
+    if (results[3].status === "fulfilled" && results[3].value.message) {
+      banner.textContent = results[3].value.message;
+      banner.hidden = false;
+    } else banner.hidden = true;
     if (results[0].status === "fulfilled") {
       const records = results[0].value.training;
       byId("metric-submitted").textContent = String(records.length);

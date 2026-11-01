@@ -247,10 +247,13 @@ def tool_cost(tool, successes, at, mode="direct", price=None):
 
 
 def totals(conn, uid):
+    """Spend counted against the limits: settled usage; a failed, uncertain or running
+    attempt is counted at its worst-case reservation (never forgotten)."""
     return conn.execute(
-        """SELECT COALESCE(sum(r.amount_cny) FILTER(WHERE r.created_at>=(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS day,
-     COALESCE(sum(r.amount_cny) FILTER(WHERE r.created_at>=(date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS month,
-     COALESCE(sum(r.amount_cny),0) AS trial FROM ai_cny_reservations r JOIN ai_jobs j ON j.id=r.job_id WHERE j.user_id=%s""",
+        """SELECT COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE r.created_at>=(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS day,
+     COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE r.created_at>=(date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS month,
+     COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)),0) AS trial FROM ai_cny_reservations r JOIN ai_jobs j ON j.id=r.job_id
+     LEFT JOIN ai_cny_events e ON e.job_id=r.job_id AND e.attempt=r.attempt AND e.kind='usage_estimate' WHERE j.user_id=%s""",
         (uid,),
     ).fetchone()
 

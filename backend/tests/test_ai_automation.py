@@ -30,7 +30,7 @@ def setup_ai(db):
     cap = dict(
         real_api_verified=True,
         max_tested_output_tokens=32768,
-        efforts=["off", "high"],
+        efforts=["off", "low", "high"],
         tools=False,
         vision=False,
         prices=dict(
@@ -75,7 +75,7 @@ def test_discovery_unavailability_cache_and_unknown_fields(db):
     assert not stale["auto_switch_performed"]
 
 
-@pytest.mark.parametrize("effort", ["low", "max", "imaginary"])
+@pytest.mark.parametrize("effort", ["max", "imaginary"])
 def test_unsupported_effort_rejected(db, setup_ai, effort):
     with pytest.raises(ValueError):
         m.configure(db, setup_ai, "deepseek-flash", effort)

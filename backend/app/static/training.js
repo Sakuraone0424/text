@@ -476,7 +476,8 @@ function renderProgress() {
   const total = (paper?.count || 60) - reported.size;
   $("progress").textContent =
     `已答 ${done} / ${total} · 剩余 ${total - done}` +
-    (reported.size ? ` · 已反馈${reported.size}题不计分` : "");
+    (reported.size ? ` · 已反馈${reported.size}题不计分` : "") +
+    (paper?.includes_reused ? " · 含复用题" : "");
   emitUI();
 }
 function render() {
@@ -493,7 +494,7 @@ function render() {
     if (value.flagged) article.classList.add("flagged");
     element(
       "h2",
-      `${q.position}. ${q.subject === "biochemistry" ? "生化与分子生物学" : "细胞生物学"} · ${names[q.question_type]} · ${q.max_points}分${q.is_retest ? " · FSRS复测" : q.review_knowledge_tags?.length ? " · 知识点复测变式" : ""}`,
+      `${q.position}. ${q.subject === "biochemistry" ? "生化与分子生物学" : "细胞生物学"} · ${names[q.question_type]} · ${q.max_points}分${q.is_retest ? " · FSRS复测" : q.review_knowledge_tags?.length ? " · 知识点复测变式" : ""}${q.reused ? " · 复用题" : ""}`,
       article,
     );
     const stem = element("p", q.stem, article);
@@ -691,6 +692,7 @@ async function showResult() {
   renderedResultSignature = signature;
   $("result").replaceChildren();
   const excludedCount = result.excluded?.question_ids?.length || 0;
+  if (result.includes_reused) element("p", "本卷含复用题：新题不足时，用14天前出现过的已审核旧题补齐。", $("result")).className = "notice";
   element(
     "h2",
     (result.score === null
