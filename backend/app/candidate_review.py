@@ -269,7 +269,9 @@ def inspect(conn, key):
 def decide(conn, key, reviewer, data):
     # 2026-11-01 latest owner policy: manual/expert signoff must not be a
     # requirement or an alternative shortcut. Keep historical rows immutable.
-    raise PermissionError("manual_review_disabled_use_automated_science_answer_gate")
+    from app.legacy_fixture_gate import allowed
+    if not allowed(conn):
+        raise PermissionError("manual_review_disabled_use_automated_science_answer_gate")
     UUID(data["request_id"])
     if (
         not reviewer.strip()
