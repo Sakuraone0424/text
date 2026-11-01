@@ -83,7 +83,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 
 **先看三个必须知道的点**
 
-1. **新 worker 会被守卫拒绝（需一处小代码改动，待批准）**：`deployment_target.verify_isolated_target()` 在 QA 档案下要求 `RAILWAY_SERVICE_ID` 等于钉死的 `b2cbe2fd-…`。新建的 worker 服务有自己的服务 ID，会报 `Railway target identity mismatch: SERVICE`。办法：允许 QA 档案的服务 ID 为 `{b2cbe2fd-…, <worker 服务 ID>}` 两个固定值（约 10 行 + 测试）。流程：先建 worker 服务、**先不要部署**，把它的服务 ID 发给我 → 我改代码、过 CI、合并 → 再部署。无需改代码的替代做法（不推荐）：在 `training-api-qa` 的启动命令里同时跑循环 `python -m app.auto_worker`，网站与 worker 互相影响且镜像里没有旧资料 JSON。
+1. **新 worker 需要守卫放行其服务 ID（已改：QA 档案放行网站 `b2cbe2fd-…` 与 worker `9295cd65-7355-4804-aa06-f10a5327846c` 两个固定 ID）**：`deployment_target.verify_isolated_target()` 在 QA 档案下要求 `RAILWAY_SERVICE_ID` 等于钉死的 `b2cbe2fd-…`。新建的 worker 服务有自己的服务 ID，会报 `Railway target identity mismatch: SERVICE`。办法：允许 QA 档案的服务 ID 为 `{b2cbe2fd-…, <worker 服务 ID>}` 两个固定值（约 10 行 + 测试）。流程：先建 worker 服务、**先不要部署**，把它的服务 ID 发给我 → 我改代码、过 CI、合并 → 再部署。无需改代码的替代做法（不推荐）：在 `training-api-qa` 的启动命令里同时跑循环 `python -m app.auto_worker`，网站与 worker 互相影响且镜像里没有旧资料 JSON。
 2. **网站和 worker 都要 `DEEPSEEK_API_KEY`**：排队兼容性探测、刷新官方目录在网站进程里检查密钥；真正调用模型的在 worker。
 3. **网站要 `QUIZ_PUBLIC_ORIGIN`**：模型设置页的 POST 会校验 Origin，Railway 代理后网站看到的是 `http://`，不设会 403。
 
