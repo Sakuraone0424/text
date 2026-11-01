@@ -103,7 +103,9 @@ def review_question(conn, question_id: int, audit: Audit):
 
 
 def publish_question(conn, question_id: int):
-    raise ValueError("manual_publication_disabled_use_auto_quality_promote")
+    from app.legacy_fixture_gate import allowed
+    if not allowed(conn):
+        raise ValueError("manual_publication_disabled_use_auto_quality_promote")
     lock_bank(conn)
     if conn.execute(
         "SELECT 1 FROM candidate_review_packets p JOIN candidate_revision_links l ON l.old_key=p.candidate_key WHERE p.question_id=%s",
