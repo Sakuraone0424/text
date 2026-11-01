@@ -202,3 +202,62 @@ def test_the_served_model_must_be_the_configured_one_for_every_job(db, lease):
     assert finish_with(db, lease(), "deepseek-flash") == "succeeded"
     assert finish_with(db, lease(), "some-other-model") == "retrying"
     assert finish_with(db, lease(), None) == "retrying"
+
+
+def test_the_real_installed_sdk_body_passes_the_guard_for_an_ordinary_job(lease, tmp_path):
+    """Real SDK + restricted patch against a LOCAL mock server (never DeepSeek):
+    its actual system prompt must hash to the pinned value and its actual request
+    body must be accepted by the validator built for an ordinary job."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from pathlib import Path
+
+    from deepseek_harness import DeepSeekHarness
+
+    job = lease("science_review")
+    guard = execution_guard(job)
+    s = job["settings_snapshot"]
+    bodies = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_POST(self):
+            bodies.append(json.loads(self.rfile.read(int(self.headers["content-length"]))))
+            events = [
+                dict(type="message_start", message=dict(id="s", model="deepseek-flash", usage=dict(input_tokens=3, output_tokens=0))),
+                dict(type="content_block_start", index=0, content_block=dict(type="text", text="")),
+                dict(type="content_block_delta", index=0, delta=dict(type="text_delta", text='{"check":2}')),
+                dict(type="content_block_stop", index=0),
+                dict(type="message_delta", delta=dict(stop_reason="end_turn"), usage=dict(output_tokens=5)),
+                dict(type="message_stop"),
+            ]
+            raw = "".join("event: " + e["type"] + "\ndata: " + json.dumps(e) + "\n\n" for e in events).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with DeepSeekHarness(
+            dsh_home=str(tmp_path / "home"), cwd=str(tmp_path), profile="sdk-minimal",
+            patches=(str(Path(__file__).resolve().parents[1] / "harness" / "restricted.patch.yml"),),
+            provider="deepseek-official", model=s["model_id"], reasoning_effort=s["effort"],
+            max_tokens=s["token_limit"], api_key="synthetic-local-only-key",
+            base_url=f"http://127.0.0.1:{server.server_port}", request_timeout_seconds=15,
+            env={"DSH_PRIMARY_RUNTIME": "", "OTEL_SDK_DISABLED": "true"},
+        ) as harness:
+            harness.run(build_prompt(job["payload"]), session_id="synthetic-only")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+    (body,) = bodies
+    assert ai_jobs.content_sha(body["system"]) == ae.SYSTEM_SHA
+    assert guard(body) is True
