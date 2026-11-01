@@ -16,6 +16,7 @@ from app.question_quality import (
 from app.common import today_cn
 from app.training_spec import COUNTS, SUBJECTS, validate_items
 from app import training_spec_v2 as spec_v2
+from app import training_spec_v3 as spec_v3
 
 
 class PreparationPaused(ValueError):
@@ -102,6 +103,7 @@ def review_question(conn, question_id: int, audit: Audit):
 
 
 def publish_question(conn, question_id: int):
+    raise ValueError("manual_publication_disabled_use_auto_quality_promote")
     lock_bank(conn)
     if conn.execute(
         "SELECT 1 FROM candidate_review_packets p JOIN candidate_revision_links l ON l.old_key=p.candidate_key WHERE p.question_id=%s",
@@ -152,7 +154,9 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     lock_bank(conn)
     spec = blueprint.model_dump()
     is_v2 = spec["specification"] == spec_v2.SPECIFICATION
-    spec_counts = spec_v2.COUNTS if is_v2 else COUNTS
+    is_v3 = spec["specification"] == spec_v3.SPECIFICATION
+    is_new_60 = is_v2 or is_v3
+    spec_counts = spec_v3.COUNTS if is_v3 else spec_v2.COUNTS if is_v2 else COUNTS
     existing = conn.execute(
         "SELECT * FROM papers_v2 WHERE user_id=%s AND paper_date=%s", (user_id, day)
     ).fetchone()
@@ -160,7 +164,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         if existing["blueprint"] != spec:
             # A pre-upgrade 28q paper must remain reachable under its own
             # immutable rules; do not overwrite/restart it with a 60q request.
-            if not is_v2:
+            if not is_new_60:
                 raise ValueError("Today already has a paper with a different blueprint")
         return load_paper(conn, user_id, existing["id"])
     if resume_unfinished:
@@ -174,7 +178,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             "AND NOT EXISTS(SELECT 1 FROM attempts_v2 a WHERE a.paper_id=p.id) "
             "AND (s.paper_id IS NULL OR (s.submitted_at IS NULL AND s.deadline>clock_timestamp())) "
             "ORDER BY p.paper_date DESC,p.id DESC LIMIT 1 FOR UPDATE OF p",
-            (user_id, day, Jsonb(spec), is_v2, "xiaohan-150-60-v1"),
+            (user_id, day, Jsonb(spec), is_new_60, "xiaohan-150-60-v1"),
         ).fetchone()
         if previous:
             return load_paper(conn, user_id, previous["id"])
@@ -219,14 +223,14 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         except ValueError:
             reasons.append("invalid_question_or_rubric")
         if not reasons:
-            supported_points = spec_v2.POINTS if is_v2 else {
+            supported_points = spec_v3.POINTS if is_v3 else spec_v2.POINTS if is_v2 else {
                 "single_choice": 2, "fill_blank": 3, "term": 4,
                 "short_answer": 8, "essay": 20,
             }
             if (content.get("question_type") not in supported_points
                 or content.get("max_points") != supported_points[content["question_type"]]):
                 reasons.append("not_compatible_with_paper_version_scoring")
-        if not reasons and is_v2:
+        if not reasons and is_new_60:
             from app.source_policy import pinned_science_evidence
 
             if not pinned_science_evidence(content):
@@ -241,7 +245,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
 
                 if not ready(conn, row["id"]):
                     reasons.append("automatic_quality_not_ready_or_stale")
-            elif is_v2 or os.environ.get("QUIZ_AUTO_ONLY") == "1":
+            elif is_new_60 or os.environ.get("QUIZ_AUTO_ONLY") == "1":
                 reasons.append("automatic_ready_qualification_required")
             else:
                 # Historical API compatibility; new automatic records never fall back to it.
@@ -341,7 +345,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             )
     if shortages:
         raise BankShortage(shortages)
-    (spec_v2.validate_items if is_v2 else validate_items)([r["content"] for r in selected])
+    (spec_v3.validate_items if is_v3 else spec_v2.validate_items if is_v2 else validate_items)([r["content"] for r in selected])
     from app.answer_cues import conflict
 
     if any(
@@ -430,7 +434,7 @@ def load_paper(conn, user_id, paper_id):
     return {
         "paper_id": paper_id,
         "date": row["paper_date"].isoformat(),
-        "mode": "reviewed_60" if row["blueprint"].get("specification") == spec_v2.SPECIFICATION else "reviewed_28",
+        "mode": "reviewed_60" if row["blueprint"].get("specification") in (spec_v2.SPECIFICATION, spec_v3.SPECIFICATION) else "reviewed_28",
         "blueprint": row["blueprint"],
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),
