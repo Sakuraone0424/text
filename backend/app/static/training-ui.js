@@ -100,29 +100,34 @@
         };
       });
     }
+    const reported = new Set(latest.paper?.reported_question_ids || []);
     let count = 0,
       marked = 0;
     questions.forEach((question, index) => {
       const button = grid.children[index],
         draft = latest.drafts[question.id],
-        done = answered(draft),
+        isReported = reported.has(question.id),
+        done = answered(draft) && !isReported,
         flag = !!draft?.flagged;
       count += Number(done);
       marked += Number(flag);
       button.classList.toggle("answered", done);
       button.classList.toggle("marked", flag);
+      button.classList.toggle("reported", isReported);
       if (position === index) button.setAttribute("aria-current", "step");
       else button.removeAttribute("aria-current");
       button.setAttribute(
         "aria-label",
-        `第${index + 1}题，${done ? "已作答" : "未作答"}${flag ? "，已标记" : ""}${position === index ? "，当前题" : ""}`,
+        `第${index + 1}题，${isReported ? "已反馈不计分" : done ? "已作答" : "未作答"}${flag ? "，已标记" : ""}${position === index ? "，当前题" : ""}`,
       );
     });
-    byId("answer-progress").max = latest.paper?.count || 60;
+    const counted = (questions.length || latest.paper?.count || 60) - reported.size;
+    byId("answer-progress").max = counted;
     byId("answer-progress").value = count;
-    byId("map-progress").textContent = `${count}/${questions.length || latest.paper?.count || 60}`;
+    byId("map-progress").textContent = `${count}/${counted}`;
     byId("map-summary").textContent =
-      `已答${count}题 · 未答${Math.max(0, questions.length - count)}题 · 已标记${marked}题`;
+      `已答${count}题 · 未答${Math.max(0, counted - count)}题 · 已标记${marked}题` +
+      (reported.size ? ` · 已反馈${reported.size}题（不计分）` : "");
   }
   function state(next) {
     const previousPaper = latest.paper?.paper_id;
@@ -229,7 +234,7 @@
       track.setAttribute("role", "img");
       track.setAttribute(
         "aria-label",
-        `${label}：${data.max > 0 ? `已判分${data.points}/${data.max}分` : "暂无已判分数据"}；待批${data.pending}题`,
+        `${label}：${data.max > 0 ? `已判分${data.points}/${data.max}分` : "暂无已判分数据"}；待判分${data.pending}题`,
       );
       const fill = make(
         "div",
@@ -241,13 +246,15 @@
       if (data.pending)
         make(
           "small",
-          `${data.pending}题待批，未计入得分率`,
+          `${data.pending}题待判分，未计入得分率`,
           row,
           "card-footnote",
         );
     });
   }
   function trend(root, history) {
+    // Plot on a 150-point scale of each paper's own (possibly reduced) total.
+    const scaled = (row) => (row.score / (row.max_points || 150)) * 150;
     const rows = history
       .filter((row) => Number.isFinite(row.score))
       .slice(0, 10)
@@ -264,7 +271,7 @@
         "p",
         rows.length
           ? "已有1份完整判分记录，再完成一份即可查看真实趋势。"
-          : "完成考试后查看成绩趋势。待批改成绩不绘入曲线。",
+          : "完成考试后查看成绩趋势。未判完的成绩不绘入曲线。",
         root,
       );
       return;
@@ -276,14 +283,14 @@
     svg.setAttribute("role", "img");
     svg.classList.add("chart");
     const description = rows
-      .map((r) => `${r.paper_date}：${r.score}/150分`)
+      .map((r) => `${r.paper_date}：${r.score}/${r.max_points || 150}分`)
       .join("；");
     const title = document.createElementNS(ns, "title");
     title.textContent = `真实完整判分成绩：${description}`;
     svg.append(title);
     const points = rows.map((r, i) => [
       32 + (i * 304) / (rows.length - 1),
-      148 - (r.score / 150) * 116,
+      148 - (scaled(r) / 150) * 116,
     ]);
     [0, 75, 150].forEach((value) => {
       const y = 148 - (value / 150) * 116,
@@ -327,7 +334,7 @@
     make("p", description, root, "chart-description");
     make(
       "p",
-      "历史28题与新版60题均为150分，不将主观题未批的成绩作为完整成绩；统计应按卷型区分。",
+      "只统计已全部判分的试卷；反馈有问题的题不计入，成绩按150分折算。",
       root,
       "card-footnote",
     );
@@ -356,7 +363,11 @@
       byId("overview-note").textContent = records.length
         ? `${pending}份试卷待完成批改；提交不等于完整判分。统计范围为最近100份正式档案。`
         : "尚无提交记录。完成第一份考试，开始积累你的学习轨迹。";
-      trend(byId("score-trend"), records);
+      // 60-question and old 28-question papers are different exams: separate charts.
+      trend(byId("score-trend"), records.filter((r) => r.mode === "reviewed_60"));
+      const legacy = records.filter((r) => r.mode !== "reviewed_60");
+      byId("score-trend-legacy-card").hidden = !legacy.length;
+      if (legacy.length) trend(byId("score-trend-legacy"), legacy);
     } else
       byId("overview-note").textContent =
         "历史记录暂时读取失败，未将未知数据当作0。";
@@ -429,7 +440,7 @@
     byId("exam-intro").hidden = true;
     const summary = make("div", undefined, undefined, "result-analytics"),
       grade = make("section", undefined, summary, "card grade-card");
-    const graded = data.answers.filter((a) => a.points !== null).length;
+    const graded = data.answers.filter((a) => a.points !== null || a.excluded).length;
     const ns = "http://www.w3.org/2000/svg",
       ring = document.createElementNS(ns, "svg");
     ring.setAttribute("viewBox", "0 0 100 100");
@@ -437,7 +448,7 @@
     ring.setAttribute("role", "img");
     ring.setAttribute(
       "aria-label",
-      `已判分${graded}/${data.answers.length}题，待批${data.pending}题`,
+      `已判分${graded}/${data.answers.length}题，待判分${data.pending}题`,
     );
     const total = document.createElementNS(ns, "circle"),
       done = document.createElementNS(ns, "circle");
@@ -470,11 +481,11 @@
     ring.append(caption);
     grade.append(ring);
     const info = make("div", undefined, grade);
-    make("span", data.pending ? "待批改" : "批改完成", info, "pill blue-pill");
+    make("span", data.pending ? "判分中" : "判分完成", info, "pill blue-pill");
     make(
       "div",
       data.score === null
-        ? `${data.pending}题待批改`
+        ? `${data.pending}题待判分`
         : `${data.score} / ${data.max_points}分`,
       info,
       "grade-title",
@@ -552,7 +563,7 @@
     make("div", `${wrong.length}道已作答失分题`, reflection, "grade-title");
     make(
       "p",
-      `另有${blank}道未答题、${data.pending}道待批题，未混入已作答错题。`,
+      `另有${blank}道未答题、${data.pending}道待判分题，未混入已作答错题。`,
       reflection,
       "grade-caption",
     );
@@ -589,9 +600,11 @@
         );
         make(
           "span",
-          answer.points === null
-            ? "待批改"
-            : `${answer.points}/${answer.max_points}分`,
+          answer.excluded
+            ? "已反馈 · 不计分"
+            : answer.points === null
+              ? "待判分"
+              : `${answer.points}/${answer.max_points}分`,
           title,
         );
         const body = make("div", undefined, details);
@@ -622,7 +635,7 @@
       make("h3", row.chapter || "未标注章节", card);
       make(
         "p",
-        `${labels[row.subject]} · ${row.answers}条作答记录 · ${row.pending}题待批`,
+        `${labels[row.subject]} · ${row.answers}条作答记录 · ${row.pending}题待判分`,
         card,
         "analysis-note",
       );

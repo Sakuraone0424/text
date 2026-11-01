@@ -98,11 +98,15 @@ def progress(conn, user_id, paper_id):
     for job in jobs:
         recent.setdefault(str(job["question_id"]), job)
     allowed, why = auto_queue_allowed(conn, user_id)
+    reported = {
+        r["question_id"]
+        for r in conn.execute("SELECT question_id FROM question_reports WHERE paper_id=%s", (paper_id,)).fetchall()
+    }
     questions = []
     pending = 0
     for row in rows:
         job = recent.get(str(row["question_id"]))
-        if row["points"] is None:
+        if row["points"] is None and row["question_id"] not in reported:
             pending += 1
         # Images remain pending until a VERIFIED vision pipeline has transcribed
         # and independently checked them. Never fabricate recognition or score.
@@ -115,12 +119,18 @@ def progress(conn, user_id, paper_id):
             row["points"] is None and isinstance(answer_data, dict)
             and answer_data.get("image_ids") and job is None
         )
+        reason = (
+            {"pending_reason": None, "pending_detail": None}
+            if row["question_id"] in reported
+            else pending_reason(row["points"], job, photo_pending, allowed, why)
+        )
         # No answer text, handwritten image bytes, private prompt or raw logs.
         questions.append({
             "position": row["position"],
             "question_id": row["question_id"],
             "question_type": row["question_type"],
-            "state": "graded" if row["points"] is not None else (
+            "excluded": row["question_id"] in reported,
+            "state": "excluded" if row["question_id"] in reported else "graded" if row["points"] is not None else (
                 (job["state"] if job else "vision_pipeline_unavailable" if photo_pending else "pending_automatic_queue")
             ),
             "points": row["points"],
@@ -132,12 +142,12 @@ def progress(conn, user_id, paper_id):
             "error_code": job["error_code"] if job else (
                 "verified_handwriting_recognition_required" if photo_pending else None
             ),
-            **pending_reason(row["points"], job, photo_pending, allowed, why),
+            **reason,
         })
     return {
         "paper_id": paper_id,
         "total": len(rows),
-        "graded": len(rows) - pending,
+        "graded": len(rows) - pending - len(reported & {r["question_id"] for r in rows if r["points"] is None}),
         "pending": pending,
         "complete": pending == 0,
         "auto_queue_available": allowed,

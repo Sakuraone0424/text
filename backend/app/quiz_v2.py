@@ -210,10 +210,16 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     from app.exams import style_issues
     from app.question_quality import Question
 
+    reported_by_user = {
+        r["question_id"]
+        for r in conn.execute("SELECT DISTINCT question_id FROM question_reports WHERE user_id=%s", (user_id,)).fetchall()
+    }
     quality = []
     for row in candidates:
         content = row["content"]
         reasons = []
+        if row["id"] in reported_by_user:
+            reasons.append("reported_by_learner")
         try:
             Question.model_validate(content)
         except ValueError:
@@ -438,10 +444,60 @@ def load_paper(conn, user_id, paper_id):
         "blueprint": row["blueprint"],
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),
+        "reported_question_ids": sorted(reported_question_ids(conn, paper_id)),
+        "photo_answers_enabled": photo_answers_enabled(),
         "duration_seconds": 3600,
         "timing": timing,
         "questions": questions if timing["status"] != "not_started" else [],
     }
+
+
+def photo_answers_enabled():
+    from app.training_sessions import photo_answers_enabled as enabled
+
+    return enabled()
+
+
+def reported_question_ids(conn, paper_id):
+    return {
+        r["question_id"]
+        for r in conn.execute("SELECT question_id FROM question_reports WHERE paper_id=%s", (paper_id,)).fetchall()
+    }
+
+
+def excluded_summary(conn, paper_id):
+    reported = reported_question_ids(conn, paper_id)
+    items = conn.execute(
+        "SELECT question_id,(snapshot->>'max_points')::int AS points FROM paper_items_v2 WHERE paper_id=%s",
+        (paper_id,),
+    ).fetchall()
+    excluded = sum(i["points"] for i in items if i["question_id"] in reported)
+    return {
+        "question_ids": sorted(reported),
+        "excluded_points": excluded,
+        "nominal_max_points": sum(i["points"] for i in items),
+        "max_points": sum(i["points"] for i in items) - excluded,
+    }
+
+
+def report_question(conn, user_id, paper_id, question_id, note=""):
+    """The learner says this question is wrong or unclear.
+
+    It never appears for this learner again, and for THIS paper it is taken out
+    of the total score (and shown as excluded). Idempotent; recorded for later review.
+    """
+    owned_paper(conn, user_id, paper_id)
+    if not conn.execute(
+        "SELECT 1 FROM paper_items_v2 WHERE paper_id=%s AND question_id=%s", (paper_id, question_id)
+    ).fetchone():
+        raise ValueError("Question does not belong to this paper")
+    if not conn.execute("SELECT 1 FROM training_sessions WHERE paper_id=%s", (paper_id,)).fetchone():
+        raise ValueError("Paper has not been started")
+    conn.execute(
+        "INSERT INTO question_reports(paper_id,question_id,user_id,note) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (paper_id, question_id, user_id, note.strip()[:1000]),
+    )
+    return excluded_summary(conn, paper_id)
 
 
 def schedule_review(conn, attempt_id, question_id):
@@ -581,7 +637,9 @@ def result(conn, user_id, paper_id):
         "AND i.paper_id=%s WHERE a.attempt_id=%s ORDER BY i.position",
         (paper_id, attempt["id"]),
     ).fetchall()
-    pending = sum(r["points"] is None for r in rows)
+    reported = reported_question_ids(conn, paper_id)
+    counted = [r for r in rows if r["question_id"] not in reported]  # reported questions do not count
+    pending = sum(r["points"] is None for r in counted)
     if not pending and attempt["finalized_at"] is None:
         conn.execute(
             "UPDATE attempts_v2 SET finalized_at=NOW() WHERE id=%s", (attempt["id"],)
@@ -592,6 +650,7 @@ def result(conn, user_id, paper_id):
         "SELECT * FROM selection_runs WHERE paper_id=%s", (paper_id,)
     ).fetchone()
     analysis = summary(run) if run else {"status": "historical_trace_not_recorded"}
+    excluded = excluded_summary(conn, paper_id)
     return {
         "selection_analysis": analysis,
         "subject_scores": {
@@ -599,20 +658,20 @@ def result(conn, user_id, paper_id):
                 "score": None
                 if any(
                     r["points"] is None
-                    for r in rows
+                    for r in counted
                     if r["snapshot"]["subject"] == subject
                 )
                 else sum(
-                    r["points"] for r in rows if r["snapshot"]["subject"] == subject
+                    r["points"] for r in counted if r["snapshot"]["subject"] == subject
                 ),
                 "graded_points": sum(
                     r["points"] or 0
-                    for r in rows
+                    for r in counted
                     if r["snapshot"]["subject"] == subject
                 ),
                 "max_points": sum(
                     r["snapshot"]["max_points"]
-                    for r in rows
+                    for r in counted
                     if r["snapshot"]["subject"] == subject
                 ),
             }
@@ -622,9 +681,11 @@ def result(conn, user_id, paper_id):
         "attempt_id": attempt["id"],
         "status": "pending_review" if pending else "graded",
         "pending": pending,
-        "score": None if pending else sum(r["points"] for r in rows),
-        "graded_points": sum(r["points"] or 0 for r in rows),
-        "max_points": sum(r["snapshot"]["max_points"] for r in rows),
+        "score": None if pending else sum(r["points"] for r in counted),
+        "graded_points": sum(r["points"] or 0 for r in counted),
+        "max_points": excluded["max_points"],
+        "nominal_max_points": excluded["nominal_max_points"],
+        "excluded": {"question_ids": excluded["question_ids"], "points": excluded["excluded_points"]},
         "answers": [
             {
                 "question_id": r["question_id"],
@@ -645,6 +706,7 @@ def result(conn, user_id, paper_id):
                 ),
                 "evidence": r["snapshot"]["evidence"],
                 "rubric": r["snapshot"]["rubric"],
+                "excluded": r["question_id"] in reported,
             }
             for r in rows
         ],

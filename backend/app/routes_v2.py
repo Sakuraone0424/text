@@ -264,6 +264,16 @@ def quality_report():
     return operation(report)
 
 
+class QuestionReport(StrictModel):
+    note: str = Field(default="", max_length=1000)
+
+
+@router.post("/papers/{paper_id}/questions/{question_id}/report")
+def report_question(paper_id: int, question_id: int, payload: QuestionReport, username: str = Depends(require_auth)):
+    """"这题有问题": never shown again, and not counted in this paper's score."""
+    return operation(lambda c, u: service.report_question(c, u, paper_id, question_id, payload.note), username)
+
+
 @router.post("/papers/{paper_id}/start")
 def start_training(paper_id: int, username: str = Depends(require_auth)):
     from app.training_sessions import start
@@ -547,7 +557,8 @@ def weekly_stats(username: str = Depends(require_auth)):
                 "COUNT(*) FILTER(WHERE a.points IS NULL) AS pending,COUNT(*) AS answers "
                 "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
                 "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
-                "WHERE p.user_id=%s AND t.submitted_at>=clock_timestamp()-INTERVAL '7 days' GROUP BY 1,2 ORDER BY 1,2",
+                "WHERE p.user_id=%s AND t.submitted_at>=clock_timestamp()-INTERVAL '7 days' "
+                "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id) GROUP BY 1,2 ORDER BY 1,2",
                 (u,),
             ).fetchall()
         },
@@ -878,7 +889,12 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             ).fetchall()
         ]
         recent = c.execute(
-            "SELECT p.id AS paper_id,p.paper_date,p.blueprint->>'specification' AS specification,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
+            "SELECT p.id AS paper_id,p.paper_date,p.blueprint->>'specification' AS specification,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending,"
+            "SUM((i.snapshot->>'max_points')::int) AS max_points,(SELECT count(*) FROM question_reports qr WHERE qr.paper_id=p.id) AS excluded "
+            "FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id "
+            "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
+            "WHERE p.user_id=%s AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id) "
+            "GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
             (u,),
         ).fetchall()
         return {

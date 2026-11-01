@@ -467,11 +467,16 @@ function element(tag, text, parent) {
   return el;
 }
 function renderProgress() {
-  const done = Object.values(localDrafts).filter(
-    (v) =>
-      v.text?.trim() || v.blanks?.some((x) => x.trim()) || v.image_ids?.length,
+  const reported = new Set(paper?.reported_question_ids || []);
+  const done = Object.entries(localDrafts).filter(
+    ([id, v]) =>
+      !reported.has(Number(id)) &&
+      (v.text?.trim() || v.blanks?.some((x) => x.trim()) || v.image_ids?.length),
   ).length;
-  $("progress").textContent = `已答 ${done} / ${paper?.count || 60} · 剩余 ${(paper?.count || 60) - done}`;
+  const total = (paper?.count || 60) - reported.size;
+  $("progress").textContent =
+    `已答 ${done} / ${total} · 剩余 ${total - done}` +
+    (reported.size ? ` · 已反馈${reported.size}题不计分` : "");
   emitUI();
 }
 function render() {
@@ -538,7 +543,7 @@ function render() {
       input.value = value.text || "";
       input.setAttribute("aria-label", `第${q.position}题答案`);
       input.oninput = () => change(q.id, { text: input.value });
-      if (q.question_type !== "fill_blank") {
+      if (q.question_type !== "fill_blank" && paper.photo_answers_enabled) {
         for (const capture of [true, false]) {
           const label = element(
             "label",
@@ -573,8 +578,42 @@ function render() {
       article.classList.toggle("flagged", flagged);
       flag.textContent = flagged ? "取消标记" : "标记此题";
     };
+    const isReported = (paper.reported_question_ids || []).includes(q.id);
+    const report = element(
+      "button",
+      isReported ? "已反馈 · 本卷不计分" : "这题有问题",
+      article,
+    );
+    report.type = "button";
+    report.className = "question-report";
+    report.disabled = isReported;
+    if (isReported) article.classList.add("reported");
+    report.onclick = () => reportQuestion(q.id, report, article);
   }
   renderProgress();
+}
+const REPORT_CONFIRM =
+  "反馈后，这道题以后不会再出现，本卷也不计这道题的分。确定反馈吗？";
+async function reportQuestion(questionId, button, article) {
+  if (!confirm(REPORT_CONFIRM)) return;
+  try {
+    await api(`/v2/papers/${paper.paper_id}/questions/${questionId}/report`, {
+      method: "POST",
+      body: JSON.stringify({ note: "" }),
+    });
+  } catch (error) {
+    status(error.message);
+    return;
+  }
+  paper.reported_question_ids = [
+    ...new Set([...(paper.reported_question_ids || []), questionId]),
+  ];
+  persist();
+  button.textContent = "已反馈 · 本卷不计分";
+  button.disabled = true;
+  article?.classList.add("reported");
+  renderProgress();
+  status("已记录：这道题以后不再出现，本卷不计分。");
 }
 async function sendImage(id, file, article, jobKey) {
   if (!editable()) throw new Error("尚未开始或已截止，不能上传图片。");
@@ -619,7 +658,7 @@ async function sendImage(id, file, article, jobKey) {
 $("submit").onclick = async () => {
   const approved = window.TrainingUI
     ? await window.TrainingUI.confirmSubmit()
-    : confirm("确认统一交卷？未答题按0分，已答主观题待批改。");
+    : confirm("确认统一交卷？未答题按0分，已答主观题由AI判分。");
   if (!approved) return;
   try {
     if (!serverConfirmed) await reconnect();
@@ -651,16 +690,24 @@ async function showResult() {
     return;
   renderedResultSignature = signature;
   $("result").replaceChildren();
+  const excludedCount = result.excluded?.question_ids?.length || 0;
   element(
     "h2",
-    result.score === null
-      ? `待批改 ${result.pending} 题 · 已评分得分 ${result.graded_points}`
-      : `成绩 ${result.score} / ${result.max_points}`,
+    (result.score === null
+      ? `待判分 ${result.pending} 题 · 已得 ${result.graded_points} 分`
+      : `成绩 ${result.score} / ${result.max_points}`) +
+      (excludedCount
+        ? `（原满分 ${result.nominal_max_points}，已扣除 ${excludedCount} 道反馈题共 ${result.excluded.points} 分）`
+        : ""),
     $("result"),
   );
   renderAnalysis(result.selection_analysis, $("result"));
+  let number = 0;
   for (const answer of result.answers) {
+    number += 1;
     const article = element("article", undefined, $("result"));
+    article.className = "result-answer" + (answer.excluded ? " reported" : "");
+    article.dataset.qid = answer.question_id;
     element("p", answer.stem, article);
     if (answer.question_type === "single_choice" && answer.options) {
       for (const [letter, label] of Object.entries(answer.options).sort(([a], [b]) => a.localeCompare(b)))
@@ -675,9 +722,15 @@ async function showResult() {
     } catch {}
     element(
       "h3",
-      `题目 ${answer.question_id} · ${answer.points === null ? "待批改" : answer.points + "分"}`,
+      `第 ${number} 题 · ${answer.excluded ? "已反馈 · 不计分" : answer.points === null ? "待判分" : answer.points + " / " + answer.max_points + " 分"}`,
       article,
     );
+    if (!answer.excluded && answer.points === null) {
+      const waiting = element("p", "判分中……", article);
+      waiting.className = "grading-status";
+      waiting.dataset.qid = answer.question_id;
+      waiting.setAttribute("role", "status");
+    }
     let response;
     try {
       response = JSON.parse(answer.answer);
@@ -694,12 +747,36 @@ async function showResult() {
       (ownChoice ? ". " + ownChoice : ""), article);
     element("p", "参考答案：" +
       (answer.solution_display || answer.solution), article);
-    for (const criterion of answer.rubric)
-      element(
-        "p",
-        `评分点（${criterion.points}分）：${criterion.description}`,
-        article,
-      );
+    const scored = answer.feedback?.criteria;
+    if (scored?.length) {
+      scored.forEach((c, i) => {
+        const line = element(
+          "p",
+          `评分点 ${i + 1}（${c.description}）：${c.points} / ${c.max_points} 分`,
+          article,
+        );
+        line.className = c.points < c.max_points ? "criterion lost" : "criterion";
+        const why = answer.feedback.criterion_reasons?.[i];
+        if (why) element("small", "理由：" + why, article).className = "criterion-reason";
+      });
+    } else {
+      for (const criterion of answer.rubric)
+        element(
+          "p",
+          `评分点（${criterion.points}分）：${criterion.description}`,
+          article,
+        );
+    }
+    if (!answer.excluded) {
+      const report = element("button", "这题有问题", article);
+      report.type = "button";
+      report.className = "question-report";
+      report.onclick = async () => {
+        await reportQuestion(answer.question_id, report, article);
+        renderedResultSignature = "";
+        showResult().catch((e) => status(e.message));
+      };
+    }
     if (answer.feedback) {
       element(
         "p",
@@ -772,7 +849,7 @@ async function showResult() {
   window.TrainingUI?.result(result);
   startGradingActivity(paper.paper_id);
   showVerificationStatus(paper.paper_id);
-  status("已交卷。照片识别未通过自动核验时保持待处理，不会直接判零。");
+  status("已交卷。选择题、填空题已出分；名词解释和简答由AI判分，判完自动刷新，判不了的显示原因，不会直接记0分。");
 }
 
 async function showVerificationStatus(paperId) {
@@ -789,7 +866,7 @@ async function showVerificationStatus(paperId) {
     const result = await api("/v2/papers/" + paperId + "/verification");
     if (!root.isConnected || paper?.paper_id !== paperId) return;
     const excerpt = result.items.filter(q => q.ocr_quote_matches_stored_text).length;
-    const ai = result.items.filter(q => q.independent_ai_science_and_answer_review).length;
+    const ai = result.items.filter(q => q.independent_ai_review).length;
     const audits = result.items.filter(q => q.review_audit_record_matches_current_question).length;
     const bibliography = result.items.filter(q => q.book_metadata_pending).length;
     summary.textContent = "OCR摘录匹配 " + excerpt + "/" + result.count +
@@ -800,7 +877,7 @@ async function showVerificationStatus(paperId) {
     for (const entry of result.items) {
       element("p", "第" + entry.position + "题： " +
         (entry.ocr_quote_matches_stored_text ? "OCR摘录字段匹配" : "OCR摘录匹配未确认") + " · " +
-        (entry.independent_ai_science_and_answer_review ? "独立AI证据复核通过" :
+        (entry.independent_ai_review ? "独立AI证据复核通过" :
           entry.review_audit_record_matches_current_question ? "存在匹配的审题记录" : "科学复核状态未确认") +
         (entry.book_metadata_pending ? " · 书目信息待核查" : ""), detail);
     }
@@ -819,7 +896,7 @@ function startGradingActivity(paperId) {
   section.id = "grading-activity";
   section.className = "card grading-activity";
   section.setAttribute("aria-label", "本卷实时批改活动");
-  element("h2", "实时批改活动", section);
+  element("h2", "判分进度", section);
   const hint = element("p", "正在读取服务端批改状态……", section);
   hint.setAttribute("role", "status");
   const events = element("div", undefined, section);
@@ -829,12 +906,32 @@ function startGradingActivity(paperId) {
   let busy = false;
   let priorGraded = null;
   const labels = {
-    pending: "等待处理", retrying: "等待重试", running: "正在批改",
-    succeeded: "模型响应已返回，等待评分写入", blocked: "需要人工处理或重新授权",
-    cancelled: "已取消", pending_automatic_queue: "尚未进入自动批改队列",
-    vision_pipeline_unavailable: "照片待自动识别；当前视觉流程不可用",
-    graded: "已判分"
+    pending: "等待处理", retrying: "等待重试", running: "正在判分",
+    succeeded: "AI结果已返回，等待写入", blocked: "暂时无法判分",
+    cancelled: "已取消", pending_automatic_queue: "尚未进入判分队列",
+    graded: "已判分", excluded: "已反馈 · 不计分"
   };
+  const reasons = {
+    waiting_to_be_queued: "等待进入判分队列",
+    queued_for_ai_grading: "排队等待AI判分",
+    ai_grading_in_progress: "AI判分中",
+    ai_result_being_applied: "判分结果写入中",
+    reassessing: "结果不确定，正在自动复判一次",
+    uncertain_after_second_assessment: "复判后仍无法确定，暂不计分（不会记0分）",
+    ai_budget_exhausted: "本月 AI 额度已用完，额度恢复后继续判分",
+    ai_grading_stopped: "AI判分已暂停",
+    answer_too_long_for_automatic_grading: "作答过长，无法自动判分",
+    photo_answers_not_supported: "照片作答不支持自动判分",
+    ai_grading_failed: "判分失败，会自动重试",
+    submit_auto_grading_disabled: "自动判分尚未开启",
+    ai_worker_disabled: "自动判分服务未启动",
+    owner_ai_settings_stopped: "AI判分已暂停",
+    private_data_authorization_required: "尚未授权发送教材段落",
+    provider_authorization_required: "尚未授权调用AI",
+  };
+  const reasonText = (row) =>
+    (reasons[row.pending_reason] || labels[row.state] || "待判分") +
+    (row.pending_detail ? "：" + row.pending_detail : "");
   async function poll() {
     if (busy || paper?.paper_id !== paperId || document.visibilityState !== "visible") return;
     busy = true;
@@ -846,17 +943,20 @@ function startGradingActivity(paperId) {
         return;
       }
       hint.textContent = "已判分 " + data.graded + "/" + data.total +
-        " 题，待批 " + data.pending + " 题。" +
-        (data.auto_queue_available ? "自动批改需独立工作进程执行。" :
-          "自动批改尚未启用或授权不足；不会假装已发送AI任务。");
+        " 题，待判分 " + data.pending + " 题。" +
+        (data.auto_queue_available ? "" :
+          "自动判分尚未启用或授权不足；不会假装已发送AI任务。");
       events.replaceChildren();
+      for (const row of data.questions) {
+        const mark = document.querySelector(
+          `.grading-status[data-qid="${row.question_id}"]`,
+        );
+        if (mark && row.points === null && !row.excluded) mark.textContent = reasonText(row);
+      }
       for (const row of data.questions.filter((q) =>
-        q.state !== "graded" || q.reviewer_kind === "AI"
+        q.points === null && !q.excluded
       ).slice(0, 60)) {
-        const item = element("p", "第" + row.position + "题 · " +
-          (labels[row.state] || row.state) +
-          (row.points === null ? "" : " · " + row.points + "分"), events);
-        if (row.error_code) item.textContent += " · " + row.error_code;
+        element("p", "第" + row.position + "题 · " + reasonText(row), events);
       }
       const gained = priorGraded !== null && data.graded > priorGraded;
       priorGraded = data.graded;
@@ -869,7 +969,7 @@ function startGradingActivity(paperId) {
       if (data.complete && gradingActivityTimer) {
         clearInterval(gradingActivityTimer);
         gradingActivityTimer = null;
-        hint.textContent += " 批改已完成，成绩以服务端记录为准。";
+        hint.textContent += " 判分已完成，成绩以服务端记录为准。";
       }
     } catch (error) {
       hint.textContent = "批改状态暂时无法读取：" + error.message;
@@ -1369,7 +1469,7 @@ $("weekly").onclick = async () => {
     for (const row of result.chapters)
       element(
         "p",
-        `${row.chapter}：${row.graded_points || 0}/${row.graded_max_points || 0}分，${row.pending}题待批改`,
+        `${row.chapter}：${row.graded_points || 0}/${row.graded_max_points || 0}分，${row.pending}题待判分`,
         $("learning"),
       );
     window.TrainingUI?.weekly(result.chapters);
@@ -1480,7 +1580,7 @@ $("history").onclick = async () => {
     for (const item of data.training) {
       const article = element(
         "article",
-        `${item.mode === "reviewed_60" ? 60 : 28}题 · ${item.paper_date} · ${item.score === null ? "待批改" : item.score + "分"}`,
+        `${item.mode === "reviewed_60" ? "60 题" : "28 题 · 旧版"} · ${item.paper_date} · ${item.score === null ? "待判分" : item.score + "/" + (item.max_points || 150) + "分"}${item.excluded ? ` · 已扣除${item.excluded}道反馈题` : ""}`,
         $("learning"),
       );
       const button = element("button", "查看已提交结果", article);
@@ -1490,7 +1590,7 @@ $("history").onclick = async () => {
           element(
             "p",
             result.score === null
-              ? `待批改${result.pending}题`
+              ? `待判分${result.pending}题`
               : `得分${result.score}/${result.max_points}`,
             article,
           );

@@ -253,3 +253,99 @@ def test_the_grading_request_never_contains_image_data(db, learner):
     submit(db, uid, paper)
     for job in grading.schedule(db, uid, paper["paper_id"]):
         assert "image" not in json.dumps(job["payload"]).lower().replace("images are", "")
+
+
+# ---- "这题有问题" -------------------------------------------------------------------------------------
+
+
+def first_subjective(paper):
+    return next(q for q in paper["questions"] if q["question_type"] == "term")
+
+
+def test_reporting_a_question_removes_it_from_this_papers_score_and_marks_it(db, learner):
+    uid, paper = learner
+    submit(db, uid, paper)
+    target = first_subjective(paper)
+    before = quiz.result(db, uid, paper["paper_id"])
+    summary = quiz.report_question(db, uid, paper["paper_id"], target["id"], "题干有歧义")
+    assert summary["excluded_points"] == target["max_points"] == 4
+    after = quiz.result(db, uid, paper["paper_id"])
+    assert after["nominal_max_points"] == before["max_points"]
+    assert after["max_points"] == before["max_points"] - 4
+    assert after["excluded"] == {"question_ids": [target["id"]], "points": 4}
+    flagged = [a for a in after["answers"] if a["excluded"]]
+    assert [a["question_id"] for a in flagged] == [target["id"]]
+    assert after["pending"] == before["pending"] - 1  # it no longer holds the whole paper's score back
+    assert quiz.report_question(db, uid, paper["paper_id"], target["id"])["excluded_points"] == 4  # idempotent
+    assert db.execute("SELECT count(*) AS n FROM question_reports").fetchone()["n"] == 1
+    assert db.execute("SELECT note FROM question_reports").fetchone()["note"] == "题干有歧义"
+
+
+def test_a_reported_answer_is_not_graded_or_paid_for(db, learner):
+    uid, paper = learner
+    submit(db, uid, paper)
+    target = first_subjective(paper)
+    quiz.report_question(db, uid, paper["paper_id"], target["id"])
+    jobs = grading.schedule(db, uid, paper["paper_id"])
+    assert target["id"] not in {j["payload"]["question_id"] for j in jobs}
+    shown = {q["question_id"]: q for q in grading_activity.progress(db, uid, paper["paper_id"])["questions"]}[target["id"]]
+    assert shown["state"] == "excluded" and shown["excluded"] and shown["pending_reason"] is None
+
+
+def test_the_score_completes_once_every_other_answer_is_graded(db, learner):
+    uid, paper = learner
+    submit(db, uid, paper)
+    target = first_subjective(paper)
+    quiz.report_question(db, uid, paper["paper_id"], target["id"])
+    for job in grading.schedule(db, uid, paper["paper_id"]):
+        finish(db, job, verdict(job, points=[c["points"] for c in job["payload"]["question"]["rubric"]]))
+    auto_worker.dispatch_completed(db)
+    result = quiz.result(db, uid, paper["paper_id"])
+    assert result["status"] == "graded" and result["pending"] == 0
+    assert result["score"] == sum(a["points"] for a in result["answers"] if not a["excluded"])
+    assert result["max_points"] == result["nominal_max_points"] - 4
+
+
+def test_a_reported_question_has_no_review_card_and_is_never_selected_for_that_learner(db, learner):
+    from app import memory
+    from app.common import ensure_user
+    from app.question_quality import Blueprint
+
+    uid, paper = learner
+    submit(db, uid, paper)
+    wrong = next(q for q in paper["questions"] if q["question_type"] == "single_choice")
+    quiz.report_question(db, uid, paper["paper_id"], wrong["id"])
+    assert db.execute("SELECT count(*) AS n FROM fsrs_cards WHERE question_id=%s", (wrong["id"],)).fetchone()["n"] == 0
+    assert wrong["id"] not in {r["question_id"] for r in memory.due(db, uid)}
+
+    # Two fresh learners see the same bank. The one who reported `wrong` (any paper may anchor the row)
+    # must be short exactly that question; the other gets a full paper.
+    spec = Blueprint.model_validate(db.execute("SELECT blueprint FROM papers_v2 WHERE id=%s", (paper["paper_id"],)).fetchone()["blueprint"])
+    reporter, other = ensure_user(db, "learner-who-reported"), ensure_user(db, "learner-who-did-not")
+    full = quiz.create_paper(db, other, spec)
+    assert full["count"] == 28
+    db.execute("INSERT INTO question_reports(paper_id,question_id,user_id) VALUES (%s,%s,%s)", (full["paper_id"], wrong["id"], reporter))
+    with pytest.raises(quiz.BankShortage) as short:
+        quiz.create_paper(db, reporter, spec)
+    missing = [(x["subject"], x["question_type"], x["missing"]) for x in short.value.shortages if x["missing"]]
+    assert missing == [(wrong["subject"], "single_choice", 1)]
+
+
+def test_reporting_requires_an_owned_started_paper_and_one_of_its_questions(db, learner):
+    uid, paper = learner
+    with pytest.raises(ValueError, match="does not belong"):
+        quiz.report_question(db, uid, paper["paper_id"], 99999999)
+    other = db.execute("INSERT INTO users(username) VALUES ('someone-else') RETURNING id").fetchone()["id"]
+    with pytest.raises(LookupError):
+        quiz.report_question(db, other, paper["paper_id"], paper["questions"][0]["id"])
+
+
+def test_report_endpoint_and_history_use_the_reduced_total(client, db, running):
+    uid, paper = running
+    submit(db, uid, paper)
+    term = first_subjective(paper)
+    response = client.post(f"/v2/papers/{paper['paper_id']}/questions/{term['id']}/report", json={"note": "不对"}, headers=LEARNER)
+    assert response.status_code == 200 and response.json()["excluded_points"] == 4
+    record = client.get("/v2/history", headers=LEARNER).json()["training"][0]
+    assert record["excluded"] == 1 and record["max_points"] == paper["max_points"] - 4
+    assert client.get(f"/v2/papers/{paper['paper_id']}", headers=LEARNER).json()["reported_question_ids"] == [term["id"]]

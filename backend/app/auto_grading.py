@@ -80,7 +80,7 @@ def _refuse(conn, uid, key, payload, code):
 
 def schedule(conn, uid, paper_id):
     rows = conn.execute(
-        "SELECT a.*,i.snapshot FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id WHERE p.user_id=%s AND p.id=%s AND a.points IS NULL",
+        "SELECT a.*,i.snapshot FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id WHERE p.user_id=%s AND p.id=%s AND a.points IS NULL AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id)",
         (uid, paper_id),
     ).fetchall()
     jobs = []
