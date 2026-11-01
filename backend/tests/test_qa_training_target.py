@@ -1,7 +1,7 @@
 """New QA cannot reuse old target approvals or silently serve 28 questions."""
 import pytest
 
-from app.deployment_target import QA_TARGET, QA_SOURCE_SCHEMA, verify_isolated_target
+from app.deployment_target import QA_SERVICES, QA_TARGET, QA_SOURCE_SCHEMA, QA_WORKER_SERVICE, verify_isolated_target
 
 
 @pytest.fixture
@@ -18,6 +18,54 @@ def qa(monkeypatch):
 
 def test_new_qa_target_accepted(qa):
     verify_isolated_target()
+
+
+def test_the_two_admitted_qa_services_are_exactly_website_and_worker():
+    assert QA_SERVICES == ("b2cbe2fd-cc60-49ec-b52f-68f5fd35aa07", "9295cd65-7355-4804-aa06-f10a5327846c")
+
+
+def test_qa_worker_service_is_accepted_with_its_own_approval(qa, monkeypatch):
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", QA_WORKER_SERVICE)
+    monkeypatch.setenv("QUIZ_APPROVED_RAILWAY_SERVICE_ID", QA_WORKER_SERVICE)
+    verify_isolated_target()
+
+
+@pytest.mark.parametrize("actual,approved", [
+    ("00000000-0000-4000-8000-999999999999", "00000000-0000-4000-8000-999999999999"),  # unknown service, self-approved
+    ("00000000-0000-4000-8000-999999999999", QA_WORKER_SERVICE),  # unknown service, borrowed approval
+    ("15083462-a2f4-49d0-9a72-0873208e0669", "15083462-a2f4-49d0-9a72-0873208e0669"),  # old project's service
+    (QA_WORKER_SERVICE, QA_TARGET["SERVICE"]),  # worker running with the website's approval
+    (QA_TARGET["SERVICE"], QA_WORKER_SERVICE),  # website running with the worker's approval
+    (QA_WORKER_SERVICE, ""),
+    ("not-a-uuid", "not-a-uuid"),
+])
+def test_any_other_qa_service_is_still_refused(qa, monkeypatch, actual, approved):
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", actual)
+    monkeypatch.setenv("QUIZ_APPROVED_RAILWAY_SERVICE_ID", approved)
+    with pytest.raises(PermissionError, match="SERVICE"):
+        verify_isolated_target()
+
+
+def test_the_worker_service_id_is_not_admitted_in_another_project_or_environment(qa, monkeypatch):
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", QA_WORKER_SERVICE)
+    monkeypatch.setenv("QUIZ_APPROVED_RAILWAY_SERVICE_ID", QA_WORKER_SERVICE)
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "c6028313-e1f4-43cc-a63d-b7ff474a3a24")
+    with pytest.raises(PermissionError, match="PROJECT"):
+        verify_isolated_target()
+
+
+def test_the_worker_id_does_not_open_the_non_qa_profile(monkeypatch):
+    for key, value in {"QUIZ_ISOLATED_TARGET_APPROVED": "1", "RAILWAY_ENVIRONMENT_NAME": "qa"}.items():
+        monkeypatch.setenv(key, value)
+    from app.deployment_target import TARGET, SOURCE_SCHEMA
+    monkeypatch.setenv("QUIZ_DB_SCHEMA", SOURCE_SCHEMA)
+    for kind, value in TARGET.items():
+        monkeypatch.setenv(f"RAILWAY_{kind}_ID", value)
+        monkeypatch.setenv(f"QUIZ_APPROVED_RAILWAY_{kind}_ID", value)
+    monkeypatch.setenv("RAILWAY_SERVICE_ID", QA_WORKER_SERVICE)
+    monkeypatch.setenv("QUIZ_APPROVED_RAILWAY_SERVICE_ID", QA_WORKER_SERVICE)
+    with pytest.raises(PermissionError, match="SERVICE"):
+        verify_isolated_target()
 
 
 @pytest.mark.parametrize("key,value", [

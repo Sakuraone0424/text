@@ -15,6 +15,10 @@ QA_TARGET = {
     "SERVICE": "b2cbe2fd-cc60-49ec-b52f-68f5fd35aa07",
 }
 QA_SOURCE_SCHEMA = "source_staging_ocr_20261030"
+# The QA website and the automation worker are two services of one environment.
+# Exactly these two are admitted; any other service ID is refused.
+QA_WORKER_SERVICE = "9295cd65-7355-4804-aa06-f10a5327846c"
+QA_SERVICES = (QA_TARGET["SERVICE"], QA_WORKER_SERVICE)
 
 PROTECTED_PROJECT = "c8ace6c2-e725-4e19-b064-3c71b44d4fde"
 PROTECTED_ENVIRONMENT = "54a1a3e3-9a24-4182-8441-5670d1ba9f04"
@@ -55,8 +59,11 @@ def verify_isolated_target():
     for kind, pinned in selected.items():
         actual = os.environ.get(f"RAILWAY_{kind}_ID", "")
         approved = os.environ.get(f"QUIZ_APPROVED_RAILWAY_{kind}_ID", "")
+        allowed = QA_SERVICES if qa and kind == "SERVICE" else (pinned,)
         try:
-            if str(UUID(actual)) != pinned or str(UUID(approved)) != pinned:
+            # The running service and its separately configured approval must be
+            # the same ID, and that ID must be one of the admitted ones.
+            if str(UUID(actual)) not in allowed or str(UUID(approved)) != str(UUID(actual)):
                 raise ValueError()
         except ValueError:
             raise PermissionError("Railway target identity mismatch: " + kind)
