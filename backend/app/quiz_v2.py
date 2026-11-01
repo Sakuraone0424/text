@@ -164,7 +164,9 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         if existing["blueprint"] != spec:
             # A pre-upgrade 28q paper must remain reachable under its own
             # immutable rules; do not overwrite/restart it with a 60q request.
-            if not is_new_60:
+            # Different v3/v2 versions must never silently return a paper
+            # whose shape conflicts with the requested 60q contract.
+            if is_v3 or not is_new_60:
                 raise ValueError("Today already has a paper with a different blueprint")
         return load_paper(conn, user_id, existing["id"])
     if resume_unfinished:
@@ -178,7 +180,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             "AND NOT EXISTS(SELECT 1 FROM attempts_v2 a WHERE a.paper_id=p.id) "
             "AND (s.paper_id IS NULL OR (s.submitted_at IS NULL AND s.deadline>clock_timestamp())) "
             "ORDER BY p.paper_date DESC,p.id DESC LIMIT 1 FOR UPDATE OF p",
-            (user_id, day, Jsonb(spec), is_new_60, "xiaohan-150-60-v1"),
+            (user_id, day, Jsonb(spec), is_v2, "xiaohan-150-60-v1"),
         ).fetchone()
         if previous:
             return load_paper(conn, user_id, previous["id"])
