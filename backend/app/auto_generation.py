@@ -1,8 +1,16 @@
 """Bounded supplementation from current AI-verified knowledge, never quota padding."""
 
 import json
+import os
 
 from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
+from app import training_spec_v3 as spec_v3
+
+
+def active_question_contract():
+    """V3 is opt-in; never alter old paper/source records or start model jobs."""
+    return spec_v3 if os.environ.get("QUIZ_DAILY_SPECIFICATION") == spec_v3.SPECIFICATION else None
+
 from app.source_policy import (
     current_source_sql, FILES, pinned_source_bytes, pinned_science_evidence
 )
@@ -222,9 +230,10 @@ def balanced_generation_buckets(attempts):
     An unsuccessful generation still consumes a model request and must count
     toward balancing; it never counts as a scientifically approved question.
     """
+    active_counts = (active_question_contract().COUNTS if active_question_contract() else COUNTS)
     entries = [
         (subject, kind, needed)
-        for subject in SUBJECTS for kind, needed in COUNTS.items()
+        for subject in SUBJECTS for kind, needed in active_counts.items()
     ]
     return sorted(
         entries,
@@ -232,7 +241,7 @@ def balanced_generation_buckets(attempts):
             attempts.get((b[0], b[1]), 0) / (b[2] * STARTUP_RESERVE_DAYS),
             attempts.get((b[0], b[1]), 0),
             SUBJECTS.index(b[0]),
-            list(COUNTS).index(b[1]),
+            list(active_counts).index(b[1]),
         ),
     )
 
@@ -252,6 +261,7 @@ def plan(conn, uid):
     attempts = {
         (r["subject"], r["question_type"]): r["n"] for r in rows
     }
+    active_points = active_question_contract().POINTS if active_question_contract() else POINTS
     for subject, kind, required in balanced_generation_buckets(attempts):
         # A merely "ready" state does not prove current science/answer
         # review, publication or v2 scoring compatibility.
@@ -265,7 +275,7 @@ def plan(conn, uid):
             "WHERE i.question_id=q.id AND p.user_id=%s) "
             "OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id "
             "AND f.user_id=%s AND f.due<=clock_timestamp()))",
-            (subject, kind, str(POINTS[kind]), uid, uid),
+            (subject, kind, str(active_points[kind]), uid, uid),
         ).fetchall()
         count = eligible_verified_reserve(conn, eligible)
         if count >= required * STARTUP_RESERVE_DAYS:
@@ -332,7 +342,7 @@ def plan(conn, uid):
             payload = dict(
                 subject=subject,
                 question_type=kind,
-                max_points=POINTS[kind],
+                max_points=active_points[kind],
                 evidence=bounded_textbook_evidence(conn, u, kind),
                 anchor_exact_excerpt=anchor_quote,
                 style=style_units,
@@ -340,7 +350,7 @@ def plan(conn, uid):
                 style_overlap=style["lexical_topic_overlap"],
                 source_bibliography=book,
                 schema=Question.model_json_schema(),
-                instructions=exam_instructions(kind, POINTS[kind])
+                instructions=exam_instructions(kind, active_points[kind])
                 + " For at least one citation, copy anchor_exact_excerpt EXACTLY "
                 "into its evidence.excerpt field with identical characters, "
                 "punctuation and spacing; do not paraphrase or retype it. "
