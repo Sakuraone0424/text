@@ -4,8 +4,8 @@
 
 | 服务 | 构建 | 启动 |
 |---|---|---|
-| 网站 API（正式站、QA） | `railway.json` → `backend/Dockerfile` | `uvicorn app.main:app`；Web 进程内的 `app.worker` 由 `QUIZ_WORKER_ENABLED`（默认 `1`）控制 |
-| AI 任务 worker（第 8 步新开） | `deploy/railway-automation/worker.railway.json` → `deploy/railway-automation/Dockerfile` | `python -m app.auto_worker`，cron `*/5 * * * *` |
+| 网站 API（正式站、QA） | Railway 服务级设置 → `backend/Dockerfile` | `uvicorn app.main:app`；Web 进程内的 `app.worker` 由 `QUIZ_WORKER_ENABLED`（默认 `1`）控制 |
+| AI 任务 worker（第 8 步新开） | Railway 服务级设置 → `deploy/railway-automation/Dockerfile`（`worker.railway.json` 仅作参考） | `python -m app.auto_worker`，cron `*/5 * * * *` |
 
 AI 任务（出题、一轮独立审核、主观题判分）由 `auto_worker` 执行，经 `app.harness_gateway` → `app.harness_runner` 调用 `deepseek-harness-sdk`（`backend/requirements-harness.txt`）与 `backend/harness/restricted.patch.yml`。这两项不能删。
 
@@ -45,6 +45,17 @@ worker 真正开始调用模型，需要同时满足：
 | `QUIZ_DB_SCHEMA` 以 `source_staging_` 开头 | `auto_worker.main` 的现有检查；用于单项目合并时需要放宽（第 11 步） |
 | Railway 目标校验 | 在 Railway 上还需 `QUIZ_ISOLATED_TARGET_APPROVED=1` 及与部署目标一致的 `RAILWAY_*_ID` / `QUIZ_APPROVED_RAILWAY_*_ID`（`app/deployment_target.py`） |
 | 数据库里 `ai_settings` 的用户未停止，三项 CNY 预算均启用且大于 0，模型已通过兼容性探测（`/model/probe`），CNY 价格已核实 | 缺任何一项，任务在领取时被挡住 |
+
+## 部署设置的来源
+
+**以 Railway 服务级配置为准。** 仓库里不再有根目录 `railway.json`：它会作为 config-as-code 覆盖同仓库所有服务的设置（曾让 worker 用 `backend/Dockerfile` 构建、缺少两个旧资料 JSON）。每个服务在 Railway 里单独设置：
+
+| 服务 | Dockerfile | 启动 / 其他 |
+|---|---|---|
+| `training-api-qa`（网站） | `backend/Dockerfile` | 启动命令 `python migrate.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT`；健康检查 `/health` |
+| `training-worker-qa` | `deploy/railway-automation/Dockerfile` | 启动 `python -m app.auto_worker`；cron `*/5 * * * *`；重启策略 `NEVER` |
+
+`deploy/railway-automation/worker.railway.json` 只作为上述设置的参考，不会被任何服务读取。正式站（`xiao-ustc-quiz`）运行 `main`，不受此变更影响；第 10 步切换时需在其服务级设置里同样写明。
 
 ## 数据库迁移
 
@@ -91,9 +102,9 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 
 构建与启动（Settings）：
 - Source：仓库 `Sakuraone0424/text`，分支 **`feat/60q-v2-spec`**（合并提交 `33ccbc3`；不再固定在 `d2b6a01`）。
-- Builder：由 RAILPACK 改为 **Dockerfile**，路径 `backend/Dockerfile`（仓库根 `railway.json` 已写明；Dashboard 里不要再覆盖）。
+- Builder：由 RAILPACK 改为 **Dockerfile**，路径 `backend/Dockerfile`（服务级设置，见「部署设置的来源」）。
 - Start Command：保持 `python migrate.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT`（Dockerfile 的 CMD 只启 uvicorn，迁移靠这条）。
-- Healthcheck Path：`/health`（`railway.json` 已有）。
+- Healthcheck Path：`/health`（服务级设置）。
 
 变量：
 
@@ -122,7 +133,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 ### b) 新 worker 服务
 
 - 名称建议 `training-worker-qa`，同项目同环境（qa），源同上（`feat/60q-v2-spec`）。
-- 配置文件：`deploy/railway-automation/worker.railway.json`（Settings → Config-as-code 路径填 `/deploy/railway-automation/worker.railway.json`）。其内容：builder `DOCKERFILE`，`dockerfilePath` = `deploy/railway-automation/Dockerfile`，`startCommand` = `python -m app.auto_worker`，`cronSchedule` = `*/5 * * * *`，`restartPolicyType` = `NEVER`。无 `railway.json` 健康检查（cron 任务）。
+- 设置在服务级配置里填写（不再使用配置文件；`worker.railway.json` 仅作参考）。对应内容：builder `DOCKERFILE`，`dockerfilePath` = `deploy/railway-automation/Dockerfile`，`startCommand` = `python -m app.auto_worker`，`cronSchedule` = `*/5 * * * *`，`restartPolicyType` = `NEVER`。无 `railway.json` 健康检查（cron 任务）。
 - 该 Dockerfile 含 worker 需要的全部文件：`app/`、`sql/`、`harness/`、`config/`、两个旧资料 JSON、`migrate.py`。
 - 变量：
 
