@@ -8,8 +8,4 @@
 
 [唯一现行产品规格](docs/product-specification.md) · 公开规格接口：`GET /v2/training-specification`。
 
-[接口、证据、运行与回滚说明](docs/reviewed-quiz.md) · [实际验收与外部依赖状态](docs/acceptance.md)
-
-[动态命题、证据边界与可重放设计](docs/dynamic-engine.md)
-
-[当前六文件OCR-only预检、导入与交接](docs/private-source-intake.md)
+[部署说明](docs/deployment.md)
