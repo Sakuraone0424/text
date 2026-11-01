@@ -146,7 +146,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
             elif job["kind"] == "grading" and ":reassessment" not in job["job_key"]:
                 payload = {
                     **job["payload"],
-                    "instructions": "Independently reassess the original answer and rubric from supplied evidence, without using any previous score. Return the declared Grade schema, set uncertain=true if unresolved.",
+                    "instructions": auto_grading.REASSESS_INSTRUCTIONS + auto_grading.GRADING_INSTRUCTIONS,
                 }
                 ai_jobs.enqueue(
                     conn,

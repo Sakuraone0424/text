@@ -1,6 +1,7 @@
 """Server-clock timed sessions. All writes lock the paper then its session."""
 
 import json
+import os
 from datetime import timedelta
 
 from psycopg.types.json import Jsonb
@@ -17,6 +18,11 @@ def validate_paper_items(conn, paper_id, items):
     if row["blueprint"].get("specification") == new_spec.SPECIFICATION:
         return new_spec.validate_items(items)
     return validate_items(items)
+
+
+def photo_answers_enabled():
+    """Typed answers only: photographed answers cannot be graded, so the entry is off by default."""
+    return os.environ.get("QUIZ_PHOTO_ANSWERS_ENABLED") == "1"
 
 
 def server_now(conn):
@@ -120,6 +126,8 @@ def valid_value(conn, paper_id, question_id, value):
         or any(type(i) is not int for i in images)
     ):
         raise ValueError("At most five image IDs are allowed")
+    if images and not photo_answers_enabled():
+        raise ValueError("Photo answers are turned off; please type your answer")
     if images and q["question_type"] in ("single_choice", "fill_blank"):
         raise ValueError("Images are only supported for subjective answers")
     for image_id in images:

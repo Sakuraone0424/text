@@ -35,7 +35,9 @@ def training_specification():
         from app.training_spec import formal_specification
     else:
         from app.training_spec_v2 import formal_specification
-    return formal_specification()
+    from app.training_sessions import photo_answers_enabled
+
+    return {**formal_specification(), "photo_answers_enabled": photo_answers_enabled()}
 
 
 def require_reviewer(request: Request):
@@ -304,7 +306,10 @@ async def upload_image(
     username: str = Depends(require_auth),
 ):
     from app.images import verify_image, store_image
+    from app.training_sessions import photo_answers_enabled
 
+    if not photo_answers_enabled():
+        raise HTTPException(410, "Photo answers are turned off; please type your answer")
     raw = bytearray()
     async for part in request.stream():
         raw.extend(part)
