@@ -9,6 +9,8 @@
 
 AI 任务（出题、两轮审核、主观题判分）由 `auto_worker` 执行，经 `app.harness_gateway` → `app.harness_runner` 调用 `deepseek-harness-sdk`（`backend/requirements-harness.txt`）与 `backend/harness/restricted.patch.yml`。这两项不能删。
 
+出题与真题入库的规划都在每次 worker 运行时进行，且**不依赖 `AI_FULL_CORPUS_ENABLED`**：每个请求只带一道题相关的教材段落（最多 4 段、5000 字），出新题按题型缺口、考频加权选段落。该开关只控制整库知识点提取，必须保持关闭。注意 worker 每次运行只执行一次模型调用，cron 每 5 分钟一次时，每天约 288 次调用（一道题约需 3 次：出题 + 两轮审核）。
+
 ## 数据库迁移
 
 `backend/Dockerfile` 的 CMD 只启动 uvicorn，迁移由 Railway 配置执行：

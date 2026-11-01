@@ -13,9 +13,15 @@ TYPE_GUIDANCE = {
         "A-D alternatives of parallel grammatical form. Distractors should represent "
         "a specific misconception, not implausible filler; vary mechanisms, conditions "
         "or closely related terms. Only ONE alternative can be correct under the stated "
-        "context; check each distractor against evidence. Do not use 'all of the above', "
-        "'none of the above', deliberately ambiguous negations or answer-letter hints. "
-        "Return canonical answer as A/B/C/D; rubric must justify the unique correct claim."
+        "context. Do not use 'all of the above', 'none of the above', deliberately "
+        "ambiguous negations or answer-letter hints. Return canonical answer as A/B/C/D; "
+        "rubric must justify the unique correct claim. Return the wrapper object described "
+        "by schema: {question: <Question>, distractor_checks: {<each of the three wrong "
+        "letters>: {unit_id, excerpt, why_wrong}}}. For EVERY wrong alternative quote, "
+        "verbatim, the continuous textbook excerpt from a supplied unit that shows it is "
+        "wrong (for a half-true statement, the exact point where it fails) and explain in "
+        "why_wrong. If a distractor cannot be refuted from the supplied units, replace it. "
+        "Make certain that no second alternative can also be correct."
     ),
     "fill_blank": (
         "Place an explicit ____ at the exact missing concept; test a key term, causal "
@@ -68,7 +74,9 @@ _COMMON = (
 # The generator must satisfy them, not the dispatcher silently repair them.
 _SCHEMA_CONTRACT = (
     " STRICT Question validator requirements: return a single unwrapped JSON "
-    "object with the exact Question schema keys and no additional properties. "
+    "object with the exact Question schema keys and no additional properties "
+    "(for single_choice this Question object is the `question` member of the "
+    "wrapper described for that type). "
     "Copy subject, question_type and max_points EXACTLY from the input payload. "
     "The rubric must be a nonempty list of criterion objects with integer points "
     "whose sum is exactly max_points, not an example or an estimate. All criterion "

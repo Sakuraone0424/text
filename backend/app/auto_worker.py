@@ -193,6 +193,7 @@ def plan(conn, uid):
     # Past-exam questions need no corpus-wide sweep: each request carries only
     # the few textbook paragraphs relevant to that one question.
     past_exam_import.plan(conn, uid)
+    auto_generation.plan_gap(conn, uid)
 
 
 def main():

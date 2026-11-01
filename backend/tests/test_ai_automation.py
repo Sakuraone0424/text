@@ -179,6 +179,21 @@ def synthetic_result(job, db, passed=True, quote=None):
             rationale="Synthetic mocked round result on synthetic evidence; not a real API call or scientific certification",
         ),
     )
+    content = db.execute(
+        "SELECT content FROM reviewed_questions WHERE id=%s", (job["payload"]["question_id"],)
+    ).fetchone()["content"]
+    if job["payload"]["phase"] == "answer" and content["question_type"] == "single_choice":
+        # The answer round must judge every option against the cited text.
+        result["response"]["option_checks"] = {
+            letter: dict(
+                verdict="correct" if letter == content["answer"] else "wrong",
+                unit_id=u["unit_id"],
+                excerpt=quote or u["text"],
+                reason="Synthetic option check on synthetic evidence only",
+            )
+            for letter in "ABCD"
+        }
+        result["response"]["other_correct_options"] = []
     db.execute(
         "UPDATE ai_jobs SET state='succeeded',result=%s WHERE id=%s",
         (Jsonb(result), job["id"]),

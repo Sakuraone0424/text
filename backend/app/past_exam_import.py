@@ -348,6 +348,42 @@ def retrieve_evidence(conn, subject, text):
     return chosen
 
 
+def chapter_key(unit):
+    return f"{unit['file_id']}|{unit['chapter']}"
+
+
+def index_item_chapters(conn, limit=100):
+    """Tag items with the textbook chapter their top-ranked paragraph is in.
+
+    Cheap, deterministic and model-free; used only to weight which chapters
+    new questions are written from, never as evidence for any answer.
+    """
+    done = 0
+    for item in conn.execute(
+        "SELECT id,subject,stem,options FROM past_exam_items WHERE chapter_key IS NULL ORDER BY id LIMIT %s",
+        (limit,),
+    ).fetchall():
+        units = retrieve_evidence(conn, item["subject"], item["stem"] + " " + " ".join(item["options"].values()))
+        conn.execute(
+            "UPDATE past_exam_items SET chapter_key=%s WHERE id=%s",
+            (chapter_key(units[0]) if units else "", item["id"]),
+        )
+        done += 1
+    return done
+
+
+def chapter_frequency(conn, subject):
+    """How often each chapter was examined: sum over distinct stems of years seen."""
+    return {
+        r["chapter_key"]: r["n"]
+        for r in conn.execute(
+            "SELECT chapter_key,sum(GREATEST(jsonb_array_length(years),1))::int AS n FROM past_exam_items "
+            "WHERE subject=%s AND chapter_key IS NOT NULL AND chapter_key<>'' GROUP BY 1",
+            (subject,),
+        ).fetchall()
+    }
+
+
 # --------------------------------------------------------------------------
 # Planning: one bounded DeepSeek request per question
 # --------------------------------------------------------------------------
@@ -514,6 +550,25 @@ def _check_units(conn, units, kind):
             raise ValueError("evidence_version_changed")
 
 
+def evidence_record(unit, bibliography, excerpt):
+    """Citation whose identity comes from the database snapshot, never the model."""
+    page = unit["ocr_page"]
+    return dict(
+        file_id=unit["file_id"],
+        source_sha256=unit["source_sha256"],
+        ocr_page=page,
+        paragraph_id=unit["unit_id"],
+        source_unit_id=unit["unit_id"],
+        textbook=bibliography["textbook"],
+        authors=bibliography["authors"],
+        edition=bibliography["edition"],
+        isbn=None,
+        chapter=unit["chapter"],
+        locator=f"OCR:{page}:UNIT:{unit['unit_id']}" if page else f"UNIT:{unit['unit_id']}",
+        excerpt=excerpt,
+    )
+
+
 def accept(conn, job):
     if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
         raise ValueError("actual_generation_call_required")
@@ -549,23 +604,7 @@ def accept(conn, job):
         bibliography = p["bibliographies"][unit["file_id"]]
         if (point.unit_id, point.excerpt) not in seen:
             seen.add((point.unit_id, point.excerpt))
-            page = unit["ocr_page"]
-            evidence.append(
-                dict(
-                    file_id=unit["file_id"],
-                    source_sha256=unit["source_sha256"],
-                    ocr_page=page,
-                    paragraph_id=unit["unit_id"],
-                    source_unit_id=unit["unit_id"],
-                    textbook=bibliography["textbook"],
-                    authors=bibliography["authors"],
-                    edition=bibliography["edition"],
-                    isbn=None,
-                    chapter=unit["chapter"],
-                    locator=f"OCR:{page}:UNIT:{unit['unit_id']}" if page else f"UNIT:{unit['unit_id']}",
-                    excerpt=point.excerpt,
-                )
-            )
+            evidence.append(evidence_record(unit, bibliography, point.excerpt))
         rubric.append(dict(description=point.description, points=point.points, knowledge_tags=[]))
         rubric_evidence.append(
             dict(

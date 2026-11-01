@@ -171,6 +171,32 @@ def preflight(conn, qid):
     return result
 
 
+class OptionCheck(StrictModel):
+    verdict: Literal["correct", "wrong"]
+    unit_id: StrictInt
+    excerpt: str = Field(min_length=5, max_length=2000)
+    reason: str = Field(min_length=10, max_length=1000)
+
+
+class ChoiceAnswerFinding(Finding):
+    """Answer round of a single-choice question: every option judged against the text."""
+
+    option_checks: dict[str, OptionCheck]
+    other_correct_options: list[Literal["A", "B", "C", "D"]]
+
+
+OPTION_VERIFICATION = (
+    " Option verification (single choice): fill option_checks for EACH of A, B, C and D with "
+    "verdict 'correct' only if that option is fully correct under the supplied excerpts, "
+    "otherwise 'wrong', plus unit_id, an excerpt copied verbatim from that supplied unit and a "
+    "reason. Look specifically for a SECOND correct option: list every letter other than the "
+    "answer key that could also be correct in other_correct_options (an empty list only if "
+    "none can). Exactly one option may be 'correct' and it must be the supplied answer. If a "
+    "distractor cannot be confirmed wrong from the supplied excerpts, set passed=false and "
+    "list it in unresolved."
+)
+
+
 def source_views(q, refs, style):
     """Send exact cited spans, not entire source units or prior analyst prose."""
     fields = (
@@ -242,6 +268,9 @@ def review_payload(phase, qid, checksum, q, refs, style, contract_version=1):
             "Check whether the new draft follows their observed questioning patterns; "
             "derive scientific answers and rubric criteria independently from textbook evidence."
         )
+    if phase == "answer" and q["question_type"] == "single_choice":
+        payload["schema"] = ChoiceAnswerFinding.model_json_schema()
+        payload["instructions"] += OPTION_VERIFICATION
     if contract_version in (2, 3, 4, 5, 6, 7):
         if phase == "answer":
             payload["question"]["accepted_answers"] = q.get("accepted_answers", [])
@@ -348,7 +377,10 @@ def accept_round(conn, job):
         raise ValueError("question_version_changed")
     if p != review_payload(p["phase"], qid, content_sha(q), q, refs, style, job_contract_version(job)):
         raise ValueError("evidence_version_changed")
-    finding = Finding.model_validate(job["result"]["response"])
+    choice_round = p["phase"] == "answer" and q["question_type"] == "single_choice"
+    finding = (ChoiceAnswerFinding if choice_round else Finding).model_validate(
+        job["result"]["response"]
+    )
     bound = {u["unit_id"]: u for u in refs}
     sent_excerpts = {}
     for cited in q["evidence"]:
@@ -405,6 +437,23 @@ def accept_round(conn, job):
         covered.update(claim.criterion_indices)
     if p["phase"] == "answer" and covered != set(range(len(q["rubric"]))):
         issues.append("rubric_not_fully_evidenced")
+    if choice_round:
+        verdicts = {k: v.verdict for k, v in finding.option_checks.items()}
+        if set(verdicts) != set("ABCD"):
+            issues.append("option_checks_incomplete")
+        else:
+            if verdicts[q["answer"]] != "correct":
+                issues.append("answer_key_not_confirmed_correct")
+            others = sorted(k for k, v in verdicts.items() if k != q["answer"] and v == "correct")
+            if others or finding.other_correct_options:
+                issues.append("second_correct_option")
+            if sorted(finding.other_correct_options) != others:
+                issues.append("option_verdicts_inconsistent")
+        for check in finding.option_checks.values():
+            if check.unit_id not in bound or not any(
+                check.excerpt in excerpt for excerpt in sent_excerpts.get(check.unit_id, [])
+            ):
+                issues.append("invented_quote")
     issues += hard_issues(conn, qid, q)
     conn.execute(
         "INSERT INTO auto_quality_events(question_id,content_sha256,policy_version,phase,run_key,job_id,evidence_snapshot,result,passed) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
