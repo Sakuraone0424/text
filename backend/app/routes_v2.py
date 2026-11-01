@@ -20,6 +20,7 @@ from app.question_quality import (
 from app.common import ensure_user
 from app.dynamic_model import Policy
 from app import quiz_v2 as service
+from app import training_spec_v3 as spec_v3
 
 router = APIRouter(prefix="/v2", tags=["reviewed-training"])
 
@@ -33,6 +34,8 @@ def training_specification():
         and os.environ.get("QUIZ_QA_LEGACY_FIXTURE_SCHEMA", "").startswith("quiz_live_test_")
     ):
         from app.training_spec import formal_specification
+    elif os.environ.get("QUIZ_DAILY_SPECIFICATION") == spec_v3.SPECIFICATION:
+        from app.training_spec_v3 import formal_specification
     else:
         from app.training_spec_v2 import formal_specification
     return formal_specification()
@@ -122,7 +125,7 @@ def withdraw(question_id: int):
 @router.post("/papers")
 def paper(blueprint: Blueprint, username: str = Depends(require_auth)):
     if (os.environ.get("QUIZ_DEPLOYMENT_PROFILE") == "ustc-exam-ocr-qa"
-            and blueprint.specification != "xiaohan-60q-150pt-v2"):
+            and blueprint.specification != os.environ.get("QUIZ_DAILY_SPECIFICATION", "xiaohan-60q-150pt-v2")):
         raise HTTPException(409, "QA training requires 60-question specification")
     return operation(lambda c, u: service.create_paper(c, u, blueprint), username)
 
@@ -881,7 +884,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             "training": [
                 {
                     **r,
-                    "mode": "reviewed_60" if r["specification"] == "xiaohan-60q-150pt-v2" else "reviewed_28",
+                    "mode": "reviewed_60" if r["specification"] in ("xiaohan-60q-150pt-v2", spec_v3.SPECIFICATION) else "reviewed_28",
                     "score": None if r["pending"] else r["graded_points"],
                 }
                 for r in recent

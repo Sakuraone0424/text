@@ -7,6 +7,7 @@ from typing import Literal
 
 from app.training_spec import POINTS, DURATION_SECONDS, validate_quotas
 from app import training_spec_v2 as v2
+from app import training_spec_v3 as v3
 
 from pydantic import (
     BaseModel,
@@ -179,14 +180,17 @@ class Blueprint(StrictModel):
     @model_validator(mode="before")
     @classmethod
     def v2_default_scoring(cls, value):
-        if isinstance(value, dict) and value.get("specification") == v2.SPECIFICATION and "points" not in value:
-            return {**value, "points": dict(v2.POINTS)}
+        if isinstance(value, dict) and value.get("specification") in (v2.SPECIFICATION, v3.SPECIFICATION) and "points" not in value:
+            return {**value, "points": dict(v3.POINTS if value["specification"] == v3.SPECIFICATION else v2.POINTS)}
         return value
 
     @model_validator(mode="after")
     def total(self):
         if self.specification == v2.SPECIFICATION:
             v2.validate_blueprint(self.model_dump())
+            return self
+        if self.specification == v3.SPECIFICATION:
+            v3.validate_blueprint(self.model_dump())
             return self
         if set(self.quotas) != {"biochemistry", "cell_biology"}:
             raise ValueError("Both subjects are required")
