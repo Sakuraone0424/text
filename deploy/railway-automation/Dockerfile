@@ -2,9 +2,7 @@
 FROM python:3.12-slim-bookworm AS python
 WORKDIR /build
 COPY backend/requirements.txt backend/requirements-harness.txt ./
-RUN --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then export PIP_CERT=/run/secrets/proxy_ca; fi; \
-    pip install --no-cache-dir -r requirements.txt -r requirements-harness.txt
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-harness.txt
 FROM postgres:17-bookworm
 COPY --from=python /usr/local /usr/local
 WORKDIR /app
