@@ -57,6 +57,9 @@ def create_question(conn, question: Question):
 
 
 def review_question(conn, question_id: int, audit: Audit):
+    from app.legacy_fixture_gate import allowed
+    if not allowed(conn):
+        raise ValueError("manual_review_disabled_use_automatic_quality")
     lock_bank(conn)
     row = conn.execute(
         "SELECT * FROM reviewed_questions WHERE id=%s FOR UPDATE", (question_id,)
