@@ -15,6 +15,10 @@ class TestSixtyChoiceBlank(unittest.TestCase):
         self.assertEqual(s.COUNTS, {"single_choice":15,"fill_blank":15})
         self.assertEqual(s.QUESTIONS_PER_SUBJECT, 30)
         s.validate_blueprint(s.default_blueprint())
+        full = s.formal_specification()
+        self.assertEqual(full["points"], s.POINTS)
+        self.assertEqual(full["points_total"], 120)
+        self.assertEqual(full["points_by_type"], s.POINTS)
         self.assertEqual(len(s.validate_items(self.paper())),60)
     def test_refuses_28_q_and_essay(self):
         with self.assertRaises(ValueError):s.validate_items(self.paper()[:28])
@@ -28,6 +32,14 @@ class TestSixtyChoiceBlank(unittest.TestCase):
     def test_refuses_mutated_blueprint(self):
         bp=s.default_blueprint();bp["quotas"]["biochemistry"]["fill_blank"]=14
         with self.assertRaises(ValueError):s.validate_blueprint(bp)
+    def test_pydantic_live_blueprint_accepts_only_v3_contract(self):
+        from app.question_quality import Blueprint
+        self.assertEqual(Blueprint.model_validate(s.default_blueprint()).specification, s.SPECIFICATION)
+        bad = s.default_blueprint()
+        bad["quotas"]["cell_biology"]["term"] = 1
+        with self.assertRaises(ValueError):
+            Blueprint.model_validate(bad)
+
     def test_bool_is_not_integer_quota(self):
         bp=s.default_blueprint();bp["quotas"]["biochemistry"]["fill_blank"]=True
         with self.assertRaises(ValueError):s.validate_blueprint(bp)
