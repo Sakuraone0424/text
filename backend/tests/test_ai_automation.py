@@ -30,7 +30,7 @@ def setup_ai(db):
     cap = dict(
         real_api_verified=True,
         max_tested_output_tokens=32768,
-        efforts=["off", "high"],
+        efforts=["off", "low", "high"],
         tools=False,
         vision=False,
         prices=dict(
@@ -75,7 +75,7 @@ def test_discovery_unavailability_cache_and_unknown_fields(db):
     assert not stale["auto_switch_performed"]
 
 
-@pytest.mark.parametrize("effort", ["low", "max", "imaginary"])
+@pytest.mark.parametrize("effort", ["max", "imaginary"])
 def test_unsupported_effort_rejected(db, setup_ai, effort):
     with pytest.raises(ValueError):
         m.configure(db, setup_ai, "deepseek-flash", effort)
@@ -179,6 +179,21 @@ def synthetic_result(job, db, passed=True, quote=None):
             rationale="Synthetic mocked round result on synthetic evidence; not a real API call or scientific certification",
         ),
     )
+    content = db.execute(
+        "SELECT content FROM reviewed_questions WHERE id=%s", (job["payload"]["question_id"],)
+    ).fetchone()["content"]
+    if job["payload"]["phase"] in ("answer", "review") and content["question_type"] == "single_choice":
+        # The answer round must judge every option against the cited text.
+        result["response"]["option_checks"] = {
+            letter: dict(
+                verdict="correct" if letter == content["answer"] else "wrong",
+                unit_id=u["unit_id"],
+                excerpt=quote or u["text"],
+                reason="Synthetic option check on synthetic evidence only",
+            )
+            for letter in "ABCD"
+        }
+        result["response"]["other_correct_options"] = []
     db.execute(
         "UPDATE ai_jobs SET state='succeeded',result=%s WHERE id=%s",
         (Jsonb(result), job["id"]),
@@ -188,7 +203,9 @@ def synthetic_result(job, db, passed=True, quote=None):
 
 def test_real_rounds_required_no_static_ai_or_human_dependency(db, setup_ai, candidate):
     planned = quality.schedule_checks(db, setup_ai, candidate)
-    assert len(planned) == 2 and "answer" not in planned[0]["payload"]["question"]
+    # One independent review; it is shown the answer and scoring, never the author's reasoning.
+    assert len(planned) == 1 and planned[0]["kind"] == "quality_review"
+    assert "answer" in planned[0]["payload"]["question"] and "rubric" in planned[0]["payload"]["question"]
     assert not quality.promote(db, candidate)
     db.execute(
         "UPDATE auto_question_states SET status='checking' WHERE question_id=%s",
@@ -231,7 +248,7 @@ def test_unsent_source_context_cannot_support_formal_review(db, setup_ai, candid
 
     monkeypatch.setattr(quality, "evidence", with_extra_context)
     assert not quality.accept_round(db, synthetic_result(job, db, quote=unsent))
-    event = db.execute("SELECT passed,result FROM auto_quality_events WHERE phase='science'").fetchone()
+    event = db.execute("SELECT passed,result FROM auto_quality_events WHERE phase='review'").fetchone()
     assert event["passed"] is False and "invented_quote" in event["result"]["issues"]
     assert quality.ready(db, candidate) is False
 

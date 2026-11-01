@@ -13,6 +13,7 @@ TASKS = (
     "generation",
     "science_review",
     "answer_review",
+    "quality_review",  # the single independent review round
     "repair",
     "grading",
     "explanation",

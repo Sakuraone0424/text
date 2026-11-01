@@ -1,0 +1,235 @@
+"""Monthly spend caps, off-peak scheduling and thinking levels for the AI pipeline.
+
+- Question writing, review and repair run only in DeepSeek's off-peak hours
+  (jobs wait, they are never dropped). Grading is never held back.
+- A monthly hard cap (default 90 CNY) applies to all calls; 15 CNY of it is kept
+  for grading, so writing/review stop earlier (at 75 when grading has used
+  nothing) and grading keeps working up to the cap.
+- Spend is measured on settled usage; only a failed, uncertain or still running
+  attempt is counted at its worst-case reservation.
+"""
+
+import os
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+
+from app import cny_billing
+
+# Everything that writes or checks questions waits for off-peak hours.
+OFF_PEAK_ONLY = ("generation", "quality_review", "repair")
+# Calls that keep running while the writing/review budget is exhausted.
+RESERVED_FOR = ("grading", "compatibility")
+DEFAULT_MONTHLY_CAP = Decimal(90)
+DEFAULT_GRADING_RESERVE = Decimal(15)
+THINKING_DEFAULTS = {"generation": "off", "repair": "off", "quality_review": "low"}
+THINKING_ENV = {
+    "generation": "AI_GENERATION_THINKING",
+    "repair": "AI_GENERATION_THINKING",
+    "quality_review": "AI_REVIEW_THINKING",
+    "grading": "AI_GRADING_THINKING",
+}
+EFFORTS = ("off", "low", "high", "max")
+
+
+# ---- off-peak ----------------------------------------------------------------------
+
+
+def is_peak(at=None, calendar=None):
+    """DeepSeek peak: Beijing 09:00-12:00 and 14:00-18:00 on weekdays that are not holidays.
+
+    With a verified calendar for that year holidays are off-peak all day. Without
+    one the rule still applies on every weekday (holidays then count as workdays:
+    never cheaper than reality, so never a surprise bill).
+    """
+    at = at or datetime.now(timezone.utc)
+    local = at.astimezone(cny_billing.SHANGHAI)
+    calendar = cny_billing.calendar_2026() if calendar is None else calendar
+    if local.weekday() >= 5:
+        return False
+    if calendar.get("verified") and calendar.get("year") == local.year and local.date().isoformat() in calendar.get("holidays", []):
+        return False
+    minute = local.hour * 60 + local.minute
+    return 540 <= minute < 720 or 840 <= minute < 1080
+
+
+def held_back_kinds(at=None):
+    """Job kinds that must wait right now."""
+    return list(OFF_PEAK_ONLY) if is_peak(at) else []
+
+
+# ---- thinking level -----------------------------------------------------------------
+
+
+def effort_for(kind):
+    """Configured thinking level for a job kind, or None to keep the model setting."""
+    raw = os.environ.get(THINKING_ENV.get(kind, ""), "").strip().lower()
+    value = raw or THINKING_DEFAULTS.get(kind)
+    return value if value in EFFORTS else THINKING_DEFAULTS.get(kind)
+
+
+# ---- caps ---------------------------------------------------------------------------
+
+
+def _money(name, default):
+    try:
+        value = Decimal(os.environ.get(name, "").strip() or str(default))
+    except InvalidOperation:
+        return Decimal(default)
+    return value if value.is_finite() and value >= 0 else Decimal(default)
+
+
+def caps():
+    """(monthly cap, amount reserved for grading), both in CNY."""
+    cap = _money("AI_MONTHLY_CAP_CNY", DEFAULT_MONTHLY_CAP)
+    return cap, min(_money("AI_GRADING_RESERVE_CNY", DEFAULT_GRADING_RESERVE), cap)
+
+
+MONTH_START = "(date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')"
+DAY_START = "(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')"
+
+
+def month_split(conn, uid):
+    """(reserved-group spend, writing/review spend) this Shanghai month."""
+    row = conn.execute(
+        "SELECT COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE j.kind=ANY(%s)),0) AS reserved, "
+        "COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE NOT j.kind=ANY(%s)),0) AS other "
+        "FROM ai_cny_reservations r JOIN ai_jobs j ON j.id=r.job_id "
+        "LEFT JOIN ai_cny_events e ON e.job_id=r.job_id AND e.attempt=r.attempt AND e.kind='usage_estimate' "
+        f"WHERE j.user_id=%s AND r.created_at>={MONTH_START}",
+        (list(RESERVED_FOR), list(RESERVED_FOR), uid),
+    ).fetchone()
+    return Decimal(row["reserved"]), Decimal(row["other"])
+
+
+def cap_reason(conn, uid, kind, amount):
+    """Why this call may not start under the monthly cap, or None."""
+    cap, reserve = caps()
+    reserved, other = month_split(conn, uid)
+    total = reserved + other
+    if kind in RESERVED_FOR:
+        limit = cap
+    else:
+        # Keep back whatever part of the grading reserve is still unused.
+        limit = cap - max(Decimal(0), reserve - reserved)
+    return "budget_exceeded" if total + Decimal(amount) > limit else None
+
+
+# ---- report ---------------------------------------------------------------------------
+
+
+def spend_report(conn, uid):
+    """Today / this month, tokens, per-kind breakdown, and cost per admitted question."""
+    cap, reserve = caps()
+    reserved, other = month_split(conn, uid)
+    base = (
+        "FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id "
+        "WHERE j.user_id=%s AND e.kind='usage_estimate' AND e.created_at>={start}"
+    )
+    tokens = (
+        "COALESCE(sum((e.detail->'usage'->>'input_tokens')::bigint),0) AS input_tokens,"
+        "COALESCE(sum((e.detail->'usage'->>'cache_read_input_tokens')::bigint),0) AS cached_tokens,"
+        "COALESCE(sum((e.detail->'usage'->>'output_tokens')::bigint),0) AS output_tokens,"
+        "count(*) AS calls,COALESCE(sum(e.amount_cny),0) AS cny"
+    )
+
+    def window(start):
+        return conn.execute(f"SELECT {tokens} " + base.format(start=start), (uid,)).fetchone()
+
+    today, month = window(DAY_START), window(MONTH_START)
+    by_kind = conn.execute(
+        f"SELECT j.kind,{tokens} " + base.format(start=MONTH_START) + " GROUP BY j.kind ORDER BY j.kind", (uid,)
+    ).fetchall()
+    recent = conn.execute(
+        "SELECT e.created_at,j.kind,e.amount_cny AS cny,(e.detail->'usage'->>'input_tokens')::bigint AS input_tokens,"
+        "(e.detail->'usage'->>'cache_read_input_tokens')::bigint AS cached_tokens,"
+        "(e.detail->'usage'->>'output_tokens')::bigint AS output_tokens,e.detail->>'period_start' AS period "
+        "FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id WHERE j.user_id=%s AND e.kind='usage_estimate' "
+        "ORDER BY e.id DESC LIMIT 50",
+        (uid,),
+    ).fetchall()
+    def writing_spend(start):
+        return Decimal(conn.execute(
+            "SELECT COALESCE(sum(e.amount_cny),0) AS cny FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id "
+            f"WHERE j.user_id=%s AND e.kind='usage_estimate' AND NOT j.kind=ANY(%s) AND e.created_at>={start}",
+            (uid, list(RESERVED_FOR)),
+        ).fetchone()["cny"])
+
+    def admitted(start):
+        return conn.execute(
+            "SELECT count(*) AS n FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
+            f"WHERE s.status='ready' AND q.status='published' AND s.updated_at>={start}"
+        ).fetchone()["n"]
+
+    month_admitted, all_admitted = admitted(MONTH_START), admitted("'-infinity'")
+    all_writing = writing_spend("'-infinity'")
+    month_writing = writing_spend(MONTH_START)
+    discarded = conn.execute(
+        f"SELECT count(*) AS n FROM auto_question_states WHERE status='retired' AND reason LIKE 'discarded:%%' AND updated_at>={MONTH_START}"
+    ).fetchone()["n"]
+    total = reserved + other
+    writing_limit = cap - max(Decimal(0), reserve - reserved)
+    exhausted_writing = total >= writing_limit
+    exhausted_all = total >= cap
+    return dict(
+        currency="CNY",
+        today_cny=str(today["cny"]), month_cny=str(month["cny"]),
+        month_counted_cny=str(total),  # settled usage + worst case of failed/running attempts
+        month_cap_cny=str(cap), grading_reserve_cny=str(reserve),
+        writing_review_limit_cny=str(writing_limit),
+        remaining_writing_review_cny=str(max(Decimal(0), writing_limit - total)),
+        remaining_grading_cny=str(max(Decimal(0), cap - total)),
+        writing_review_exhausted=exhausted_writing, ai_quota_exhausted=exhausted_all,
+        message=("本月 AI 额度已用完" if exhausted_all else "本月 AI 出题与审核额度已用完，判分仍可使用" if exhausted_writing else None),
+        tokens=dict(today={k: int(today[k]) for k in ("input_tokens", "cached_tokens", "output_tokens", "calls")},
+                    month={k: int(month[k]) for k in ("input_tokens", "cached_tokens", "output_tokens", "calls")}),
+        by_kind=[{**r, "cny": str(r["cny"])} for r in by_kind],
+        recent_calls=[{**r, "cny": str(r["cny"]), "created_at": r["created_at"].isoformat()} for r in recent],
+        admitted_questions=dict(month=month_admitted, total=all_admitted, discarded_month=discarded),
+        cost_per_admitted_question_cny=dict(
+            month=str((month_writing / month_admitted).quantize(Decimal("0.0001"))) if month_admitted else None,
+            total=str((all_writing / all_admitted).quantize(Decimal("0.0001"))) if all_admitted else None,
+            basis="writing + review + repair spend divided by questions now published",
+        ),
+        off_peak=dict(now_is_peak=is_peak(), held_back_kinds=held_back_kinds(),
+                      peak_hours_beijing=["09:00-12:00", "14:00-18:00 (weekdays, not holidays)"]),
+        thinking=dict(generation=effort_for("generation"), review=effort_for("quality_review"), grading=effort_for("grading")),
+    )
+
+
+# ---- temporary bank target (first trial batch) ----------------------------------------
+
+
+def bank_target():
+    """AI_BANK_TARGET_PER_BUCKET: stock wanted per subject x question type, or None.
+
+    TEMPORARY. Unset (or invalid / not positive) means the normal rule: top each
+    bucket up to two days of reserve. Set, it replaces that reserve target, e.g. 5
+    gives the 8 buckets x 5 = 40 question first batch.
+    """
+    raw = os.environ.get("AI_BANK_TARGET_PER_BUCKET", "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def reserve_target(required, days):
+    return bank_target() or required * days
+
+
+def bucket_supply(conn, subject, kind):
+    """Questions of a bucket that exist or are already on their way (any pipeline stage)."""
+    made = conn.execute(
+        "SELECT count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+        "WHERE st.status IN ('ready','candidate','checking','repairing') "
+        "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s",
+        (subject, kind),
+    ).fetchone()["n"]
+    queued = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND dispatched_at IS NULL "
+        "AND state IN ('pending','running','retrying','succeeded') "
+        "AND payload->>'subject'=%s AND payload->>'question_type'=%s",
+        (subject, kind),
+    ).fetchone()["n"]
+    return made + queued

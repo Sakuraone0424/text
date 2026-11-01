@@ -5,7 +5,7 @@ import os
 import sys
 from app.db import get_db
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
-from app import auto_knowledge, auto_generation, auto_exams, auto_insights
+from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
 from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
@@ -81,7 +81,11 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
     for job in rows:
         try:
             with conn.transaction():
-                if job["kind"] in ("science_review", "answer_review"):
+                if job["kind"] == "quality_review":
+                    if auto_quality.accept_round(conn, job):
+                        auto_quality.promote(conn, job["payload"]["question_id"])
+                elif job["kind"] in ("science_review", "answer_review"):
+                    # Retired two-round flow, kept only so old stored jobs can be read.
                     auto_quality.accept_round(conn, job)
                     phases = conn.execute(
                         "SELECT count(DISTINCT phase) AS n FROM auto_quality_events WHERE question_id=%s AND content_sha256=%s AND passed AND phase IN ('science','answer')",
@@ -105,7 +109,10 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                 elif job["kind"] in ("textbook_analysis", "knowledge_extraction"):
                     auto_knowledge.accept(conn, job)
                 elif job["kind"] == "generation":
-                    new = auto_generation.accept(conn, job)
+                    if job["payload"].get("origin") == past_exam_import.ORIGIN_PAST_EXAM:
+                        new = past_exam_import.accept(conn, job)
+                    else:
+                        new = auto_generation.accept(conn, job)
                     auto_quality.schedule_checks(conn, job["user_id"], new)
                 elif job["kind"] == "exam_analysis":
                     auto_exams.accept(conn, job)
@@ -124,11 +131,13 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                 "UPDATE ai_jobs SET state='blocked',error_code='invalid_or_uncertain_result' WHERE id=%s",
                 (job["id"],),
             )
-            if job["kind"] in ("science_review", "answer_review"):
+            if job["kind"] in ("quality_review", "science_review", "answer_review"):
                 conn.execute(
                     "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason='invalid_or_uncertain_result' WHERE question_id=%s",
                     (job["payload"]["question_id"],),
                 )
+            elif job["kind"] == "generation" and job["payload"].get("origin") == past_exam_import.ORIGIN_PAST_EXAM:
+                past_exam_import.mark_blocked(conn, job, safe_dispatch_failure(exc)["code"])
             elif job["kind"] == "repair":
                 conn.execute(
                     "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason='invalid_repair_result' WHERE question_id=%s",
@@ -137,7 +146,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
             elif job["kind"] == "grading" and ":reassessment" not in job["job_key"]:
                 payload = {
                     **job["payload"],
-                    "instructions": "Independently reassess the original answer and rubric from supplied evidence, without using any previous score. Return the declared Grade schema, set uncertain=true if unresolved.",
+                    "instructions": auto_grading.REASSESS_INSTRUCTIONS + auto_grading.GRADING_INSTRUCTIONS,
                 }
                 ai_jobs.enqueue(
                     conn,
@@ -154,12 +163,14 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
 
 def plan(conn, uid):
     auto_quality.retire_stale(conn)
+    auto_quality.discard_unfixable(conn)
     for row in conn.execute(
         "SELECT p.question_id FROM candidate_review_packets p LEFT JOIN auto_question_states s ON s.question_id=p.question_id WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) AND (s.question_id IS NULL OR s.status='candidate') ORDER BY p.question_id LIMIT 10"
     ).fetchall():
         auto_quality.schedule_checks(conn, uid, row["question_id"])
     for row in conn.execute(
-        "SELECT question_id FROM auto_question_states WHERE status='blocked' AND revision_count<2 AND reason NOT IN ('unresolvable_ocr_or_image_dependency','source_file_integrity_failed') ORDER BY question_id LIMIT 3"
+        "SELECT question_id FROM auto_question_states WHERE status='blocked' AND revision_count<%s AND reason<>ALL(%s) ORDER BY question_id LIMIT 3",
+        (auto_quality.MAX_REPAIRS, list(auto_quality.UNREPAIRABLE)),
     ).fetchall():
         try:
             q, refs, style = auto_quality.evidence(conn, row["question_id"])
@@ -170,7 +181,7 @@ def plan(conn, uid):
             question=q,
             evidence=refs,
             style=style,
-            instructions="Repair the question using only the supplied actual excerpts. Return JSON {question: complete Question object, reason: detailed correction rationale}. No invented citation, no human approval. A new version will undergo both independent rounds again.",
+            instructions="Repair the question using only the supplied actual excerpts. Return JSON {question: complete Question object, reason: detailed correction rationale}. No invented citation, no human approval. A new version will undergo the independent review again.",
             schema=auto_quality.Question.model_json_schema(),
         )
         ai_jobs.enqueue(
@@ -185,6 +196,36 @@ def plan(conn, uid):
         (uid,),
     ).fetchall():
         auto_grading.schedule(conn, uid, row["id"])
+    # Past-exam questions need no corpus-wide sweep: each request carries only
+    # the few textbook paragraphs relevant to that one question.
+    legacy_reuse.plan(conn, uid)
+    past_exam_import.plan(conn, uid)
+    auto_generation.plan_gap(conn, uid)
+
+
+# Sizing: about 160 calls a day (60 questions at ~75% review pass rate = ~80 written
+# + ~80 reviewed), only in off-peak hours, one worker run every 5 minutes.
+#   weekday off-peak = 24h - (3h + 4h peak) = 17h -> 17 * 12 = 204 runs
+#   160 calls * 1.25 (retries / failures) = 200 calls -> 200 / 204 ~ 1 call per run
+# Default 2: a write is followed by its review in the same run, and the backlog left
+# by a 4-hour peak window (up to ~48 runs) clears at twice that rate. Weekends and
+# holidays (24h off-peak) have far more headroom. Raise it with AI_CALLS_PER_RUN.
+DEFAULT_CALLS_PER_RUN = 2
+MAX_CALLS_PER_RUN = 10
+
+
+def calls_per_run(env=None):
+    """Model calls one worker run may make: AI_CALLS_PER_RUN, default 3, 1..10.
+
+    Budget, concurrency and retry limits still apply to every call; this only
+    bounds how many a single cron run attempts.
+    """
+    raw = (os.environ if env is None else env).get("AI_CALLS_PER_RUN", "")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_CALLS_PER_RUN
+    return min(max(value, 1), MAX_CALLS_PER_RUN)
 
 
 def main():
@@ -245,7 +286,13 @@ def main():
         conn.execute(
             "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' AND j.error_code IN ('budget_exceeded','automation_stopped')"
         )
-    ai_jobs.run_once(get_db, execute)
+    for _ in range(calls_per_run()):
+        if not ai_jobs.run_once(get_db, execute):
+            break  # nothing claimable: queue empty, budget spent or retries pending
+        with get_db() as conn:
+            # Hand each finished result on at once so its review jobs can be
+            # claimed by the next call of this same run.
+            dispatch_completed(conn)
     with get_db() as conn:
         dispatch_completed(conn)
     integrations_tick()

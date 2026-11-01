@@ -1,6 +1,7 @@
-"""Reviewed 28-question workflow; deliberately independent of legacy records."""
+"""Reviewed paper workflow: new papers are 60q v2; stored 28q papers stay readable."""
 
 import json
+from collections import defaultdict
 import os
 
 from psycopg.types.json import Jsonb
@@ -35,6 +36,9 @@ def exclusive_topic_collision(question, other):
             if isinstance(tag, str) and tag.startswith("exclusive:")
         }
     return bool(ids(question) & ids(other))
+
+
+REUSE_AFTER_DAYS = 14  # a question last seen this long ago may fill a gap in a paper
 
 
 class BankShortage(ValueError):
@@ -196,24 +200,36 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     decisions = []
     audit = []
     # Also reject semantically close stems already seen by this user; no revision recycling.
-    seen = [
-        r["stem"]
+    seen_rows = [
+        (r["stem"], r["day"])
         for r in conn.execute(
-            "SELECT i.snapshot->>'stem' AS stem FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id WHERE p.user_id=%s "
-            "UNION ALL SELECT q.stem FROM paper_questions i JOIN papers p ON p.id=i.paper_id "
+            "SELECT i.snapshot->>'stem' AS stem,p.paper_date AS day FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id WHERE p.user_id=%s "
+            "UNION ALL SELECT q.stem,p.paper_date FROM paper_questions i JOIN papers p ON p.id=i.paper_id "
             "JOIN questions q ON q.id=i.question_id WHERE p.user_id=%s",
             (user_id, user_id),
         ).fetchall()
     ]
+    seen = [stem for stem, _ in seen_rows]
+    # Not enough new questions? Questions last seen REUSE_AFTER_DAYS or more ago may fill the gap.
+    import datetime as _dt
+
+    reuse_cutoff = day - _dt.timedelta(days=REUSE_AFTER_DAYS)
+    reusable = defaultdict(list)
     selected, shortages = [], []
     from app.sources import evidence_issues
     from app.exams import style_issues
     from app.question_quality import Question
 
+    reported_by_user = {
+        r["question_id"]
+        for r in conn.execute("SELECT DISTINCT question_id FROM question_reports WHERE user_id=%s", (user_id,)).fetchall()
+    }
     quality = []
     for row in candidates:
         content = row["content"]
         reasons = []
+        if row["id"] in reported_by_user:
+            reasons.append("reported_by_learner")
         try:
             Question.model_validate(content)
         except ValueError:
@@ -270,21 +286,35 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     for row in quality:
         content = row["content"]
         item = next(r for r in audit if r["question_id"] == row["id"])
+        def review_tags():
+            return [
+                tag
+                for tag in item["knowledge_tags"]
+                if any(
+                    c["due"]
+                    for c in context["topics"][content["subject"]][tag]["review"]["cards"]
+                )
+            ]
+
         if row["id"] not in due and any(
             duplicate(content["stem"], stem) for stem in seen
         ):
             item["excluded_reasons"].append("previously_seen_stem_without_due_review")
+            last_seen = max(d for stem, d in seen_rows if duplicate(content["stem"], stem))
+            if last_seen <= reuse_cutoff:
+                item["is_retest"] = False
+                item["review_knowledge_tags"] = review_tags()
+                reusable[(content["subject"], content["question_type"])].append((last_seen, row["id"], row, item))
             continue
         item["is_retest"] = row["id"] in due
-        item["review_knowledge_tags"] = [
-            tag
-            for tag in item["knowledge_tags"]
-            if any(
-                c["due"]
-                for c in context["topics"][content["subject"]][tag]["review"]["cards"]
-            )
-        ]
+        item["review_knowledge_tags"] = review_tags()
         eligible.append(row)
+    from app.past_exam_import import concept_keys, concepts_collide
+
+    concepts = concept_keys(
+        conn, [r["id"] for r in eligible] + [x[2]["id"] for group in reusable.values() for x in group]
+    )
+    reused_ids = set()
     for subject in SUBJECTS:
         for kind, count in spec_counts.items():
             pool = []
@@ -301,6 +331,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     continue
                 if any(
                     exclusive_topic_collision(content, r["content"])
+                    or concepts_collide(concepts, row["id"], r["id"])
                     for r in selected + pool
                 ):
                     next(r for r in audit if r["question_id"] == row["id"])[
@@ -316,6 +347,27 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     ].append("duplicate_candidate_stem")
                     continue
                 pool.append(row)
+            if len(pool) < count:
+                # New questions are not enough: fill with the ones seen longest ago.
+                for _, _, cand, cand_item in sorted(reusable.get((subject, kind), []), key=lambda x: (x[0], x[1])):
+                    if len(pool) >= count:
+                        break
+                    cand_content = cand["content"]
+                    from app.answer_cues import conflict as cue_conflict
+
+                    if (
+                        cue_conflict(cand_content, [r["content"] for r in selected + pool])
+                        or any(
+                            exclusive_topic_collision(cand_content, r["content"]) or concepts_collide(concepts, cand["id"], r["id"])
+                            for r in selected + pool
+                        )
+                        or any(duplicate(cand_content["stem"], r["content"]["stem"]) for r in selected + pool)
+                    ):
+                        continue
+                    cand_item["excluded_reasons"] = []
+                    cand_item["reused"] = True
+                    reused_ids.add(cand["id"])
+                    pool.append(cand)
             if len(pool) < count:
                 shortages.append(
                     {
@@ -355,8 +407,8 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     ).fetchone()["id"]
     for pos, row in enumerate(selected, 1):
         conn.execute(
-            "INSERT INTO paper_items_v2(paper_id,question_id,position,snapshot,is_retest) VALUES (%s,%s,%s,%s,%s)",
-            (paper_id, row["id"], pos, Jsonb(row["content"]), row["id"] in due),
+            "INSERT INTO paper_items_v2(paper_id,question_id,position,snapshot,is_retest,is_reused) VALUES (%s,%s,%s,%s,%s,%s)",
+            (paper_id, row["id"], pos, Jsonb(row["content"]), row["id"] in due, row["id"] in reused_ids),
         )
     selected_ids = {r["id"] for r in selected}
     for item in audit:
@@ -419,6 +471,7 @@ def load_paper(conn, user_id, paper_id):
             "position": i["position"],
             "blank_count": len(i["snapshot"].get("blanks", [])),
             "is_retest": i.get("is_retest", False),
+            "reused": i.get("is_reused", False),
             "review_knowledge_tags": review_tags.get(i["question_id"], []),
             **{
                 k: i["snapshot"][k]
@@ -434,10 +487,61 @@ def load_paper(conn, user_id, paper_id):
         "blueprint": row["blueprint"],
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),
+        "includes_reused": any(i.get("is_reused") for i in items),
+        "reported_question_ids": sorted(reported_question_ids(conn, paper_id)),
+        "photo_answers_enabled": photo_answers_enabled(),
         "duration_seconds": 3600,
         "timing": timing,
         "questions": questions if timing["status"] != "not_started" else [],
     }
+
+
+def photo_answers_enabled():
+    from app.training_sessions import photo_answers_enabled as enabled
+
+    return enabled()
+
+
+def reported_question_ids(conn, paper_id):
+    return {
+        r["question_id"]
+        for r in conn.execute("SELECT question_id FROM question_reports WHERE paper_id=%s", (paper_id,)).fetchall()
+    }
+
+
+def excluded_summary(conn, paper_id):
+    reported = reported_question_ids(conn, paper_id)
+    items = conn.execute(
+        "SELECT question_id,(snapshot->>'max_points')::int AS points FROM paper_items_v2 WHERE paper_id=%s",
+        (paper_id,),
+    ).fetchall()
+    excluded = sum(i["points"] for i in items if i["question_id"] in reported)
+    return {
+        "question_ids": sorted(reported),
+        "excluded_points": excluded,
+        "nominal_max_points": sum(i["points"] for i in items),
+        "max_points": sum(i["points"] for i in items) - excluded,
+    }
+
+
+def report_question(conn, user_id, paper_id, question_id, note=""):
+    """The learner says this question is wrong or unclear.
+
+    It never appears for this learner again, and for THIS paper it is taken out
+    of the total score (and shown as excluded). Idempotent; recorded for later review.
+    """
+    owned_paper(conn, user_id, paper_id)
+    if not conn.execute(
+        "SELECT 1 FROM paper_items_v2 WHERE paper_id=%s AND question_id=%s", (paper_id, question_id)
+    ).fetchone():
+        raise ValueError("Question does not belong to this paper")
+    if not conn.execute("SELECT 1 FROM training_sessions WHERE paper_id=%s", (paper_id,)).fetchone():
+        raise ValueError("Paper has not been started")
+    conn.execute(
+        "INSERT INTO question_reports(paper_id,question_id,user_id,note) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (paper_id, question_id, user_id, note.strip()[:1000]),
+    )
+    return excluded_summary(conn, paper_id)
 
 
 def schedule_review(conn, attempt_id, question_id):
@@ -577,7 +681,13 @@ def result(conn, user_id, paper_id):
         "AND i.paper_id=%s WHERE a.attempt_id=%s ORDER BY i.position",
         (paper_id, attempt["id"]),
     ).fetchall()
-    pending = sum(r["points"] is None for r in rows)
+    reported = reported_question_ids(conn, paper_id)
+    reused = {
+        r["question_id"]: r["is_reused"]
+        for r in conn.execute("SELECT question_id,is_reused FROM paper_items_v2 WHERE paper_id=%s", (paper_id,)).fetchall()
+    }
+    counted = [r for r in rows if r["question_id"] not in reported]  # reported questions do not count
+    pending = sum(r["points"] is None for r in counted)
     if not pending and attempt["finalized_at"] is None:
         conn.execute(
             "UPDATE attempts_v2 SET finalized_at=NOW() WHERE id=%s", (attempt["id"],)
@@ -588,6 +698,7 @@ def result(conn, user_id, paper_id):
         "SELECT * FROM selection_runs WHERE paper_id=%s", (paper_id,)
     ).fetchone()
     analysis = summary(run) if run else {"status": "historical_trace_not_recorded"}
+    excluded = excluded_summary(conn, paper_id)
     return {
         "selection_analysis": analysis,
         "subject_scores": {
@@ -595,20 +706,20 @@ def result(conn, user_id, paper_id):
                 "score": None
                 if any(
                     r["points"] is None
-                    for r in rows
+                    for r in counted
                     if r["snapshot"]["subject"] == subject
                 )
                 else sum(
-                    r["points"] for r in rows if r["snapshot"]["subject"] == subject
+                    r["points"] for r in counted if r["snapshot"]["subject"] == subject
                 ),
                 "graded_points": sum(
                     r["points"] or 0
-                    for r in rows
+                    for r in counted
                     if r["snapshot"]["subject"] == subject
                 ),
                 "max_points": sum(
                     r["snapshot"]["max_points"]
-                    for r in rows
+                    for r in counted
                     if r["snapshot"]["subject"] == subject
                 ),
             }
@@ -618,9 +729,12 @@ def result(conn, user_id, paper_id):
         "attempt_id": attempt["id"],
         "status": "pending_review" if pending else "graded",
         "pending": pending,
-        "score": None if pending else sum(r["points"] for r in rows),
-        "graded_points": sum(r["points"] or 0 for r in rows),
-        "max_points": sum(r["snapshot"]["max_points"] for r in rows),
+        "score": None if pending else sum(r["points"] for r in counted),
+        "graded_points": sum(r["points"] or 0 for r in counted),
+        "max_points": excluded["max_points"],
+        "nominal_max_points": excluded["nominal_max_points"],
+        "includes_reused": any(reused.values()),
+        "excluded": {"question_ids": excluded["question_ids"], "points": excluded["excluded_points"]},
         "answers": [
             {
                 "question_id": r["question_id"],
@@ -641,6 +755,8 @@ def result(conn, user_id, paper_id):
                 ),
                 "evidence": r["snapshot"]["evidence"],
                 "rubric": r["snapshot"]["rubric"],
+                "excluded": r["question_id"] in reported,
+                "reused": bool(reused.get(r["question_id"])),
             }
             for r in rows
         ],

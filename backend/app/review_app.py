@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from app import candidate_review as service
 from app.source_intake import isolated_db
-from app.training_spec import COUNTS, SUBJECTS, validate_items
+from app.training_spec_v2 import COUNTS, SUBJECTS, validate_items
 
 app = FastAPI(
     title="私有候选题审核（非生产）", docs_url=None, redoc_url=None, openapi_url=None

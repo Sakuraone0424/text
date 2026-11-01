@@ -116,8 +116,8 @@ def test_pending_grade_custom_confirmation_and_truthful_chart(live_app, browser)
     page.locator("#cancel-submit").click()
     assert client.get(f"/v2/papers/{pid}").json()["timing"]["status"] == "in_progress"
     confirm_submission(page)
-    expect(page.locator(".grade-title").first).to_have_text("1题待批改")
-    expect(page.locator(".grade-ring")).to_have_attribute("aria-label", "已判分27/28题，待批1题")
+    expect(page.locator(".grade-title").first).to_have_text("1题待判分")
+    expect(page.locator(".grade-ring")).to_have_attribute("aria-label", "已判分27/28题，待判分1题")
     result = client.get(f"/v2/papers/{pid}/result").json()
     assert result["score"] is None and result["pending"] == 1
     repeated = client.post(f"/v2/papers/{pid}/submit", json={"expected_version": 0}).json()
@@ -137,17 +137,26 @@ def test_dashboard_data_denominators_and_no_fake_trend(live_app, browser):
     client, _, _ = live_app
     page = browser.new_page(viewport={"width": 1440, "height": 900})
     # Explicit synthetic transport fixtures test display arithmetic; never persisted or shipped as product defaults.
-    history = {"legacy": [{"score": 60}], "training": [{"paper_date": "2026-10-27", "score": 120}, {"paper_date": "2026-10-26", "score": None}, {"paper_date": "2026-10-25", "score": 90}]}
+    history = {"legacy": [{"score": 60}], "training": [
+        {"paper_date": "2026-10-27", "score": 120, "mode": "reviewed_60", "max_points": 150},
+        {"paper_date": "2026-10-26", "score": None, "mode": "reviewed_60", "max_points": 150},
+        {"paper_date": "2026-10-25", "score": 90, "mode": "reviewed_60", "max_points": 150},
+        {"paper_date": "2026-10-20", "score": 100, "mode": "reviewed_28", "max_points": 150},
+        {"paper_date": "2026-10-19", "score": 80, "mode": "reviewed_28", "max_points": 150}]}
     page.route("**/v2/history", lambda route: route.fulfill(json=history))
     page.route("**/v2/stats/weekly", lambda route: route.fulfill(json={"chapters": [{"subject": "biochemistry", "chapter": "合成统计章节", "graded_points": 3, "graded_max_points": 6, "pending": 2, "answers": 4}]}))
     page.goto(str(client.base_url).rstrip("/"))
     page.locator("#password").fill("test-live-login"); page.locator("#login button").click()
-    expect(page.locator("#metric-submitted")).to_have_text("3")
-    expect(page.locator("#metric-graded")).to_have_text("2")
+    expect(page.locator("#metric-submitted")).to_have_text("5")
+    expect(page.locator("#metric-graded")).to_have_text("4")
     expect(page.locator("#subject-performance")).to_contain_text("3 / 6分 · 50%")
-    expect(page.locator("#subject-performance")).to_contain_text("2题待批")
+    expect(page.locator("#subject-performance")).to_contain_text("2题待判分")
     expect(page.locator("#score-trend svg")).to_have_count(1)
     expect(page.locator("#score-trend")).to_contain_text("90/150分")
+    expect(page.locator("#score-trend")).not_to_contain_text("80/150分")  # old 28-question papers are a separate chart
+    expect(page.locator("#score-trend-legacy-card")).to_be_visible()
+    expect(page.locator("#score-trend-legacy svg")).to_have_count(1)
+    expect(page.locator("#score-trend-legacy")).to_contain_text("80/150分")
     assert "60/150" not in page.locator("#score-trend").inner_text()
     page.close()
 

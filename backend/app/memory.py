@@ -30,6 +30,8 @@ def record_failure(conn, attempt_id, question_id):
     )
     if not answered or row["points"] is None or row["points"] >= row["max_points"]:
         return
+    if conn.execute("SELECT 1 FROM question_reports WHERE user_id=%s AND question_id=%s", (uid, question_id)).fetchone():
+        return  # the learner reported this question: no review card for it
     conn.execute(
         "INSERT INTO fsrs_cards(user_id,question_id,card,due) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
         (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now),
@@ -95,6 +97,8 @@ def due(conn, user_id):
         "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem, "
         "q.content->>'question_type' AS question_type,q.content->'options' AS options "
         "FROM fsrs_cards c JOIN reviewed_questions q ON q.id=c.question_id "
-        "WHERE c.user_id=%s AND c.due<=clock_timestamp() ORDER BY c.due,c.question_id",
+        "WHERE c.user_id=%s AND c.due<=clock_timestamp() "
+        "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.user_id=c.user_id AND qr.question_id=c.question_id) "
+        "ORDER BY c.due,c.question_id",
         (user_id,),
     ).fetchall()

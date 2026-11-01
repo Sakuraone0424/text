@@ -8,6 +8,7 @@ import sys
 import signal
 import shutil
 from app.model_router import authorized
+from app.ai_jobs import extended_limits
 
 
 def prepare_private_home(root, job_id):
@@ -90,7 +91,7 @@ def execute(job):
             try:
                 out, _ = process.communicate(
                     json.dumps(job, default=str),
-                    timeout=420 if ("review_campaign" in job["settings_snapshot"] or "qa_automation" in job["settings_snapshot"]) else 150,
+                    timeout=420 if extended_limits(job["settings_snapshot"]) else 150,
                 )
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -104,7 +105,7 @@ def execute(job):
             pass  # Never lose a completed provider result to cache housekeeping.
     if returncode:
         raise RuntimeError("harness_task_failed")
-    if len(out.encode()) > (1048576 if ("review_campaign" in job["settings_snapshot"] or "qa_automation" in job["settings_snapshot"]) else 131072):
+    if len(out.encode()) > (1048576 if extended_limits(job["settings_snapshot"]) else 131072):
         raise ValueError("oversized_harness_response")
     result = json.loads(out)
     if result.get("provider_error"):

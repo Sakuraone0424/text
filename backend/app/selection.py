@@ -39,7 +39,8 @@ def snapshot(conn, user_id, questions, as_of=None):
         "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
         "LEFT JOIN LATERAL (SELECT graded_at FROM grading_events WHERE attempt_id=a.attempt_id AND question_id=a.question_id ORDER BY id DESC LIMIT 1) g ON true "
-        "WHERE p.user_id=%s AND a.points IS NOT NULL AND COALESCE(g.graded_at,t.submitted_at)<=%s",
+        "WHERE p.user_id=%s AND a.points IS NOT NULL AND COALESCE(g.graded_at,t.submitted_at)<=%s "
+        "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id)",
         (user_id, as_of),
     ).fetchall()
     reflection_rows = conn.execute(

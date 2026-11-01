@@ -192,3 +192,12 @@ def running(db, bank, blueprint):
     paper = q.create_paper(db, uid, blueprint)
     sessions.start(db, uid, paper["paper_id"])
     return uid, q.load_paper(db, uid, paper["paper_id"])
+
+
+@pytest.fixture(autouse=True)
+def photo_answers_for_legacy_tests(monkeypatch):
+    """Photo answers are off in production; the older tests exercise the upload path.
+
+    Tests of the default behaviour delete this variable themselves.
+    """
+    monkeypatch.setenv("QUIZ_PHOTO_ANSWERS_ENABLED", "1")

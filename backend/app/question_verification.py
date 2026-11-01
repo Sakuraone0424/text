@@ -70,7 +70,7 @@ def report(conn, user_id, paper_id):
             "ocr_excerpt_recorded": bool(refs),
             "ocr_quote_matches_stored_text": bool(refs) and all(quote_matches),
             "book_metadata_pending": bibliography_pending,
-            "independent_ai_science_and_answer_review": automatic,
+            "independent_ai_review": automatic,
             "review_audit_record_matches_current_question": audit_match,
             "printed_original_book_page_verified": None,
             "official_exam_original_verified": None,

@@ -17,7 +17,7 @@ def test_owner_can_read_verification_only_after_submission(client, db, running, 
     assert len(payload["items"]) == 28
     assert all(item["ocr_quote_matches_stored_text"] for item in payload["items"])
     assert all(item["review_audit_record_matches_current_question"] for item in payload["items"])
-    assert all(not item["independent_ai_science_and_answer_review"] for item in payload["items"])
+    assert all(not item["independent_ai_review"] for item in payload["items"])
     assert all(item["printed_original_book_page_verified"] is None for item in payload["items"])
     assert all(item["official_exam_original_verified"] is None for item in payload["items"])
     monkeypatch.setenv("QUIZ_USERNAME", "unauthorized-user")

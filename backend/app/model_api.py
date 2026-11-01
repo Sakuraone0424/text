@@ -291,6 +291,14 @@ def billing(name=Depends(require_auth)):
     return operation(name, summary)
 
 
+@router.get("/spend")
+def spend(name=Depends(require_auth)):
+    """Today / this month, per-call tokens and cost, caps, and the average cost per admitted question."""
+    from app.cost_control import spend_report
+
+    return operation(name, spend_report)
+
+
 @router.post("/prices/refresh")
 def refresh_cny_prices(request: Request, name=Depends(require_auth)):
     origin(request)

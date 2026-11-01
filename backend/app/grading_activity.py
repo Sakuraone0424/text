@@ -42,6 +42,36 @@ def try_queue(conn, user_id, paper_id):
     return {"queued": bool(jobs), "jobs": len(jobs), "reason": None if jobs else "no_eligible_text_answers"}
 
 
+def pending_reason(points, job, photo_pending, queue_allowed, queue_why):
+    """Why an answer has no score yet. A pending answer is never a zero."""
+    if points is not None:
+        return {"pending_reason": None, "pending_detail": None}
+    detail = None
+    if photo_pending:
+        reason = "photo_answers_not_supported"
+    elif job is None:
+        reason = "waiting_to_be_queued" if queue_allowed else queue_why
+    elif job["state"] in ("pending", "retrying"):
+        reason = "queued_for_ai_grading"
+    elif job["state"] == "running":
+        reason = "ai_grading_in_progress"
+    elif job["state"] == "succeeded":
+        reason = "ai_result_being_applied"
+    elif job["error_code"] in ("budget_exceeded", "daily_budget_exceeded", "monthly_budget_exceeded"):
+        reason = "ai_budget_exhausted"
+    elif job["error_code"] == "automation_stopped":
+        reason = "ai_grading_stopped"
+    elif job["error_code"] == "answer_too_long_for_automatic_grading":
+        reason = "answer_too_long_for_automatic_grading"
+    elif job["error_code"] == "invalid_or_uncertain_result":
+        # The first uncertain result is re-assessed once automatically; this is the final one.
+        reason = "uncertain_after_second_assessment" if job["job_key"].endswith(":reassessment") else "reassessing"
+        detail = job["detail"]
+    else:
+        reason = "ai_grading_failed"
+    return {"pending_reason": reason, "pending_detail": detail}
+
+
 def progress(conn, user_id, paper_id):
     owner = conn.execute(
         "SELECT p.id FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id "
@@ -57,7 +87,8 @@ def progress(conn, user_id, paper_id):
         (paper_id,),
     ).fetchall()
     jobs = conn.execute(
-        "SELECT id,state,error_code,attempts,started_at,finished_at,"
+        "SELECT id,state,error_code,attempts,started_at,finished_at,job_key,"
+        "left(result #>> '{response,explanation}',300) AS detail,"
         "payload->>'question_id' AS question_id FROM ai_jobs "
         "WHERE user_id=%s AND kind='grading' AND payload->>'paper_id'=%s "
         "ORDER BY id DESC",
@@ -67,11 +98,15 @@ def progress(conn, user_id, paper_id):
     for job in jobs:
         recent.setdefault(str(job["question_id"]), job)
     allowed, why = auto_queue_allowed(conn, user_id)
+    reported = {
+        r["question_id"]
+        for r in conn.execute("SELECT question_id FROM question_reports WHERE paper_id=%s", (paper_id,)).fetchall()
+    }
     questions = []
     pending = 0
     for row in rows:
         job = recent.get(str(row["question_id"]))
-        if row["points"] is None:
+        if row["points"] is None and row["question_id"] not in reported:
             pending += 1
         # Images remain pending until a VERIFIED vision pipeline has transcribed
         # and independently checked them. Never fabricate recognition or score.
@@ -84,12 +119,18 @@ def progress(conn, user_id, paper_id):
             row["points"] is None and isinstance(answer_data, dict)
             and answer_data.get("image_ids") and job is None
         )
+        reason = (
+            {"pending_reason": None, "pending_detail": None}
+            if row["question_id"] in reported
+            else pending_reason(row["points"], job, photo_pending, allowed, why)
+        )
         # No answer text, handwritten image bytes, private prompt or raw logs.
         questions.append({
             "position": row["position"],
             "question_id": row["question_id"],
             "question_type": row["question_type"],
-            "state": "graded" if row["points"] is not None else (
+            "excluded": row["question_id"] in reported,
+            "state": "excluded" if row["question_id"] in reported else "graded" if row["points"] is not None else (
                 (job["state"] if job else "vision_pipeline_unavailable" if photo_pending else "pending_automatic_queue")
             ),
             "points": row["points"],
@@ -101,11 +142,12 @@ def progress(conn, user_id, paper_id):
             "error_code": job["error_code"] if job else (
                 "verified_handwriting_recognition_required" if photo_pending else None
             ),
+            **reason,
         })
     return {
         "paper_id": paper_id,
         "total": len(rows),
-        "graded": len(rows) - pending,
+        "graded": len(rows) - pending - len(reported & {r["question_id"] for r in rows if r["points"] is None}),
         "pending": pending,
         "complete": pending == 0,
         "auto_queue_available": allowed,

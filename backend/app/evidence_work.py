@@ -396,7 +396,7 @@ def stored_work_version(conn):
 def progress(conn):
     from app.ocr_sources import review_snapshot
     from app.source_policy import current_source_sql
-    from app.training_spec import COUNTS, SUBJECTS
+    from app.training_spec_v2 import COUNTS, SUBJECTS
 
     units = conn.execute(
         "SELECT u.*,d.metadata,d.sha256 FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE "

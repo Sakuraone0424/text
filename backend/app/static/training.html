@@ -157,16 +157,24 @@
                 已判分满分。包含未答0分，排除待批题；不等同知识掌握率。
               </p>
             </section>
+            <p id="quota-banner" class="notice" role="status" hidden></p>
             <section class="card trend-card">
               <div class="card-heading">
                 <h2>成绩趋势</h2>
-                <span class="muted small">最近完整判分试卷</span>
+                <span class="muted small">60 题 · 最近完整判分试卷</span>
               </div>
               <div id="score-trend" class="empty-state">
                 <span class="empty-icon" aria-hidden="true">↗</span
                 ><strong>让进步留下轨迹</strong>
                 <p>完成考试后查看成绩趋势。</p>
               </div>
+            </section>
+            <section class="card trend-card" id="score-trend-legacy-card" hidden>
+              <div class="card-heading">
+                <h2>旧版成绩趋势</h2>
+                <span class="muted small">28 题 · 旧版</span>
+              </div>
+              <div id="score-trend-legacy" class="empty-state"></div>
             </section>
             <section class="card weak-card">
               <div class="card-heading">
@@ -288,7 +296,7 @@
               <p class="eyebrow">LEARNING ANALYTICS</p>
               <h1>用数据，看清下一步。</h1>
               <p class="muted">
-                已判分与待批改分别统计，不把待批题算成对或错。
+                已判分与待判分分别统计，不把待批题算成对或错。
               </p>
             </div>
           </div>
@@ -374,7 +382,7 @@
       <h2 id="submit-title">准备交卷了吗？</h2>
       <p id="submit-summary"></p>
       <p class="muted">
-        交卷后不能修改。未答题按0分，已答主观题保留待批改；系统不会编造完整总成绩。
+        交卷后不能修改。未答题按0分，已答主观题由AI判分，判完前不显示总成绩；系统不会编造成绩。
       </p>
       <div class="button-row">
         <button id="cancel-submit" class="secondary">继续检查</button

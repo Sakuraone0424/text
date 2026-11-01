@@ -1,19 +1,43 @@
 """Bounded supplementation from current AI-verified knowledge, never quota padding."""
 
 import json
+import random
+import re
+from collections import defaultdict
+
+from pydantic import Field, StrictInt
 
 from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
 from app.source_policy import (
     current_source_sql, FILES, pinned_source_bytes, pinned_science_evidence
 )
 from app.candidate_review import snapshot_unit, create_packet
-from app.question_quality import Question, AXES
+from app.question_quality import Question, AXES, StrictModel
 from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
 from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
+from app import cost_control, past_exam_import
 
 STARTUP_RESERVE_DAYS = 2  # 60 questions/day, 120 verified candidates per user
+# A paragraph already written from is worth this fraction of a fresh one.
+USED_PARAGRAPH_WEIGHT = 0.2
+ANCHOR_PARAGRAPH_MIN_CHARS = 120
+ANCHOR_PARAGRAPH_MAX_CHARS = 3000
+GAP_ATTEMPTS_PER_BUCKET = 8
+
+
+class DistractorCheck(StrictModel):
+    unit_id: StrictInt = Field(ge=1)
+    excerpt: str = Field(min_length=5, max_length=2000)
+    why_wrong: str = Field(min_length=10, max_length=1000)
+
+
+class ChoiceDraft(StrictModel):
+    """Single-choice output: the question plus textbook proof for each distractor."""
+
+    question: Question
+    distractor_checks: dict[str, DistractorCheck]
 
 
 def eligible_verified_reserve(conn, rows):
@@ -176,13 +200,15 @@ def generation_payload_within_limit(payload):
     return len(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()) <= 24000
 
 
-def bounded_textbook_evidence(conn, primary, kind):
-    """Expand a 9-point mechanism question only with same-book clean units.
+def bounded_textbook_evidence(conn, primary, kind=None):
+    """The anchor paragraph plus nearby clean ones of the same book and chapter.
 
-    Metadata/byte integrity is checked again during scientific review;
-    proximity is contextual evidence, never scientific approval.
+    Hard ceiling for every question type: at most MAX_EVIDENCE_UNITS paragraphs
+    and MAX_EVIDENCE_CHARS characters. The model never receives a whole book.
+    Proximity is context, never scientific approval; integrity is checked again
+    during scientific review.
     """
-    if kind != "short_answer" or primary["chapter"] in ("", "unclassified", "contents"):
+    if primary["chapter"] in ("", "unclassified", "contents"):
         return [primary]
     candidates = conn.execute(
         "SELECT u.id FROM source_units u "
@@ -190,11 +216,13 @@ def bounded_textbook_evidence(conn, primary, kind):
         "WHERE u.document_id=anchor.document_id AND u.chapter=anchor.chapter "
         "AND u.id<>anchor.id AND u.quality_flags='[]'::jsonb "
         "AND length(u.text) BETWEEN 80 AND 4000 "
-        "ORDER BY abs(u.ordinal-anchor.ordinal),u.ordinal,u.id LIMIT 4",
+        "ORDER BY abs(u.ordinal-anchor.ordinal),u.ordinal,u.id LIMIT 8",
         (primary["unit_id"],),
     ).fetchall()
     snapshots = [primary]
     for item in candidates:
+        if len(snapshots) >= past_exam_import.MAX_EVIDENCE_UNITS:
+            break
         try:
             other = snapshot_unit(conn, item["id"])
         except ValueError:
@@ -208,11 +236,12 @@ def bounded_textbook_evidence(conn, primary, kind):
             or not pinned_source_bytes(other["file_id"], other["source_sha256"])
         ):
             continue
-        if sum(len(v["text"]) for v in snapshots) + len(other["text"]) > 7000:
+        if (
+            sum(len(v["text"]) for v in snapshots) + len(other["text"])
+            > past_exam_import.MAX_EVIDENCE_CHARS
+        ):
             continue
         snapshots.append(other)
-        if len(snapshots) >= 3:
-            break
     return snapshots
 
 
@@ -237,38 +266,103 @@ def balanced_generation_buckets(attempts):
     )
 
 
+def generation_attempts(conn, uid):
+    """Question-writing requests so far per (subject, type); past-exam jobs excluded."""
+    return {
+        (r["subject"], r["question_type"]): r["n"]
+        for r in conn.execute(
+            "SELECT payload->>'subject' AS subject,"
+            "payload->>'question_type' AS question_type,count(*) AS n "
+            "FROM ai_jobs WHERE user_id=%s AND kind='generation' "
+            "AND COALESCE(payload->>'origin','')<>'past_exam' GROUP BY 1,2", (uid,),
+        ).fetchall()
+    }
+
+
+def eligible_reserve_count(conn, uid, subject, kind):
+    # A merely "ready" state does not prove current science/answer
+    # review, publication or v2 scoring compatibility.
+    eligible = conn.execute(
+        "SELECT q.id,q.content FROM auto_question_states s "
+        "JOIN reviewed_questions q ON q.id=s.question_id "
+        "WHERE s.status='ready' AND q.status='published' "
+        "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
+        "AND q.content->>'max_points'=%s AND "
+        "(NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
+        "WHERE i.question_id=q.id AND p.user_id=%s) "
+        "OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id "
+        "AND f.user_id=%s AND f.due<=clock_timestamp()))",
+        (subject, kind, str(POINTS[kind]), uid, uid),
+    ).fetchall()
+    return eligible_verified_reserve(conn, eligible)
+
+
+def assemble_payload(conn, subject, kind, primary, anchor_quote, style_concept):
+    """Everything ONE question-writing request carries; None if it cannot be built safely."""
+    if len(primary["text"]) > past_exam_import.MAX_EVIDENCE_CHARS:
+        return None
+    # Bootstrap directly from the user's genuine past-exam transcript, rather
+    # than requiring an earlier hand-created candidate packet. Question
+    # boundaries must be recognized and text/image risks resolved before using
+    # an item as style.
+    style = select_exam_style(conn, subject, kind, style_concept)
+    if not style:
+        return None
+    try:
+        style_units = [snapshot_unit(conn, sid) for sid in style["style_unit_ids"]]
+    except ValueError:
+        return None
+    if any(
+        st["source_kind"] != "exam_transcription"
+        or st["subject"] != subject
+        or set(st["quality_flags"]) & STYLE_SOURCE_BLOCKERS
+        # A newer/overwritten DOCX with the same Drive ID must not become an AI
+        # style anchor merely by being current in SQL; only the exact
+        # user-locked genuine-exam bytes are allowed.
+        or not pinned_source_bytes(st["file_id"], st["source_sha256"])
+        for st in style_units
+    ):
+        return None
+    try:
+        book = source_bibliography(conn, primary)
+    except ValueError:
+        # Unknown author/edition or a changed source checksum must never be
+        # replaced by an invented bibliographic label.
+        return None
+    payload = dict(
+        subject=subject,
+        question_type=kind,
+        max_points=POINTS[kind],
+        evidence=bounded_textbook_evidence(conn, primary, kind),
+        anchor_exact_excerpt=anchor_quote,
+        style=style_units,
+        style_year=style["year"],
+        style_overlap=style["lexical_topic_overlap"],
+        source_bibliography=book,
+        schema=(ChoiceDraft if kind == "single_choice" else Question).model_json_schema(),
+        instructions=exam_instructions(kind, POINTS[kind])
+        + " For at least one citation, copy anchor_exact_excerpt EXACTLY "
+        "into its evidence.excerpt field with identical characters, "
+        "punctuation and spacing; do not paraphrase or retype it. "
+        "Other excerpt strings, if present, must be literal substrings "
+        "of their matching evidence unit. Never use this anchor as "
+        "proof for any answer or rubric claim it does not support.",
+    )
+    # A source/style packet can exceed the job admission limit. Skip it and
+    # try another genuine evidence unit rather than retrying the same
+    # ValueError on every planner tick.
+    return payload if generation_payload_within_limit(payload) else None
+
+
 def plan(conn, uid):
     existing = conn.execute(
-        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND state IN ('pending','running','retrying')"
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' AND state IN ('pending','running','retrying')"
     ).fetchone()["n"]
     if existing >= 2:
         return
-    rows = conn.execute(
-        "SELECT payload->>'subject' AS subject,"
-        "payload->>'question_type' AS question_type,count(*) AS n "
-        "FROM ai_jobs WHERE user_id=%s AND kind='generation' "
-        "GROUP BY 1,2", (uid,),
-    ).fetchall()
-    attempts = {
-        (r["subject"], r["question_type"]): r["n"] for r in rows
-    }
-    for subject, kind, required in balanced_generation_buckets(attempts):
-        # A merely "ready" state does not prove current science/answer
-        # review, publication or v2 scoring compatibility.
-        eligible = conn.execute(
-            "SELECT q.id,q.content FROM auto_question_states s "
-            "JOIN reviewed_questions q ON q.id=s.question_id "
-            "WHERE s.status='ready' AND q.status='published' "
-            "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
-            "AND q.content->>'max_points'=%s AND "
-            "(NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
-            "WHERE i.question_id=q.id AND p.user_id=%s) "
-            "OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id "
-            "AND f.user_id=%s AND f.due<=clock_timestamp()))",
-            (subject, kind, str(POINTS[kind]), uid, uid),
-        ).fetchall()
-        count = eligible_verified_reserve(conn, eligible)
-        if count >= required * STARTUP_RESERVE_DAYS:
+    for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
+        count = eligible_reserve_count(conn, uid, subject, kind)
+        if count >= cost_control.reserve_target(required, STARTUP_RESERVE_DAYS):
             continue
         # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
         concepts = conn.execute(
@@ -301,61 +395,191 @@ def plan(conn, uid):
                 "SELECT 1 FROM ai_jobs WHERE job_key=%s", (key,)
             ).fetchone():
                 continue
-            # Bootstrap directly from the user's genuine past-exam
-            # transcript, rather than requiring an earlier hand-created
-            # candidate packet. Question boundaries must be recognized and
-            # text/image risks resolved before using an item as style.
-            style = select_exam_style(conn, subject, kind, concept)
-            if not style:
-                continue
-            style_units = [snapshot_unit(conn, sid) for sid in style["style_unit_ids"]]
-            if any(
-                st["source_kind"] != "exam_transcription"
-                or st["subject"] != subject
-                or set(st["quality_flags"]) & STYLE_SOURCE_BLOCKERS
-                or not pinned_source_bytes(st["file_id"], st["source_sha256"])
-                for st in style_units
-            ):
-                continue
-            s = style_units[0]
-            if not pinned_source_bytes(s["file_id"], s["source_sha256"]):
-                # A newer/overwritten DOCX with the same Drive ID must not
-                # become an AI style anchor merely by being current in SQL.
-                # Only the exact user-locked genuine-exam bytes are allowed.
-                continue
-            try:
-                book = source_bibliography(conn, u)
-            except ValueError:
-                # Unknown author/edition or a changed source checksum must
-                # never be replaced by an invented bibliographic label.
-                continue
-            payload = dict(
-                subject=subject,
-                question_type=kind,
-                max_points=POINTS[kind],
-                evidence=bounded_textbook_evidence(conn, u, kind),
-                anchor_exact_excerpt=anchor_quote,
-                style=style_units,
-                style_year=style["year"],
-                style_overlap=style["lexical_topic_overlap"],
-                source_bibliography=book,
-                schema=Question.model_json_schema(),
-                instructions=exam_instructions(kind, POINTS[kind])
-                + " For at least one citation, copy anchor_exact_excerpt EXACTLY "
-                "into its evidence.excerpt field with identical characters, "
-                "punctuation and spacing; do not paraphrase or retype it. "
-                "Other excerpt strings, if present, must be literal substrings "
-                "of their matching evidence unit. Never use this anchor as "
-                "proof for any answer or rubric claim it does not support.",
-            )
-            # A source/style packet can exceed the job admission limit.
-            # Skip it and try another genuine evidence unit rather than
-            # retrying the same ValueError on every 10-second planner tick.
-            if not generation_payload_within_limit(payload):
+            payload = assemble_payload(conn, subject, kind, u, anchor_quote, concept)
+            if payload is None:
                 continue
             enqueue(conn, uid, key, "generation", payload)
             return
 
+
+# --------------------------------------------------------------------------
+# Gap-driven planning: no corpus-wide sweep, one paragraph per request
+# --------------------------------------------------------------------------
+
+
+def _count_by_bucket(conn, sql, params=()):
+    return {(r["s"], r["t"]): r["n"] for r in conn.execute(sql, params).fetchall()}
+
+
+def bucket_gaps(conn, uid):
+    """Buckets still short of the two-day reserve, in fair-attempt order.
+
+    Supply already on its way is deducted so the planner never over-orders:
+    questions being reviewed or repaired, unfinished writing requests, and for
+    term/short answer the past-exam items not yet turned into questions.
+    """
+    pipeline = _count_by_bucket(
+        conn,
+        "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,count(*) AS n "
+        "FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+        "WHERE st.status IN ('candidate','checking','repairing') GROUP BY 1,2",
+    )
+    inflight = _count_by_bucket(
+        conn,
+        "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,count(*) AS n FROM ai_jobs "
+        "WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' "
+        "AND dispatched_at IS NULL AND state IN ('pending','running','retrying','succeeded') GROUP BY 1,2",
+    )
+    past = _count_by_bucket(
+        conn,
+        "SELECT subject AS s,question_type AS t,count(*) AS n FROM past_exam_items "
+        "WHERE status IN ('imported','queued') AND question_type IN ('term','short_answer') GROUP BY 1,2",
+    )
+    gaps = []
+    for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
+        key = (subject, kind)
+        gap = (
+            cost_control.reserve_target(required, STARTUP_RESERVE_DAYS)
+            - eligible_reserve_count(conn, uid, subject, kind)
+            - pipeline.get(key, 0) - inflight.get(key, 0) - past.get(key, 0)
+        )
+        if gap > 0:
+            gaps.append((subject, kind, gap))
+    return gaps
+
+
+def paragraph_pool(conn, subject):
+    """Clean, pinned textbook paragraphs a question may be written from."""
+    pinned = {}
+    pool = []
+    for row in conn.execute(
+        "SELECT u.id,u.chapter,d.file_id,d.sha256 FROM source_units u "
+        "JOIN source_documents d ON d.id=u.document_id WHERE "
+        + current_source_sql("d", kind="textbook")
+        + " AND d.subject=%s AND u.quality_flags='[]'::jsonb "
+        "AND u.chapter NOT IN ('','unclassified','contents') AND length(u.text) BETWEEN %s AND %s "
+        "ORDER BY u.id",
+        (subject, ANCHOR_PARAGRAPH_MIN_CHARS, ANCHOR_PARAGRAPH_MAX_CHARS),
+    ).fetchall():
+        ok = pinned.setdefault((row["file_id"], row["sha256"]), pinned_source_bytes(row["file_id"], row["sha256"]))
+        if ok:
+            pool.append(dict(unit_id=row["id"], chapter_key=f"{row['file_id']}|{row['chapter']}"))
+    return pool
+
+
+def used_paragraphs(conn):
+    """How many questions were already written from each paragraph."""
+    return {
+        r["unit"]: r["n"]
+        for r in conn.execute(
+            "SELECT unit,count(*) AS n FROM ("
+            " SELECT (payload->'evidence'->0->>'unit_id')::bigint AS unit FROM ai_jobs "
+            " WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam'"
+            " UNION ALL"
+            " SELECT substring(k from 6)::bigint FROM question_origins o,"
+            " jsonb_array_elements_text(o.concept_keys) k WHERE o.origin='past_exam' AND k LIKE 'unit:%'"
+            ") t WHERE unit IS NOT NULL GROUP BY unit"
+        ).fetchall()
+    }
+
+
+def chapter_weights(pool, frequency, used):
+    """Chapter weight = exam frequency, discounted by what it already supplied.
+
+    Frequently examined chapters come first; as questions accumulate from a
+    chapter its weight falls, so coverage spreads instead of repeating one area.
+    """
+    by_chapter = defaultdict(list)
+    for item in pool:
+        by_chapter[item["chapter_key"]].append(item["unit_id"])
+    weights = {
+        ck: (1 + frequency.get(ck, 0)) / (1 + sum(used.get(u, 0) for u in units))
+        for ck, units in by_chapter.items()
+    }
+    return by_chapter, weights
+
+
+def pick_paragraph(by_chapter, weights, used, rng, skip=()):
+    """Weighted choice: chapter by examined frequency, then a less-used paragraph."""
+    chapters = sorted(c for c, units in by_chapter.items() if any(u not in skip for u in units))
+    if not chapters:
+        return None
+    chapter = rng.choices(chapters, weights=[weights[c] for c in chapters])[0]
+    units = sorted(u for u in by_chapter[chapter] if u not in skip)
+    return rng.choices(units, weights=[USED_PARAGRAPH_WEIGHT ** used.get(u, 0) for u in units])[0]
+
+
+def anchor_sentence(text):
+    """The longest sentence-sized literal span of a paragraph (never rewritten)."""
+    parts = [x.strip() for x in re.split(r"(?<=[。！？；;])|\n", text) if x]
+    parts = [x for x in parts if 20 <= len(x) <= 300]
+    return max(parts, key=len) if parts else None
+
+
+def _enqueue_gap(conn, uid, subject, kind):
+    if not select_exam_style(conn, subject, kind):
+        return None  # no clean genuine past question of this type to imitate
+    pool = paragraph_pool(conn, subject)
+    if not pool:
+        return None
+    used = used_paragraphs(conn)
+    by_chapter, weights = chapter_weights(pool, past_exam_import.chapter_frequency(conn, subject), used)
+    prior = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE user_id=%s AND kind='generation' "
+        "AND payload->>'subject'=%s AND payload->>'question_type'=%s",
+        (uid, subject, kind),
+    ).fetchone()["n"]
+    rng = random.Random(f"gap:{uid}:{subject}:{kind}:{prior}")
+    skip = set()
+    for _ in range(GAP_ATTEMPTS_PER_BUCKET):
+        unit_id = pick_paragraph(by_chapter, weights, used, rng, skip)
+        if unit_id is None:
+            return None
+        skip.add(unit_id)
+        try:
+            primary = snapshot_unit(conn, unit_id)
+        except ValueError:
+            continue
+        anchor = anchor_sentence(primary["text"])
+        if (
+            anchor is None
+            or primary["source_kind"] != "textbook"
+            or primary["subject"] != subject
+            or primary["quality_flags"]
+            or not pinned_source_bytes(primary["file_id"], primary["source_sha256"])
+        ):
+            continue
+        key = f"gap:{subject}:{kind}:{unit_id}:{primary['unit_sha256'][:16]}"
+        if conn.execute("SELECT 1 FROM ai_jobs WHERE job_key=%s", (key,)).fetchone():
+            continue
+        payload = assemble_payload(
+            conn, subject, kind, primary, anchor,
+            {"unit_id": unit_id, "relation": {"name": primary["chapter"]}},
+        )
+        if payload is not None:
+            return enqueue(conn, uid, key, "generation", payload)
+    return None
+
+
+def plan_gap(conn, uid):
+    """Queue one question-writing request for the largest uncovered bucket.
+
+    Independent of AI_FULL_CORPUS_ENABLED: nothing here reads the corpus
+    through a model. Each request carries one weighted-random paragraph and a
+    few neighbours (hard caps in past_exam_import), nothing more.
+    """
+    active = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' "
+        "AND COALESCE(payload->>'origin','')<>'past_exam' AND state IN ('pending','running','retrying')"
+    ).fetchone()["n"]
+    if active >= 2:
+        return None
+    past_exam_import.index_item_chapters(conn)
+    for subject, kind, _ in bucket_gaps(conn, uid):
+        job = _enqueue_gap(conn, uid, subject, kind)
+        if job:
+            return job
+    return None
 
 
 def repair_source_identity_from_locked_units(raw_question, units):
@@ -435,6 +659,35 @@ def drop_unlisted_criterion_tags(raw_question):
     return {**raw_question, "rubric": fixed} if changed else raw_question
 
 
+def attach_distractor_proof(q, response, payload):
+    """Single choice: every wrong option needs a verbatim textbook refutation.
+
+    The refuting excerpts become part of the question's cited evidence, so the
+    independent reviewers receive exactly the text that is claimed to refute
+    each distractor.
+    """
+    raw = response.get("distractor_checks") if isinstance(response, dict) else None
+    if not isinstance(raw, dict):
+        raise ValueError("distractor_checks_required")
+    checks = {k: DistractorCheck.model_validate(v) for k, v in raw.items()}
+    if set(checks) != set("ABCD") - {q.answer}:
+        raise ValueError("distractor_checks_must_cover_every_wrong_option")
+    units = {u["unit_id"]: u for u in payload["evidence"]}
+    evidence = [e.model_dump() for e in q.evidence]
+    have = {(e["source_unit_id"], e["excerpt"]) for e in evidence}
+    for letter in sorted(checks):
+        check = checks[letter]
+        unit = units.get(check.unit_id)
+        if unit is None:
+            raise ValueError("unrequested_source")
+        if check.excerpt not in unit["text"]:
+            raise ValueError("invented_or_unmatched_quote")
+        if (check.unit_id, check.excerpt) not in have:
+            have.add((check.unit_id, check.excerpt))
+            evidence.append(past_exam_import.evidence_record(unit, payload["source_bibliography"], check.excerpt))
+    return Question.model_validate({**q.model_dump(), "evidence": evidence}), checks
+
+
 def accept(conn, job):
     if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
         raise ValueError("actual_generation_call_required")
@@ -498,6 +751,9 @@ def accept(conn, job):
         p["max_points"],
     ):
         raise ValueError("generated_quota_mismatch")
+    distractors = None
+    if q.question_type == "single_choice":
+        q, distractors = attach_distractor_proof(q, response, p)
     structural_issues = exam_issues(q)
     if structural_issues:
         raise ValueError("generated_question_quality_gate_failed:" + ",".join(structural_issues))
@@ -540,11 +796,23 @@ def accept(conn, job):
             uncertainties=["Requires new independent scientific and answer rounds"],
             rubric_evidence=[
                 dict(
-                    unit_ids=list(allowed),
+                    # Only paragraphs the question actually cites; the model may
+                    # legitimately use fewer than the neighbours it was given.
+                    unit_ids=sorted({e.source_unit_id for e in q.evidence}),
                     explanation="Exact retrieved evidence attached; independent answer round must verify every rubric criterion",
                 )
                 for _ in q.rubric
             ],
         ),
     )
-    return create_packet(conn, payload)
+    if distractors:
+        payload["ai_analysis"]["distractor_evidence"] = {
+            letter: check.model_dump() for letter, check in sorted(distractors.items())
+        }
+    qid = create_packet(conn, payload)
+    past_exam_import.mark_origin(
+        conn, qid, past_exam_import.ORIGIN_GENERATED,
+        concept_keys=[f"unit:{p['evidence'][0]['unit_id']}"],
+        source_ref=dict(style_year=p["style_year"]),
+    )
+    return qid
