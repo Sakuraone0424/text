@@ -25,7 +25,7 @@ def formal_specification():
     return {**default_blueprint(), "questions": TOTAL_QUESTIONS,
             "questions_per_subject": QUESTIONS_PER_SUBJECT,
             "points_per_subject": 60, "points_total": TOTAL_POINTS,
-            "points": TOTAL_POINTS}
+            "points_by_type": dict(POINTS)}
 
 def validate_blueprint(blueprint):
     if not isinstance(blueprint, dict):
@@ -64,7 +64,8 @@ def validate_items(items):
                 raise ValueError("rubric_incorrect")
             if kind == "fill_blank" and q.get("blanks") and (
                 not isinstance(q["blanks"], list)
-                or sum(b.get("points",0) for b in q["blanks"] if isinstance(b,dict)) != POINTS[kind]
+                or any(not isinstance(b, dict) for b in q["blanks"])
+                or sum(b.get("points",0) for b in q["blanks"]) != POINTS[kind]
             ):
                 raise ValueError("blank_points_incorrect")
     return items
