@@ -531,6 +531,9 @@ def repair(conn, qid, question, reason, max_revisions=2):
         raise ValueError("repair_must_preserve_spec_and_explain_changes")
     if content_sha(q) == old["content_sha256"]:
         raise ValueError("repair_did_not_change_content")
+    from app import past_exam_import
+
+    past_exam_import.assert_stem_preserved(conn, qid, previous, q)
     units = [e["source_unit_id"] for e in q["evidence"]]
     payload = dict(
         candidate_key="auto-repair-" + str(qid) + "-" + content_sha(q)[:16],
@@ -565,6 +568,7 @@ def repair(conn, qid, question, reason, max_revisions=2):
         ),
     )
     new = create_packet(conn, payload)
+    past_exam_import.inherit_origin(conn, qid, new)
     register(conn, new)
     conn.execute(
         "UPDATE auto_question_states SET updated_at=clock_timestamp(),revision_count=%s WHERE question_id=%s",

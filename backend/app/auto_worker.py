@@ -5,7 +5,7 @@ import os
 import sys
 from app.db import get_db
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
-from app import auto_knowledge, auto_generation, auto_exams, auto_insights
+from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import
 from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
@@ -105,7 +105,10 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                 elif job["kind"] in ("textbook_analysis", "knowledge_extraction"):
                     auto_knowledge.accept(conn, job)
                 elif job["kind"] == "generation":
-                    new = auto_generation.accept(conn, job)
+                    if job["payload"].get("origin") == past_exam_import.ORIGIN_PAST_EXAM:
+                        new = past_exam_import.accept(conn, job)
+                    else:
+                        new = auto_generation.accept(conn, job)
                     auto_quality.schedule_checks(conn, job["user_id"], new)
                 elif job["kind"] == "exam_analysis":
                     auto_exams.accept(conn, job)
@@ -129,6 +132,8 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                     "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason='invalid_or_uncertain_result' WHERE question_id=%s",
                     (job["payload"]["question_id"],),
                 )
+            elif job["kind"] == "generation" and job["payload"].get("origin") == past_exam_import.ORIGIN_PAST_EXAM:
+                past_exam_import.mark_blocked(conn, job, safe_dispatch_failure(exc)["code"])
             elif job["kind"] == "repair":
                 conn.execute(
                     "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason='invalid_repair_result' WHERE question_id=%s",
@@ -185,6 +190,9 @@ def plan(conn, uid):
         (uid,),
     ).fetchall():
         auto_grading.schedule(conn, uid, row["id"])
+    # Past-exam questions need no corpus-wide sweep: each request carries only
+    # the few textbook paragraphs relevant to that one question.
+    past_exam_import.plan(conn, uid)
 
 
 def main():

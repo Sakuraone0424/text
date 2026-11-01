@@ -12,6 +12,7 @@ from app.exam_authoring import instructions as exam_instructions, issues as exam
 from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
+from app import past_exam_import
 
 STARTUP_RESERVE_DAYS = 2  # 60 questions/day, 120 verified candidates per user
 
@@ -239,7 +240,7 @@ def balanced_generation_buckets(attempts):
 
 def plan(conn, uid):
     existing = conn.execute(
-        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND state IN ('pending','running','retrying')"
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' AND state IN ('pending','running','retrying')"
     ).fetchone()["n"]
     if existing >= 2:
         return
@@ -247,7 +248,7 @@ def plan(conn, uid):
         "SELECT payload->>'subject' AS subject,"
         "payload->>'question_type' AS question_type,count(*) AS n "
         "FROM ai_jobs WHERE user_id=%s AND kind='generation' "
-        "GROUP BY 1,2", (uid,),
+        "AND COALESCE(payload->>'origin','')<>'past_exam' GROUP BY 1,2", (uid,),
     ).fetchall()
     attempts = {
         (r["subject"], r["question_type"]): r["n"] for r in rows
@@ -547,4 +548,10 @@ def accept(conn, job):
             ],
         ),
     )
-    return create_packet(conn, payload)
+    qid = create_packet(conn, payload)
+    past_exam_import.mark_origin(
+        conn, qid, past_exam_import.ORIGIN_GENERATED,
+        concept_keys=[f"unit:{p['evidence'][0]['unit_id']}"],
+        source_ref=dict(style_year=p["style_year"]),
+    )
+    return qid

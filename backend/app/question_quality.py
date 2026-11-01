@@ -88,7 +88,9 @@ class Blank(StrictModel):
 class Question(StrictModel):
     subject: Subject
     question_type: QuestionType
-    stem: str = Field(min_length=5, max_length=10000)
+    # A term question's stem is often only the term; the schema text stays as
+    # published so queued generation/repair payloads remain byte-identical.
+    stem: str = Field(max_length=10000, json_schema_extra={"minLength": 5})
     options: dict[str, str] = Field(default_factory=dict)
     answer: str = Field(min_length=1, max_length=10000)
     accepted_answers: list[str] = Field(default_factory=list, max_length=100)
@@ -102,6 +104,8 @@ class Question(StrictModel):
 
     @model_validator(mode="after")
     def fit(self):
+        if len(self.stem) < (2 if self.question_type == "term" else 5):
+            raise ValueError("Stem is too short")
         if any(
             not set(c.knowledge_tags).issubset(self.knowledge_tags) for c in self.rubric
         ):

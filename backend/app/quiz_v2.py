@@ -285,6 +285,9 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             )
         ]
         eligible.append(row)
+    from app.past_exam_import import concept_keys, concepts_collide
+
+    concepts = concept_keys(conn, [r["id"] for r in eligible])
     for subject in SUBJECTS:
         for kind, count in spec_counts.items():
             pool = []
@@ -301,6 +304,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     continue
                 if any(
                     exclusive_topic_collision(content, r["content"])
+                    or concepts_collide(concepts, row["id"], r["id"])
                     for r in selected + pool
                 ):
                     next(r for r in audit if r["question_id"] == row["id"])[
