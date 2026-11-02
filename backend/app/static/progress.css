@@ -55,6 +55,11 @@ body {
 .jobs li:last-child { border-bottom: 0; }
 .jobs .kind { font-weight: 500; }
 .jobs .meta { color: var(--muted); font-size: 11px; grid-column: 1 / -1; overflow-wrap: anywhere; }
+.cancel {
+  grid-column: 1 / -1; justify-self: start; min-height: 44px; padding: 0 14px; margin-top: 4px;
+  border: 1px solid #fdba74; border-radius: 12px; background: #fff; color: var(--warn); font: inherit; cursor: pointer;
+}
+.cancel:disabled { opacity: 0.5; }
 .state { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #e5e9f0; color: #374151; align-self: start; }
 .state.succeeded { background: #dcfce7; color: var(--ok); }
 .state.blocked, .state.failed { background: #ffedd5; color: var(--warn); }

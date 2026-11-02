@@ -664,8 +664,36 @@
       fill.style.width = `${data.max ? Math.min(100, (data.points / data.max) * 100) : 0}%`;
     });
   }
+  // Unanswered (not reported) questions and those marked "look again", in paper order.
+  function submitCheck() {
+    const questions = latest.paper?.questions || [];
+    const reported = new Set(latest.paper?.reported_question_ids || []);
+    const open = [],
+      marked = [];
+    questions.forEach((question, index) => {
+      if (reported.has(question.id)) return;
+      const draft = latest.drafts[question.id];
+      if (!answered(draft)) open.push(index);
+      if (draft?.flagged) marked.push(index);
+    });
+    return { open, marked };
+  }
   function confirmSubmit() {
     const dialog = byId("submit-dialog");
+    const check = submitCheck();
+    const warning = byId("submit-warning"),
+      jump = byId("jump-unanswered");
+    const parts = [];
+    if (check.open.length) parts.push(`还有 ${check.open.length} 题未答`);
+    if (check.marked.length) parts.push(`${check.marked.length} 题标记稍后看`);
+    warning.hidden = !parts.length;
+    warning.textContent = parts.join("、");
+    jump.hidden = !check.open.length;
+    jump.onclick = () => {
+      dialog.close();
+      showView("exam");
+      navigate(check.open[0]);
+    };
     byId("submit-summary").textContent =
       byId("map-summary").textContent +
       (latest.pendingCount

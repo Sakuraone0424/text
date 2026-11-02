@@ -19,6 +19,11 @@ const REASON = {
   superseded_scoring: "旧分值已停用",
   invalid_or_uncertain_result: "结果无效或不确定",
   unspecified: "未注明",
+  model_delisted_or_catalog_changed: "原模型已下架或目录变化",
+  model_delisted_no_replacement: "原模型已下架，当前没有可用的替代模型（有了会自动重排）",
+  replacement_effort_not_probed: "替代模型这一档思考强度还没探测通过（通过后自动重排）",
+  replacement_unusable: "替代模型暂不可用（通过探测和价格核实后自动重排）",
+  cancelled_by_owner: "已手动取消",
 };
 
 function el(tag, text, parent, cls) {
@@ -33,7 +38,7 @@ const fmtTime = (iso) =>
     ? new Date(iso).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
     : "—";
 const yuan = (value) => (value === null || value === undefined ? "—" : "¥" + Number(value).toFixed(2));
-const reasonText = (code) => REASON[code] || code;
+const reasonText = (code) => REASON[code] || REASON[String(code).split(":")[0]] || code;
 
 function duration(hours) {
   if (hours < 1) return "不到 1 小时";
@@ -129,6 +134,35 @@ function jobs(report) {
     el("span", title, li, "kind");
     el("span", STATE[job.state] || job.state, li, "state " + job.state);
     el("span", fmtTime(job.at) + (job.reason ? " · " + reasonText(job.reason) : ""), li, "meta");
+    if (["pending", "retrying", "running"].includes(job.state)) {
+      const button = el("button", "取消任务", li, "cancel");
+      button.type = "button";
+      button.setAttribute("aria-label", "取消任务 " + job.id);
+      button.onclick = () => cancelJob(job, button);
+    }
+  }
+}
+
+async function cancelJob(job, button) {
+  const running = job.state === "running";
+  const text = running
+    ? "这个任务正在运行，已经发出的请求无法撤回，仍可能产生费用。确定取消吗？"
+    : "确定取消这个任务吗？取消后不会再执行。";
+  if (!confirm(text)) return;
+  button.disabled = true;
+  try {
+    const response = await fetch("/v2/model/jobs/" + job.id + "/cancel", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!response.ok) throw new Error("取消失败（" + response.status + "）");
+    await load();
+  } catch (error) {
+    button.disabled = false;
+    $("notice").hidden = false;
+    $("notice").textContent = error.message;
   }
 }
 

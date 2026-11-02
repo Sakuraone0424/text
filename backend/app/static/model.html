@@ -59,6 +59,7 @@
         <section aria-label="人民币费用">
           <h2>DeepSeek 人民币账本</h2>
           <p id="billing" role="status"></p>
+          <button id="price-refresh" type="button">刷新人民币价格</button>
           <details>
             <summary>费用与模型历史</summary>
             <pre id="billing-history"></pre>
@@ -109,10 +110,10 @@
           ><input
             id="upgrade"
             type="checkbox"
-          />允许通过兼容性和预算检查后的升级（尚无自动切换执行器）</label
+          />允许升级（需质量对比通过后才会切换）</label
         ><label><input id="stopped" type="checkbox" />停止AI任务</label>
-        <details>
-          <summary>任务限制</summary>
+        <details open>
+          <summary>任务限制：输出长度、重试次数、同时运行数</summary>
           <label
             >单任务输出Token上限<input
               id="token-limit"

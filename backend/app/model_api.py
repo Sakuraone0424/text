@@ -299,6 +299,32 @@ def spend(name=Depends(require_auth)):
     return operation(name, spend_report)
 
 
+class BenchmarkApproval(StrictModel):
+    model_id: str = Field(min_length=1, max_length=200)
+    approved: StrictBool = True
+    note: str = Field(default="", max_length=500)
+
+
+@router.post("/benchmark-approval")
+def benchmark_approval(data: BenchmarkApproval, request: Request, name=Depends(require_auth)):
+    """Operator-only (needs QUIZ_REVIEW_API_KEY): record that the quality comparison passed.
+
+    This only ALLOWS auto-upgrade to consider the model; it never selects it. Nothing automatic
+    calls this, and it is refused for a model that has no real compatibility probe yet.
+    """
+    import hmac
+
+    origin(request)
+    configured = os.environ.get("QUIZ_REVIEW_API_KEY", "")
+    if not configured:
+        raise HTTPException(503, "Operator approval is disabled: QUIZ_REVIEW_API_KEY is not configured")
+    if not hmac.compare_digest(request.headers.get("x-review-api-key", ""), configured):
+        raise HTTPException(403, "Operator authorization required")
+    from app.model_compatibility import approve_benchmark
+
+    return operation(name, lambda c, u: approve_benchmark(c, data.model_id, data.approved, data.note))
+
+
 @router.get("/progress")
 def progress_report(name=Depends(require_auth)):
     """Question-writing progress: counts, codes and times only (no question or textbook text)."""

@@ -668,7 +668,7 @@ def test_automatic_upgrade_requires_quality_reference_and_budget(db, setup_ai):
         (Jsonb({**original["compatibility"], "quality_benchmark_passed": False}),),
     )
     m.configure(db, setup_ai, "deepseek-flash", "high", auto_upgrade=True)
-    assert auto_upgrade(db, setup_ai) is None
+    assert auto_upgrade(db, setup_ai)["status"] == "none"
     db.execute(
         "UPDATE ai_model_catalog SET compatibility=compatibility||'{\"quality_benchmark_passed\":true}' WHERE model_id='new-synthetic'"
     )
@@ -677,7 +677,8 @@ def test_automatic_upgrade_requires_quality_reference_and_budget(db, setup_ai):
 
     install_price(db, price("new-synthetic"))
     upgraded = auto_upgrade(db, setup_ai)
-    assert upgraded and upgraded["model_id"] == "new-synthetic"
+    assert upgraded["status"] == "switched" and upgraded["model"] == "new-synthetic"
+    assert m.settings(db, setup_ai)["model_id"] == "new-synthetic"
 
 
 def test_transcription_review_cannot_claim_official_original(db, setup_ai, candidate):
