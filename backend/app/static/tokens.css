@@ -58,8 +58,6 @@
   --heat-2: #93c5fd;
   --heat-3: #3b82f6;
   --heat-4: #1d4ed8;
-  --sat: max(env(safe-area-inset-top, 0px), var(--sat-test, 0px));
-  --sab: max(env(safe-area-inset-bottom, 0px), var(--sab-test, 0px));
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -114,3 +112,10 @@
     --heat-4: #93c5fd;
   }
 }
+
+/* Page shell on every page: the document itself never scrolls. Top gap (16px, so the title sits clear of the
+   system's blurred status-bar zone) -> scrolling content area -> bottom bar. Without viewport-fit=cover the
+   system keeps the page inside the status bar and the Home indicator, so nothing needs a safe-area inset. */
+html, body { margin: 0; height: var(--app-h, 100dvh); overflow: hidden; overscroll-behavior: none; }
+body { display: grid; grid-template-rows: 16px minmax(0, 1fr) auto; background: var(--bg); }
+body::before { content: ""; grid-row: 1; grid-column: 1 / -1; }

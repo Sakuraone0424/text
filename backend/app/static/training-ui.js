@@ -55,7 +55,11 @@
   const active = () => latest.paper?.timing.status === "in_progress";
   const storageKey = () =>
     `quiz-ui-question:${account}:${latest.paper?.paper_id}`;
+  // Only the content area scrolls (the document does not): remember where each page was left.
+  const scroller = () => document.querySelector(".workspace");
+  const scrollMemory = {};
   function showView(next) {
+    if (view && scroller()) scrollMemory[view] = scroller().scrollTop;
     view = next;
     document.querySelectorAll("[data-page]").forEach((node) => {
       node.hidden = node.dataset.page !== view;
@@ -77,6 +81,7 @@
     else byId("learning").hidden = true;
     if (roots[view]) byId("learning").hidden = false;
     window.Insights?.onView(view);
+    if (scroller()) scroller().scrollTop = scrollMemory[view] || 0;
   }
   function navigate(index, focus = true) {
     const questions = active() ? latest.paper.questions || [] : [];
@@ -121,7 +126,7 @@
         `#questions article[data-id="${question.id}"] .question-stem`,
       );
       stem?.focus({ preventScroll: true });
-      window.scrollTo({ top: 0, behavior: "instant" });
+      scroller()?.scrollTo({ top: 0, behavior: "instant" });
     }
   }
   function updateMap() {
@@ -524,11 +529,10 @@
   window.addEventListener("offline", connection);
   connection();
   if (window.visualViewport) {
-    const viewport = () =>
-      document.body.classList.toggle(
-        "keyboard-open",
-        window.innerHeight - window.visualViewport.height > 150,
-      );
+    const viewport = () => {
+      const covered = window.innerHeight - window.visualViewport.height > 150;
+      document.body.classList.toggle("keyboard-open", covered);
+    };
     window.visualViewport.addEventListener("resize", viewport);
   }
   byId("logout").onclick = async () => {
