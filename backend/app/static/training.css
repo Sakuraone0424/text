@@ -1,39 +1,11 @@
-/* "Data analytics" visual system, light only.
-   Colours: page #F4F6FA, card #FFFFFF, border #E5E9F0, divider #EEF1F5, text #111827, secondary #556070,
-   primary #2563EB (pressed #1D4ED8), key card #F0F5FF / #DBE6FB, orange #EA580C (text on white #C2410C = needs attention),
-   green #15803D (correct / rising / reached), grey tag #E5E9F0 / #374151, disabled #E5E9F0 / #6B7280.
+/* "Data analytics" visual system, light and dark (colours live in tokens.css).
+   Orange only means "needs attention", green only correct / rising / reached.
    Spacing only 4 / 8 / 12 / 14 / 16 / 24 (page sides 18). Radii: card 16, small card 14, button 12, tag 999.
    No blur layers anywhere: nothing may sit under a blurred layer or the status bar. */
 .training-app {
-  --bg: #f4f6fa;
-  --card: #ffffff;
-  --line: #e5e9f0;
-  --divider: #eef1f5;
-  --ink: #111827;
-  --muted: #556070;
-  --primary: #2563eb;
-  --primary-press: #1d4ed8;
-  --primary-soft: #dbeafe;
-  --primary-soft-ink: #1e40af;
-  --key: #f0f5ff;
-  --key-line: #dbe6fb;
-  --accent: #ea580c;
-  --accent-ink: #c2410c;
-  --up: #15803d;
-  --tag: #e5e9f0;
-  --tag-ink: #374151;
-  --disabled: #e5e9f0;
-  --disabled-ink: #6b7280;
-  --input: #f8faff;
-  --input-focus: #93c5fd;
-  --shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
   --nav: 56px;
-  /* Safe areas. --sat-test / --sab-test let the browser tests simulate an iPhone's insets. */
-  --sat: max(env(safe-area-inset-top, 0px), var(--sat-test, 0px));
-  --sab: max(env(safe-area-inset-bottom, 0px), var(--sab-test, 0px));
   color: var(--ink);
   background: var(--bg);
-  color-scheme: light;
   font-family: "Noto Sans SC", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   line-height: 1.6;
@@ -76,7 +48,7 @@
 .training-app button:active:not(:disabled) { background: var(--divider); }
 .training-app button:disabled,
 .training-app button[aria-disabled="true"] { cursor: not-allowed; background: var(--disabled); border-color: var(--disabled); color: var(--disabled-ink); }
-.training-app .primary { background: var(--primary); border-color: var(--primary); color: #ffffff; font-weight: 700; min-height: 48px; }
+.training-app .primary { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 700; min-height: 48px; }
 .training-app .primary:active:not(:disabled) { background: var(--primary-press); border-color: var(--primary-press); }
 .training-app .primary:disabled,
 .training-app .primary[aria-disabled="true"] { background: var(--disabled); border-color: var(--disabled); color: var(--disabled-ink); }
@@ -91,7 +63,7 @@
 .training-app select { font: inherit; color: var(--ink); background: var(--input); border: 1px solid var(--line); border-radius: 12px; padding: 12px; min-height: 44px; width: 100%; }
 .training-app input:focus,
 .training-app textarea:focus,
-.training-app select:focus { border-color: var(--input-focus); outline: 0; box-shadow: 0 0 0 3px rgba(147, 197, 253, 0.4); }
+.training-app select:focus { border-color: var(--input-focus); outline: 0; box-shadow: 0 0 0 3px var(--focus-ring); }
 .training-app .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .training-app .button-row > * { flex: 1 1 140px; }
 
@@ -104,7 +76,7 @@
 .training-app .mobile-brand,
 .training-app .desktop-title { display: none; }
 .training-app .connection { display: none; }
-.training-app .connection.offline { display: flex; align-items: center; justify-content: center; gap: 8px; position: fixed; top: var(--sat); left: 0; right: 0; z-index: 40; padding: 4px 16px; background: #ffedd5; color: var(--accent-ink); font-size: 12px; }
+.training-app .connection.offline { display: flex; align-items: center; justify-content: center; gap: 8px; position: fixed; top: var(--sat); left: 0; right: 0; z-index: 40; padding: 4px 16px; background: var(--accent-soft); color: var(--accent-ink); font-size: 12px; }
 .training-app .connection i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .training-app .shell { padding: 12px 18px calc(var(--nav) + var(--sab) + 24px); max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 .training-app .sidebar { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; height: calc(var(--nav) + var(--sab)); padding-bottom: var(--sab); background: var(--card); border-top: 1px solid var(--line); }
@@ -115,7 +87,7 @@
 .training-app .primary-nav button[aria-current="page"] { color: var(--primary); font-weight: 700; }
 .training-app.focus-mode .sidebar { display: none; }
 .training-app.focus-mode .shell { padding-bottom: calc(80px + var(--sab)); }
-.training-app .status-message { position: fixed; z-index: 60; left: 16px; right: 16px; bottom: calc(var(--nav) + var(--sab) + 12px); margin: 0 auto; max-width: 480px; padding: 8px 12px; border-radius: 12px; background: var(--ink); color: #ffffff; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.training-app .status-message { position: fixed; z-index: 60; left: 16px; right: 16px; bottom: calc(var(--nav) + var(--sab) + 12px); margin: 0 auto; max-width: 480px; padding: 8px 12px; border-radius: 12px; background: var(--toast-bg); color: var(--toast-ink); font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
 .training-app .status-message.show { opacity: 1; }
 .training-app .status-message:empty { display: none; }
 
@@ -135,18 +107,18 @@
 .training-app .micro-note { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
 .training-app .section-title { font-size: 15px; margin: 8px 4px 0; }
 .training-app .pill { display: inline-flex; align-items: center; padding: 4px 12px; border-radius: 999px; background: var(--tag); color: var(--tag-ink); font-size: 12px; font-weight: 500; white-space: nowrap; }
-.training-app .pill.green-pill { background: #dcfce7; color: var(--up); }
+.training-app .pill.green-pill { background: var(--up-soft); color: var(--up); }
 .training-app .pill.blue-pill { background: var(--primary-soft); color: var(--primary-soft-ink); }
-.training-app .notice { background: #ffedd5; color: var(--accent-ink); border-radius: 12px; padding: 8px 12px; font-weight: 500; }
+.training-app .notice { background: var(--accent-soft); color: var(--accent-ink); border-radius: 12px; padding: 8px 12px; font-weight: 500; }
 .training-app .empty-line { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; white-space: nowrap; }
 .training-app .empty-line .ico { width: 20px; height: 20px; color: var(--disabled-ink); }
-.training-app .a2hs-hint { background: var(--primary-soft); border-color: #bfdbfe; color: var(--primary-soft-ink); }
+.training-app .a2hs-hint { background: var(--primary-soft); border-color: var(--primary-soft-line); color: var(--primary-soft-ink); }
 .training-app .a2hs-hint .text-button { color: var(--primary-soft-ink); font-weight: 700; }
 
 /* ---- login ---- */
 .training-app .login-card { display: flex; flex-direction: column; gap: 12px; }
 .training-app .login-fields { display: flex; flex-direction: column; gap: 12px; }
-.training-app .conflict-card { border-color: #fdba74; background: #fff7ed; }
+.training-app .conflict-card { border-color: var(--accent-line); background: var(--accent-faint); }
 
 /* ---- home ---- */
 .training-app .hero-card { display: flex; flex-direction: column; gap: 12px; }
@@ -171,7 +143,7 @@
 .training-app .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .training-app .stat-card { padding: 12px; border-radius: 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .training-app .stat-card strong { font-size: 24px; line-height: 1.25; font-weight: 700; }
-.training-app .stat-card strong.none { color: #c3cad5; }
+.training-app .stat-card strong.none { color: var(--placeholder); }
 .training-app .stat-card small { font-size: 11px; color: var(--muted); line-height: 1.4; }
 .training-app .stat-card small.up { color: var(--up); font-weight: 700; }
 .training-app .stat-card small.down { color: var(--accent-ink); font-weight: 700; }
@@ -244,7 +216,7 @@
 .training-app .timer-box b { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .training-app .timer-box span { font-size: 11px; color: var(--muted); }
 .training-app .time-warning #clock { color: var(--accent-ink); }
-.training-app .time-critical #clock { color: #b91c1c; }
+.training-app .time-critical #clock { color: var(--danger); }
 .training-app .map-button { min-height: 44px; padding: 4px 12px; font-weight: 500; white-space: nowrap; }
 .training-app .map-button span { color: var(--muted); font-size: 12px; margin-left: 4px; }
 .training-app progress#answer-progress { width: 100%; height: 6px; appearance: none; border: 0; border-radius: 999px; background: var(--tag); overflow: hidden; }
@@ -262,12 +234,12 @@
 .training-app .grey-tag { background: var(--tag); color: var(--tag-ink); }
 .training-app #questions { display: flex; flex-direction: column; gap: 12px; }
 .training-app .question-card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 12px; }
-.training-app .question-card.flagged { border-color: #fdba74; }
+.training-app .question-card.flagged { border-color: var(--accent-line); }
 .training-app .question-stem { margin: 0; font-size: 17px; line-height: 1.7; font-weight: 500; }
 .training-app .question-card .option { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; min-height: 48px; padding: 12px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-weight: 400; line-height: 1.5; }
 .training-app .question-card .option.chosen { border-color: var(--primary); background: var(--primary-soft); }
 .training-app .option-letter { display: inline-flex; width: 24px; height: 24px; flex: none; align-items: center; justify-content: center; border-radius: 50%; background: var(--tag); color: var(--tag-ink); font-size: 12px; font-weight: 700; }
-.training-app .option.chosen .option-letter { background: var(--primary); color: #ffffff; }
+.training-app .option.chosen .option-letter { background: var(--primary); color: var(--on-primary); }
 .training-app .question-card label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--muted); }
 .training-app .question-card input { min-height: 48px; }
 .training-app .question-card textarea { min-height: 200px; line-height: 1.8; resize: vertical; scroll-margin-top: 180px; }
@@ -279,7 +251,7 @@
 .training-app .question-report { min-height: 44px; font-weight: 500; color: var(--muted); }
 .training-app .focus-secondary { display: flex; gap: 8px; }
 .training-app .mark-button { flex: 1; min-height: 44px; color: var(--muted); font-weight: 500; }
-.training-app .mark-button[aria-pressed="true"] { color: var(--accent-ink); border-color: #fdba74; background: #fff7ed; font-weight: 700; }
+.training-app .mark-button[aria-pressed="true"] { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-faint); font-weight: 700; }
 .training-app .secondary-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .training-app .secondary-actions button { min-height: 44px; width: 100%; font-weight: 500; color: var(--muted); }
 .training-app .secondary-actions .mark-button[aria-pressed="true"] { color: var(--accent-ink); }
@@ -288,22 +260,22 @@
 .training-app.keyboard-open .focus-actions { position: static; }
 
 /* ---- dialogs ---- */
-.training-app dialog { border: 1px solid var(--line); border-radius: 16px; padding: 16px; width: min(92vw, 460px); max-height: 88vh; overflow: auto; color: var(--ink); background: var(--card); box-shadow: 0 8px 24px rgba(17, 24, 39, 0.18); }
-.training-app dialog::backdrop { background: rgba(17, 24, 39, 0.4); }
+.training-app dialog { border: 1px solid var(--line); border-radius: 16px; padding: 16px; width: min(92vw, 460px); max-height: 88vh; overflow: auto; color: var(--ink); background: var(--card); box-shadow: var(--dialog-shadow); }
+.training-app dialog::backdrop { background: var(--scrim); }
 .training-app .dialog-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .training-app .map-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--muted); margin: 8px 0; }
 .training-app .legend { display: inline-block; width: 12px; height: 12px; border-radius: 4px; margin-right: 4px; vertical-align: -1px; border: 1px solid var(--line); background: var(--card); }
 .training-app .legend.answered { background: var(--primary); border-color: var(--primary); }
-.training-app .legend.marked { background: #fff7ed; border-color: var(--accent); }
+.training-app .legend.marked { background: var(--accent-faint); border-color: var(--accent); }
 .training-app .legend.current { outline: 2px solid var(--ink); outline-offset: 1px; }
 .training-app .question-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 8px 0 12px; }
 .training-app .question-grid button { min-height: 44px; padding: 0; border-radius: 12px; background: var(--card); color: var(--ink); font-weight: 500; position: relative; font-variant-numeric: tabular-nums; }
-.training-app .question-grid .answered { background: var(--primary); color: #ffffff; border-color: var(--primary); }
+.training-app .question-grid .answered { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .training-app .question-grid .marked { border: 2px solid var(--accent); }
 .training-app .question-grid .marked::after { content: ""; position: absolute; right: 4px; top: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .training-app .question-grid .reported { background: var(--tag); color: var(--muted); text-decoration: line-through; }
 .training-app .question-grid [aria-current="step"] { outline: 3px solid var(--ink); outline-offset: 1px; }
-.training-app .submit-warning { margin: 8px 0; padding: 8px 12px; border-radius: 12px; background: #ffedd5; color: var(--accent-ink); font-weight: 700; }
+.training-app .submit-warning { margin: 8px 0; padding: 8px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--accent-ink); font-weight: 700; }
 .training-app .submit-dialog h2 { margin: 4px 0 8px; font-size: 15px; }
 .training-app .submit-dialog .button-row { margin-top: 12px; }
 
@@ -347,7 +319,7 @@
 .training-app #result article p { margin: 8px 0; }
 .training-app #result blockquote,
 .training-app #learning blockquote { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--primary); background: var(--input); border-radius: 0 12px 12px 0; color: var(--muted); font-size: 13px; }
-.training-app .criterion-reason { font-size: 13px; color: var(--accent-ink); background: #fff7ed; border-radius: 12px; padding: 8px 12px; }
+.training-app .criterion-reason { font-size: 13px; color: var(--accent-ink); background: var(--accent-faint); border-radius: 12px; padding: 8px 12px; }
 .training-app .criterion-row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
 .training-app .criterion-row .full { color: var(--up); font-weight: 700; }
 .training-app .criterion-row .lost { color: var(--accent-ink); font-weight: 700; }
@@ -364,7 +336,7 @@
 .training-app .due-number { font-size: 30px; line-height: 1.2; font-weight: 700; color: var(--primary); }
 .training-app .due-number.zero { color: var(--disabled-ink); }
 .training-app .mini-bars { display: flex; align-items: flex-end; gap: 4px; height: 36px; border-bottom: 1px solid var(--line); }
-.training-app .mini-bars i { width: 12px; border-radius: 4px 4px 0 0; background: #93c5fd; }
+.training-app .mini-bars i { width: 12px; border-radius: 4px 4px 0 0; background: var(--primary-bar); }
 .training-app .mini-bars i.today { background: var(--primary); }
 .training-app .filter-bar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--divider); }
 .training-app .filter-row { display: grid; grid-template-columns: 36px 1fr; align-items: center; gap: 8px; }
@@ -372,7 +344,7 @@
 .training-app .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .training-app .chips::-webkit-scrollbar { display: none; }
 .training-app .chips button { flex: none; min-height: 32px; padding: 4px 12px; border-radius: 999px; font-size: 13px; color: var(--muted); background: var(--card); }
-.training-app .chips button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary-soft-ink); border-color: #bfdbfe; font-weight: 700; }
+.training-app .chips button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary-soft-ink); border-color: var(--primary-soft-line); font-weight: 700; }
 .training-app .mistake-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .training-app .mistake-list li { padding: 12px 0; border-bottom: 1px solid var(--divider); display: flex; flex-direction: column; gap: 4px; }
 .training-app .mistake-list li:last-child { border-bottom: 0; }
@@ -382,8 +354,8 @@
 .training-app .mistake-stem { font-size: 14px; }
 .training-app .practice-panel { display: flex; flex-direction: column; gap: 12px; }
 .training-app .practice-feedback { border-radius: 12px; padding: 8px 12px; background: var(--input); border: 1px solid var(--line); }
-.training-app .practice-feedback.ok { background: #dcfce7; border-color: #86efac; color: var(--up); }
-.training-app .practice-feedback.bad { background: #ffedd5; border-color: #fdba74; color: var(--accent-ink); }
+.training-app .practice-feedback.ok { background: var(--up-soft); border-color: var(--up-line); color: var(--up); }
+.training-app .practice-feedback.bad { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
 .training-app #learning { display: flex; flex-direction: column; gap: 12px; }
 .training-app #learning h2 { margin: 8px 0 0; }
 .training-app #learning article { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px; box-shadow: var(--shadow); }
@@ -396,7 +368,7 @@
 .training-app .settings-list > a { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; text-align: left; text-decoration: none; color: var(--ink); background: transparent; border: 0; border-bottom: 1px solid var(--divider); border-radius: 0; min-height: 56px; padding: 8px 0; font-weight: 500; }
 .training-app .settings-list > :last-child { border-bottom: 0; }
 .training-app .settings-list small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
-.training-app .settings-list .danger-text { color: #b91c1c; }
+.training-app .settings-list .danger-text { color: var(--danger); }
 .training-app .a2hs-hint p { font-size: 13px; }
 
 /* ---- wide screens: a left rail instead of the bottom bar ---- */
@@ -404,7 +376,7 @@
   .training-app { padding-top: 0; }
   .training-app .sidebar { top: 0; right: auto; bottom: 0; width: 200px; height: auto; border-top: 0; border-right: 1px solid var(--line); padding: 16px 12px; }
   .training-app .sidebar .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; margin-bottom: 16px; }
-  .training-app .brand-mark { display: inline-flex; width: 28px; height: 28px; border-radius: 8px; background: var(--primary); color: #ffffff; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
+  .training-app .brand-mark { display: inline-flex; width: 28px; height: 28px; border-radius: 8px; background: var(--primary); color: var(--on-primary); align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
   .training-app .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
   .training-app .primary-nav { display: flex; flex-direction: column; height: auto; gap: 4px; }
   .training-app .primary-nav button { flex-direction: row; justify-content: flex-start; gap: 12px; min-height: 48px; padding: 8px 12px; border-radius: 12px; font-size: 14px; }
@@ -421,6 +393,10 @@
 
 /* Opaque band over the status-bar area: scrolling content passes under it instead of into the iOS status bar
    (which blurs whatever is behind it). Plain page colour only; no blur, no gradient, no mask. */
-body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat); background: #f4f6fa; z-index: 1000; pointer-events: none; }
+/* the "学习建议 / 归档状态" area: a card when it has content */
+.training-app #learning:not(:empty) { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.training-app .check-row { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.training-app input[type="checkbox"], .training-app input[type="radio"] { width: 22px; min-height: 0; height: 22px; padding: 0; flex: none; accent-color: var(--primary); }
+body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat); background: var(--bg); z-index: 1000; pointer-events: none; }
 .training-app.focus-mode .status-message { bottom: calc(64px + var(--sab) + 12px); }
 .training-app #due-note:empty { display: none; }

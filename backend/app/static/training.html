@@ -3,8 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#F4F6FA" />
-    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#F4F6FA" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0E1014" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="研习空间" />
@@ -16,6 +17,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" />
+    <link rel="stylesheet" href="/static/tokens.css" />
     <link rel="stylesheet" href="/static/app.css" />
     <link rel="stylesheet" href="/static/training.css" />
   </head>
@@ -115,7 +117,7 @@
 
 <section data-page="exam" id="exam-view" hidden>
           <div id="exam-intro" class="card exam-intro">
-            <span class="eyebrow">FOCUS SESSION</span>
+            <span class="eyebrow">今日训练</span>
             <h1>为这60分钟，留一点专注。</h1>
             <p class="muted">唯一新版训练规格：60题 · 生物化学、细胞生物学各30题150分 · 共300分 · 作答60分钟</p>
             <div class="blueprint-list">
@@ -243,7 +245,6 @@
     >
       <div class="dialog-heading">
         <div>
-          <span class="eyebrow">QUESTION MAP</span>
           <h2 id="map-title">答题卡</h2>
         </div>
         <button
@@ -270,7 +271,7 @@
       class="submit-dialog"
       aria-labelledby="submit-title"
     >
-      <span class="eyebrow">FINAL CHECK</span>
+      <span class="eyebrow">交卷前检查</span>
       <h2 id="submit-title">准备交卷了吗？</h2>
       <p id="submit-summary"></p>
       <p id="submit-warning" class="submit-warning" role="status" hidden></p>

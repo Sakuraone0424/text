@@ -48,9 +48,9 @@ SHORT_BANK = {
 }
 
 
-def open_page(engine, mode, base, path="/training", logged_in=True, overview=None):
+def open_page(engine, mode, base, path="/training", logged_in=True, overview=None, scheme="light"):
     name, browser, device = engine
-    context = browser.new_context(**{**device, "viewport": {"width": 393, "height": 852}})
+    context = browser.new_context(**{**device, "viewport": {"width": 393, "height": 852}, "color_scheme": scheme})
     if mode == "standalone":
         context.add_init_script(STANDALONE)
     page = context.new_page()
@@ -90,11 +90,12 @@ def clear_of_the_top_inset(page, mode):
     assert boxes and min(boxes) >= top, (min(boxes) if boxes else None, top)
 
 
+@pytest.mark.parametrize("scheme", ["light", "dark"])
 @pytest.mark.parametrize("mode", ["safari", "standalone"])
-def test_empty_state_pages(engine, live_app, mode):
+def test_empty_state_pages(engine, live_app, mode, scheme):
     client, dsn, blueprint = live_app
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, mode, base, overview=SHORT_BANK)
+    page, errors = open_page(engine, mode, base, overview=SHORT_BANK, scheme=scheme)
     # home with a short bank: grey button that says why, no made-up numbers
     expect(page.locator("#days-left")).not_to_have_text("—")
     expect(page.locator("#prepare")).to_be_disabled()
@@ -109,11 +110,16 @@ def test_empty_state_pages(engine, live_app, mode):
     toast = page.locator("#status").evaluate("(n) => getComputedStyle(n).bottom")
     assert toast.endswith("px") and float(toast[:-2]) >= 56 + INSETS[mode][1]  # lives above the bottom nav, never over a title
     band = page.evaluate("() => { const s = getComputedStyle(document.body, '::before'); return [s.position, s.height, s.backgroundColor]; }")
-    assert band == ["fixed", f"{INSETS[mode][0]}px", "rgb(244, 246, 250)"], band  # the opaque status-bar band
+    page_colour = "rgb(244, 246, 250)" if scheme == "light" else "rgb(14, 16, 20)"
+    assert band == ["fixed", f"{INSETS[mode][0]}px", page_colour], band  # the opaque status-bar band, in the theme's page colour
+    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == page_colour
+    card = "rgb(255, 255, 255)" if scheme == "light" else "rgb(23, 26, 33)"
+    assert page.locator(".stat-card").first.evaluate("(n) => getComputedStyle(n).backgroundColor") == card
+    assert page.evaluate("document.querySelector('meta[name=theme-color][media*=dark]').content") == "#0E1014"
     assert page.locator(".sidebar").bounding_box()["height"] == 56 + INSETS[mode][1]
     clear_of_the_top_inset(page, mode)
     fits(page)
-    snap(page, engine, mode, "empty", "home")
+    snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "home")
     for view, name in (("mistakes", "mistakes"), ("profile", "profile")):
         page.locator(f'nav.primary-nav [data-view="{view}"]').click()
         page.wait_for_timeout(400)
@@ -127,44 +133,45 @@ def test_empty_state_pages(engine, live_app, mode):
             heights = page.locator("#due-mini i").evaluate_all("(els) => els.map((e) => e.getBoundingClientRect().height)")
             assert heights and all(h == 0 for h in heights), heights
             expect(page.locator(".due-side .stat-label")).to_have_text("未来 7 天")
-        snap(page, engine, mode, "empty", name)
-    progress, perrors = open_page(engine, mode, base, "/progress")
+        snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "empty", name)
+    progress, perrors = open_page(engine, mode, base, "/progress", scheme=scheme)
     expect(progress.locator("#content")).to_be_visible()
     fits(progress)
-    snap(progress, engine, mode, "empty", "progress")
+    snap(progress, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "progress")
     # (signed in through the API: WebKit refuses the Secure session cookie from the form over plain http)
-    model, merrors = open_page(engine, mode, base, "/static/model.html")
+    model, merrors = open_page(engine, mode, base, "/static/model.html", scheme=scheme)
     expect(model.locator("#controls")).to_be_visible()
     fits(model)
-    snap(model, engine, mode, "empty", "model")
-    login_page, lerrors = open_page(engine, mode, base, "/training", logged_in=False)
+    snap(model, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "model")
+    login_page, lerrors = open_page(engine, mode, base, "/training", logged_in=False, scheme=scheme)
     expect(login_page.locator("#login")).to_be_visible()
     fits(login_page)
-    snap(login_page, engine, mode, "empty", "login")
+    snap(login_page, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "login")
     assert not (errors or perrors or merrors or lerrors), (errors, perrors, merrors, lerrors)
 
 
+@pytest.mark.parametrize("scheme", ["light", "dark"])
 @pytest.mark.parametrize("mode", ["safari", "standalone"])
-def test_seeded_pages(engine, live_app, mode):
+def test_seeded_pages(engine, live_app, mode, scheme):
     client, dsn, blueprint = live_app
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, mode, base)
+    page, errors = open_page(engine, mode, base, scheme=scheme)
     expect(page.locator("#stat-avg")).not_to_have_text("—")
     expect(page.locator("#weak-chapters .progress-line")).to_have_count(3)
     clear_of_the_top_inset(page, mode)
     fits(page)
-    snap(page, engine, mode, "data", "home")
+    snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "data", "home")
     for view, name in (("mistakes", "mistakes"), ("profile", "profile")):
         page.locator(f'nav.primary-nav [data-view="{view}"]').click()
         page.wait_for_timeout(600)
         clear_of_the_top_inset(page, mode)
         fits(page)
-        snap(page, engine, mode, "data", name)
+        snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "data", name)
     page.locator("#profile-history").click()
     page.wait_for_timeout(600)
     fits(page)
-    snap(page, engine, mode, "data", "history")
+    snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "data", "history")
     # the other sub-views under "我的" follow the same rules: insights and the archive status
     for action, name in (("#stats-back", None), ('[data-action="insights"]', "insights"), ("#archive", "archive")):
         if name is None:
@@ -175,17 +182,17 @@ def test_seeded_pages(engine, live_app, mode):
         page.locator(action).first.click()
         page.wait_for_timeout(700)
         fits(page)
-        snap(page, engine, mode, "data", name)
+        snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "data", name)
         page.locator('nav.primary-nav [data-view="profile"]').click()
         page.wait_for_timeout(400)
-    progress, perrors = open_page(engine, mode, base, "/progress")
+    progress, perrors = open_page(engine, mode, base, "/progress", scheme=scheme)
     expect(progress.locator("#content")).to_be_visible()
     fits(progress)
-    snap(progress, engine, mode, "data", "progress")
-    model, merrors = open_page(engine, mode, base, "/static/model.html")
+    snap(progress, engine, mode, ("" if scheme == "light" else "dark-") + "data", "progress")
+    model, merrors = open_page(engine, mode, base, "/static/model.html", scheme=scheme)
     expect(model.locator("#controls")).to_be_visible()
     fits(model)
-    snap(model, engine, mode, "data", "model")
+    snap(model, engine, mode, ("" if scheme == "light" else "dark-") + "data", "model")
     assert not (errors or perrors or merrors), (errors, perrors, merrors)
 
 
