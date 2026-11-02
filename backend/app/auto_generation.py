@@ -18,6 +18,9 @@ from app.transcript_analysis import STYLE_SOURCE_BLOCKERS, stored_types
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
 from app import cost_control, past_exam_import
+from app.auto_fixes import autofix, FIX_LABELS
+from app.dispatch_codes import safe_dispatch_failure
+from app.evidence_match import locate
 
 STARTUP_RESERVE_DAYS = 2  # 60 questions/day, 120 verified candidates per user
 # A paragraph already written from is worth this fraction of a fresh one.
@@ -692,21 +695,155 @@ def attach_distractor_proof(q, response, payload):
     have = {(e["source_unit_id"], e["excerpt"]) for e in evidence}
     for letter in sorted(checks):
         check = checks[letter]
-        unit = units.get(check.unit_id)
-        if unit is None:
-            raise ValueError("unrequested_source")
-        if check.excerpt not in unit["text"]:
-            raise ValueError("invented_or_unmatched_quote")
+        found = locate(check.excerpt, payload["evidence"], check.unit_id)
+        if not found.ok or len(found.pieces) != 1:
+            raise ValueError("unrequested_source" if check.unit_id not in units and not found.ok else "invented_or_unmatched_quote")
+        piece = found.pieces[0]
+        unit = units[piece.unit_id]
+        # what is stored is the database's own text, never the model's wording
+        checks[letter] = check = check.model_copy(update={"unit_id": piece.unit_id, "excerpt": piece.text})
         if (check.unit_id, check.excerpt) not in have:
             have.add((check.unit_id, check.excerpt))
             evidence.append(past_exam_import.evidence_record(unit, payload["source_bibliography"], check.excerpt))
     return Question.model_validate({**q.model_dump(), "evidence": evidence}), checks
 
 
-def accept(conn, job):
-    if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
-        raise ValueError("actual_generation_call_required")
-    p = job["payload"]
+# ---- accepting a model result ---------------------------------------------------------------------------
+
+# Defects a rewrite can fix: the request goes back to the model ONCE with the exact errors.
+REPAIRABLE_REASONS = {
+    "rubric_points_mismatch": "评分要点的分值之和必须等于满分 max_points",
+    "duplicate_choice_options": "单选的四个选项不能有重复",
+    "incomplete_choice_or_key": "单选必须有 A–D 四个选项，且答案必须是其中一个",
+    "blank_marker_count": "填空题的题干里必须恰好有一个空（____）",
+    "blank_count_or_points_mismatch": "空的个数与分值对不上",
+    "rubric_item_count_out_of_range": "问答题的评分要点必须是 4–6 条",
+    "rubric_missing": "缺少评分要点",
+    "evidence_quote_unmatched": "evidence 里的引用在提供的教材段落里找不到：请只从 evidence 段落里逐字重新引用，不要换成段落之外的内容",
+    "insufficient_independent_scoring_criteria": "评分要点不足：名词解释、简答、问答至少要有两条相互独立的评分要点",
+}
+
+
+class RepairNeeded(ValueError):
+    """The draft failed in a way one rewrite can fix. `errors`: [{field, code}], `draft`: the corrected draft."""
+
+    def __init__(self, message, errors, draft):
+        super().__init__(message)
+        self.errors, self.draft = errors, draft
+
+
+class RepairStillInvalid(ValueError):
+    """The one repair did not fix it: the task is thrown away, and says so."""
+
+    def __init__(self, inner):
+        super().__init__("repair_still_invalid")
+        self.inner = inner
+
+
+def relocate_evidence(raw_question, units):
+    """Replace every quoted excerpt by the database's own text, found by the layered matcher.
+
+    Returns (question, [layer record per evidence entry], [indices that could not be matched]).
+    Identity coordinates (file, hash, page, paragraph, chapter, locator) always come from the database unit.
+    """
+    if not isinstance(raw_question, dict) or not isinstance(raw_question.get("evidence"), list):
+        return raw_question, [], []
+    by_id = {u["unit_id"]: u for u in units}
+    out, records, bad = [], [], []
+    for index, entry in enumerate(raw_question["evidence"]):
+        if not isinstance(entry, dict):
+            out.append(entry)
+            bad.append(index)
+            continue
+        cited = entry.get("source_unit_id")
+        found = locate(entry.get("excerpt"), units, cited if type(cited) is int else None)
+        if not found.ok:
+            out.append(entry)
+            bad.append(index)
+            records.append(dict(index=index, matched=False, reason=found.reason))
+            continue
+        for piece in found.pieces:
+            unit = by_id[piece.unit_id]
+            out.append({
+                **entry,
+                "file_id": unit["file_id"], "source_sha256": unit["source_sha256"], "ocr_page": unit["ocr_page"],
+                "paragraph_id": unit["unit_id"], "source_unit_id": unit["unit_id"], "chapter": unit["chapter"],
+                "locator": f"OCR:{unit['ocr_page']}:UNIT:{unit['unit_id']}", "excerpt": piece.text,
+            })
+        records.append(dict(index=index, matched=True, layer=found.layer, layer_name=found.layer_name,
+                            unit_ids=[p.unit_id for p in found.pieces], parts=len(found.pieces)))
+    if len(out) > 20:  # Evidence allows at most 20 entries
+        return raw_question, records, list(range(len(raw_question["evidence"])))
+    return {**raw_question, "evidence": out}, records, bad
+
+
+def _classify(exc):
+    """(errors for the repair request, repairable?) for a validation failure of a draft."""
+    detail = safe_dispatch_failure(exc)
+    errors, repairable = [], True
+    if detail["code"] == "output_schema_violation":
+        for item in detail.get("errors", []):
+            reason = item.get("reason")
+            if reason is None and item.get("type") == "too_short" and item.get("field") == "rubric":
+                reason = "rubric_missing"
+            if reason not in REPAIRABLE_REASONS:
+                repairable = False
+            errors.append(dict(field=item.get("field"), code=reason or item.get("type")))
+    elif detail["code"] == "generated_question_quality_gate_failed":
+        reasons = detail.get("reasons", [])
+        repairable = bool(reasons) and set(reasons) <= {"insufficient_independent_scoring_criteria"}
+        errors = [dict(field="rubric", code=r) for r in reasons]
+    else:
+        repairable = False
+    return errors, repairable
+
+
+def prepare(p, response, json_extracted=False):
+    """Everything between the model's JSON and a checked Question: automatic corrections, citation matching,
+    validation. Returns (question, distractor checks, notes); raises RepairNeeded or the plain error."""
+    from pydantic import ValidationError
+
+    raw = response.get("question", response) if isinstance(response, dict) else response
+    raw, fixes = autofix(raw, p["max_points"])
+    if json_extracted:
+        fixes.insert(0, "json_extracted")
+    raw, layers, unmatched = relocate_evidence(raw, p["evidence"])
+    notes = dict(fixes=fixes, evidence=layers)
+    problems = [dict(field=f"evidence[{i}]", code="evidence_quote_unmatched") for i in unmatched]
+    try:
+        q = Question.model_validate(raw)
+    except ValidationError as exc:
+        errors, repairable = _classify(exc)
+        if not repairable:
+            raise
+        raise RepairNeeded("output_schema_violation", errors + problems, raw) from exc
+    if problems:
+        raise RepairNeeded("Textbook quote, subject or version identity mismatch", problems, raw)
+    if (q.subject, q.question_type, q.max_points) != (p["subject"], p["question_type"], p["max_points"]):
+        raise ValueError("generated_quota_mismatch")
+    distractors = None
+    if q.question_type == "single_choice":
+        q, distractors = attach_distractor_proof(q, response, p)
+    structural_issues = exam_issues(q)
+    if structural_issues:
+        message = "generated_question_quality_gate_failed:" + ",".join(structural_issues)
+        errors, repairable = _classify(ValueError(message))
+        if repairable:
+            raise RepairNeeded(message, errors, raw)
+        raise ValueError(message)
+    return q, distractors, notes
+
+
+def store_notes(conn, job_id, notes):
+    from psycopg.types.json import Jsonb
+
+    conn.execute(
+        "UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),'{normalization}',%s) WHERE id=%s",
+        (Jsonb(notes), job_id),
+    )
+
+
+def _check_sources(p):
     # Revalidate the *source bytes* when a queued model result returns, not
     # only when the job was scheduled. Old pending work must not resurrect
     # an unpinned textbook or genuine-exam style revision.
@@ -753,26 +890,12 @@ def accept(conn, job):
             ]) != ids
         ):
             raise ValueError("historical_single_choice_options_incomplete_or_spliced")
-    response = job["result"]["response"]
-    # The submitted schema is Question itself, so a direct object is canonical.
-    # Retain compatibility with older explicitly wrapped generation responses.
-    raw_question = response.get("question", response) if isinstance(response, dict) else response
-    raw_question = drop_unlisted_criterion_tags(raw_question)
-    raw_question = repair_source_identity_from_locked_units(raw_question, p["evidence"])
-    q = Question.model_validate(raw_question)
-    if (q.subject, q.question_type, q.max_points) != (
-        p["subject"],
-        p["question_type"],
-        p["max_points"],
-    ):
-        raise ValueError("generated_quota_mismatch")
-    distractors = None
-    if q.question_type == "single_choice":
-        q, distractors = attach_distractor_proof(q, response, p)
-    structural_issues = exam_issues(q)
-    if structural_issues:
-        raise ValueError("generated_question_quality_gate_failed:" + ",".join(structural_issues))
-    allowed = {u["unit_id"] for u in p["evidence"]}
+
+
+def _admit(conn, job, p, response, json_extracted):
+    """Accept a (possibly repaired) draft: checks, packet, origin. Returns the new question id."""
+    q, distractors, notes = prepare(p, response, json_extracted)
+    store_notes(conn, job["id"], notes)
     bibliography = p["source_bibliography"]
     if any(
         (e.textbook, e.authors, e.edition)
@@ -780,6 +903,7 @@ def accept(conn, job):
         for e in q.evidence
     ):
         raise ValueError("invented_bibliography")
+    allowed = {u["unit_id"] for u in p["evidence"]}
     if not {e.source_unit_id for e in q.evidence} <= allowed:
         raise ValueError("unrequested_source")
     payload = dict(
@@ -830,4 +954,75 @@ def accept(conn, job):
         concept_keys=[f"unit:{p['evidence'][0]['unit_id']}"],
         source_ref=dict(style_year=p["style_year"]),
     )
+    return qid
+
+
+def accept(conn, job):
+    if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
+        raise ValueError("actual_generation_call_required")
+    p = job["payload"]
+    _check_sources(p)
+    return _admit(conn, job, p, job["result"]["response"], bool(job["result"].get("json_extracted")))
+
+
+# ---- one repair before a draft is thrown away --------------------------------------------------------------
+
+REPAIR_INSTRUCTIONS = (
+    "Repair ONE exam-question draft. `draft` is the question you wrote; `errors` lists exactly what a program "
+    "found wrong with it (field and code; each code is explained in `explanations`). Fix ONLY those defects and "
+    "keep every other field word for word. Do not change the stem's meaning, the answer, the subject, the question "
+    "type or max_points. Every evidence excerpt must be copied verbatim from one of the `evidence` paragraphs "
+    "supplied here (never from anywhere else and never reworded); do not move a quote to a different paragraph than "
+    "the one it came from unless the text is really there. Return the COMPLETE corrected object described by "
+    "`schema` as JSON only."
+)
+
+
+def request_repair(conn, uid, job, exc):
+    """Queue the one repair of a generation job whose draft had a fixable defect. None if it cannot be queued."""
+    from app.ai_jobs import enqueue as enqueue_job
+
+    p = job["payload"]
+    if p.get("origin") == past_exam_import.ORIGIN_PAST_EXAM or p.get("repair_of_job"):
+        return None
+    response = job["result"]["response"]
+    draft = exc.draft
+    if p["question_type"] == "single_choice" and isinstance(response, dict):
+        draft = dict(question=exc.draft, distractor_checks=response.get("distractor_checks", {}))
+    codes = sorted({e["code"] for e in exc.errors if e.get("code")})
+    payload = dict(
+        origin="generation_repair",
+        repair_of_job=job["id"],
+        subject=p["subject"],
+        question_type=p["question_type"],
+        max_points=p["max_points"],
+        instructions=REPAIR_INSTRUCTIONS,
+        schema=(ChoiceDraft if p["question_type"] == "single_choice" else Question).model_json_schema(),
+        draft=draft,
+        errors=exc.errors,
+        explanations={c: REPAIRABLE_REASONS.get(c, c) for c in codes},
+        evidence=[dict(unit_id=u["unit_id"], text=u["text"]) for u in p["evidence"]],
+    )
+    try:
+        return enqueue_job(conn, uid, f"genrepair:{job['id']}", "repair", payload)
+    except ValueError:
+        return None  # too large to send again: the draft is simply thrown away, as before
+
+
+def accept_repair(conn, job):
+    """The repaired draft goes through every check again; if it still fails the task is discarded."""
+    if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
+        raise ValueError("actual_generation_call_required")
+    original = conn.execute("SELECT * FROM ai_jobs WHERE id=%s", (job["payload"]["repair_of_job"],)).fetchone()
+    if not original or original["kind"] != "generation":
+        raise ValueError("repair_source_job_missing")
+    p = original["payload"]
+    _check_sources(p)
+    try:
+        qid = _admit(conn, job, p, job["result"]["response"], bool(job["result"].get("json_extracted")))
+    except RepairNeeded as again:
+        raise RepairStillInvalid(dict(code="repair_unfixed", errors=again.errors)) from again
+    except ValueError as exc:
+        raise RepairStillInvalid(safe_dispatch_failure(exc)) from exc
+    conn.execute("UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),'{repaired_question}',to_jsonb(%s::bigint)) WHERE id=%s", (qid, job["id"]))
     return qid

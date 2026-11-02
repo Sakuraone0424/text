@@ -84,7 +84,7 @@ def test_recent_jobs_show_kind_state_reason_and_time_but_never_content(db, setup
     ids = [add_job(db, setup_ai, f"j{n}", "pending" if n % 2 else "succeeded") for n in range(25)]
     add_job(db, setup_ai, "held", "pending", kind="quality_review")
     jobs = progress.report(db, setup_ai)["recent_jobs"]
-    assert len(jobs) == 20 and set(jobs[0]) == {"id", "kind", "label", "source", "state", "reason", "detail", "at", "subject", "question_type", "question_id", "attempts", "next_retry", "outcome", "awaiting_dispatch"}
+    assert len(jobs) == 20 and set(jobs[0]) == {"id", "kind", "label", "source", "state", "reason", "detail", "notes", "at", "subject", "question_type", "question_id", "attempts", "next_retry", "outcome", "awaiting_dispatch"}
     assert len(ids) == 25
     text = json.dumps(progress.report(db, setup_ai), default=str, ensure_ascii=False)
     assert SECRET_TEXT not in text

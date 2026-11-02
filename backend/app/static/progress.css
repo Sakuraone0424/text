@@ -97,3 +97,8 @@ body {
 
 /* Opaque band over the status-bar area: scrolling content passes under it instead of into the iOS status bar
    (which blurs whatever is behind it). Plain page colour only; no blur, no gradient, no mask. */
+.waste-row { border-top: 1px solid var(--divider); }
+.waste-row:first-child { border-top: 0; }
+.waste-row > summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; }
+.waste-row > summary::after { display: none; }
+.waste-count { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }

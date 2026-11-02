@@ -634,22 +634,27 @@ def accept(conn, job):
         raise ValueError("insufficient_textbook_evidence")
     units = {u["unit_id"]: u for u in p["evidence"]}
     evidence, seen, rubric, rubric_evidence = [], set(), [], []
+    from app.evidence_match import locate
+
     for point in answer.rubric:
-        unit = units.get(point.unit_id)
-        if unit is None:
-            raise ValueError("unrequested_source")
-        if point.excerpt not in unit["text"]:
-            raise ValueError("invented_or_unmatched_quote")
-        bibliography = p["bibliographies"][unit["file_id"]]
-        if (point.unit_id, point.excerpt) not in seen:
-            seen.add((point.unit_id, point.excerpt))
-            evidence.append(evidence_record(unit, bibliography, point.excerpt))
+        found = locate(point.excerpt, p["evidence"], point.unit_id)
+        if not found.ok:
+            raise ValueError("unrequested_source" if point.unit_id not in units else "invented_or_unmatched_quote")
+        # the stored quote is the database's own text, found by the layered matcher
+        excerpt = found.pieces[0].text
+        for piece in found.pieces:
+            unit = units[piece.unit_id]
+            bibliography = p["bibliographies"][unit["file_id"]]
+            if (piece.unit_id, piece.text) not in seen:
+                seen.add((piece.unit_id, piece.text))
+                evidence.append(evidence_record(unit, bibliography, piece.text))
+        unit = units[found.pieces[0].unit_id]
         rubric.append(dict(description=point.description, points=point.points, knowledge_tags=[]))
         rubric_evidence.append(
             dict(
-                unit_ids=[unit["unit_id"]],
-                explanation=f"Textbook unit {unit['unit_id']} (OCR page {unit['ocr_page']}) quotes: {point.excerpt[:200]}",
-                excerpt=point.excerpt,
+                unit_ids=sorted({piece.unit_id for piece in found.pieces}),
+                explanation=f"Textbook unit {unit['unit_id']} (OCR page {unit['ocr_page']}) quotes: {excerpt[:200]}",
+                excerpt=excerpt,
                 ocr_page=unit["ocr_page"],
                 printed_page=unit.get("printed_page"),
             )
