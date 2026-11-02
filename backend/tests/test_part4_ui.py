@@ -212,7 +212,7 @@ def test_the_app_can_be_added_to_the_home_screen(live_app, browser):
     manifest = client.get("/manifest.webmanifest")
     assert manifest.status_code == 200 and manifest.headers["content-type"].startswith("application/manifest+json")
     data = manifest.json()
-    assert data["display"] == "standalone" and data["theme_color"] == "#2563EB" and data["start_url"] == "/training"
+    assert data["display"] == "standalone" and data["theme_color"] == "#F4F6FA" and data["start_url"] == "/training"
     sizes = {i["sizes"]: i["purpose"] for i in data["icons"]}
     assert "192x192" in sizes and "512x512" in sizes
     for icon in data["icons"] + [{"src": "/static/icons/apple-touch-icon.png"}]:
