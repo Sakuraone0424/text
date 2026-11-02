@@ -142,18 +142,23 @@ def settings(conn, user_id):
     return {k: v for k, v in row.items() if k not in ("daily_usd", "monthly_usd")}
 
 
-def configure(conn, user_id, model, effort, **options):
-    settings(conn, user_id)
+def configure(conn, user_id, model, effort, verify=True, **options):
+    """Save model, effort and limits. `verify=False` is only for saving limits while the model and effort
+    stay exactly what is already stored (they were verified when they were chosen)."""
+    current = settings(conn, user_id)
     if effort not in EFFORTS:
         raise ValueError("unsupported_effort")
+    if not verify and (model, effort) != (current["model_id"], current["effort"]):
+        raise ValueError("model_effort_not_compatibility_verified")
     row = conn.execute(
         "SELECT * FROM ai_model_catalog WHERE model_id=%s", (model,)
     ).fetchone()
-    if not row or not row["available"]:
-        raise ValueError("model_not_available_in_official_catalog")
-    cap = row["compatibility"]
-    if not cap.get("real_api_verified") or effort not in cap.get("efforts", []):
-        raise ValueError("model_effort_not_compatibility_verified")
+    if verify:
+        if not row or not row["available"]:
+            raise ValueError("model_not_available_in_official_catalog")
+        cap = row["compatibility"]
+        if not cap.get("real_api_verified") or effort not in cap.get("efforts", []):
+            raise ValueError("model_effort_not_compatibility_verified")
     allowed = {
         "auto_discover",
         "auto_upgrade",

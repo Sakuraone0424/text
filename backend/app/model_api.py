@@ -172,6 +172,59 @@ def limits(data: Limits, request: Request, name=Depends(require_auth)):
     return operation(name, save)
 
 
+class SaveAll(StrictModel):
+    """Everything on the model page except the stop switch, saved together by the one Save button."""
+    model_id: str = Field(min_length=1, max_length=200)
+    effort: str = Field(min_length=1, max_length=20)
+    auto_discover: StrictBool
+    auto_upgrade: StrictBool
+    token_limit: StrictInt = Field(ge=128, le=32768)
+    retry_limit: StrictInt = Field(ge=0, le=5)
+    max_concurrency: StrictInt = Field(ge=1, le=4)
+    daily_cny: Decimal = Field(ge=0, le=1000, allow_inf_nan=False)
+    monthly_cny: Decimal = Field(ge=0, le=10000, allow_inf_nan=False)
+    task_cny: Decimal = Field(ge=0, le=1000, allow_inf_nan=False)
+    trial_cny: Decimal = Field(ge=0, le=10000, allow_inf_nan=False)
+    trial_active: StrictBool
+    task_limit_enabled: StrictBool
+    daily_limit_enabled: StrictBool
+    monthly_limit_enabled: StrictBool
+
+
+@router.post("/save")
+def save_all(data: SaveAll, request: Request, name=Depends(require_auth)):
+    """One transaction: model, effort, switches, limits, concurrency, token and retry limits."""
+    origin(request)
+
+    def save(c, u):
+        current = models.settings(c, u)
+        same = (data.model_id, data.effort) == (current["model_id"], current["effort"])
+        models.configure(
+            c, u, data.model_id, data.effort, verify=not same,
+            **data.model_dump(exclude={"model_id", "effort"}),
+        )
+        return status(c, u)
+
+    return operation(name, save)
+
+
+class Stopped(StrictModel):
+    stopped: StrictBool
+
+
+@router.post("/stopped")
+def set_stopped(data: Stopped, request: Request, name=Depends(require_auth)):
+    """The stop / resume switch (the danger zone of the page), separate from Save."""
+    origin(request)
+
+    def apply(c, u):
+        models.settings(c, u)
+        c.execute("UPDATE ai_settings SET stopped=%s,updated_at=clock_timestamp() WHERE user_id=%s", (data.stopped, u))
+        return status(c, u)
+
+    return operation(name, apply)
+
+
 class Probe(StrictModel):
     model_id: str = Field(min_length=1, max_length=200)
     effort: str = Field(min_length=1, max_length=20)

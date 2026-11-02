@@ -17,8 +17,10 @@ def test_the_page_asks_for_login_then_shows_ten_buckets_without_horizontal_scrol
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(base + "/progress")
-    expect(page.locator("#notice")).to_contain_text("需要登录")
-    login(page, base)
+    expect(page.locator("#login")).to_be_visible()  # the same sign-in form as the other pages
+    page.locator("#password").fill("test-live-login")
+    page.locator("#login button").click()
+    expect(page.locator("#content")).to_be_visible()  # no reload needed
     page.goto(base + "/progress")
     expect(page.locator("#content")).to_be_visible()
     expect(page.locator("#bank .row")).to_have_count(10)

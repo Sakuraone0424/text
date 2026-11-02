@@ -553,3 +553,38 @@ def test_price_refresh_reprices_attempt_without_changing_model_snapshot(db, setu
         claimed["settings_snapshot"]["price_snapshot"]["version"]
         != "same-rates-refreshed"
     )
+
+
+def test_one_save_keeps_every_field_including_max_concurrency_one_to_four(client, db, monkeypatch):
+    from app import model_api
+
+    @contextmanager
+    def connection():
+        yield db
+
+    monkeypatch.setattr(model_api, "get_db", connection)
+    headers = {"x-api-key": "learner-test-key"}
+    body = dict(
+        model_id="deepseek-flash", effort="high", auto_discover=True, auto_upgrade=False, token_limit=4096,
+        retry_limit=2, max_concurrency=3, daily_cny="15", monthly_cny="90", task_cny="1", trial_cny="10",
+        trial_active=False, task_limit_enabled=True, daily_limit_enabled=True, monthly_limit_enabled=True,
+    )
+    # the model/effort stored now must be saveable even if it is not (yet) a verified model
+    client.get("/v2/model", headers=headers)
+    saved = client.post("/v2/model/save", headers=headers, json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["settings"]["max_concurrency"] == 3
+    # a fresh read (what a page refresh does) still has the user's value
+    assert client.get("/v2/model", headers=headers).json()["settings"]["max_concurrency"] == 3
+    for n in (1, 4):
+        assert client.post("/v2/model/save", headers=headers, json={**body, "max_concurrency": n}).json()["settings"]["max_concurrency"] == n
+    for bad in (0, 5):
+        assert client.post("/v2/model/save", headers=headers, json={**body, "max_concurrency": bad}).status_code == 422
+    # stop / resume is its own switch and does not touch the saved limits
+    stopped = client.post("/v2/model/stopped", headers=headers, json={"stopped": True}).json()["settings"]
+    assert stopped["stopped"] is True and stopped["max_concurrency"] == 4 and Decimal(stopped["daily_cny"]) == Decimal("15")
+    assert client.post("/v2/model/stopped", headers=headers, json={"stopped": False}).json()["settings"]["stopped"] is False
+    # a different model that was never verified is refused, and nothing is half-saved
+    refused = client.post("/v2/model/save", headers=headers, json={**body, "model_id": "never-verified", "max_concurrency": 2})
+    assert refused.status_code == 409
+    assert client.get("/v2/model", headers=headers).json()["settings"]["max_concurrency"] == 4

@@ -320,20 +320,23 @@ async function cancelJob(job, button) {
   }
 }
 
+let signedInOnce = false;
 async function load() {
   try {
     const response = await fetch("/v2/model/progress", { credentials: "same-origin", cache: "no-store" });
     if (response.status === 401) {
-      $("notice").hidden = false;
+      // The same sign-in as everywhere else (one cookie); once signed in the page loads itself.
       $("content").hidden = true;
-      $("notice").textContent = "需要登录。请先回到首页登录，再打开本页。";
-      $("updated").textContent = "";
-      return;
+      if (signedInOnce) throw new Error("登录状态没有生效（401）");
+      await Session.ensure($("login-slot"));
+      signedInOnce = true;
+      return load();
     }
     if (!response.ok) throw new Error("读取失败（" + response.status + "）");
     const report = await response.json();
     $("notice").hidden = true;
     $("content").hidden = false;
+    signedInOnce = false;
     batch(report);
     paper(report);
     status(report);
