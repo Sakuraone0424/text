@@ -40,7 +40,8 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(
 ):
     from app import auto_quality, source_policy, quiz_v2 as q
     from app.question_quality import Question
-    from app.training_spec_v2 import COUNTS, POINTS, default_blueprint, validate_items
+    from spec_helpers import rubric
+    from app.training_spec_v4 import COUNTS, POINTS, default_blueprint, validate_items
 
     # Synthetic 60q bank; review predicates are stubbed for this mechanics test.
     bank_ids = []
@@ -49,7 +50,7 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(
             for _ in range(count):
                 raw = question_factory(subject, kind).model_dump()
                 raw["max_points"] = POINTS[kind]
-                raw["rubric"] = [{"description": "Synthetic fixture criterion", "points": POINTS[kind]}]
+                raw["rubric"] = rubric(kind, POINTS[kind])
                 qid = q.create_question(db, Question.model_validate(raw))["id"]
                 assert q.review_question(db, qid, passing_audit)["passed"]
                 q.publish_question(db, qid)
@@ -87,7 +88,7 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(
     assert paper["quotas"] == expected["quotas"]
     items = [r["snapshot"] for r in db.execute("SELECT snapshot FROM paper_items_v2").fetchall()]
     validate_items(items)
-    assert len(items) == 60 and sum(i["max_points"] for i in items) == 150
+    assert len(items) == 60 and sum(i["max_points"] for i in items) == 300
 
 
 def test_ranking_balances_chapters_and_uses_recorded_signals():

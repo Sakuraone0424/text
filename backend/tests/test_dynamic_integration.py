@@ -591,9 +591,9 @@ def test_public_contract_exposes_only_v2_training_and_schema_readiness(client):
     assert "/v2/papers" in schema["paths"] and "/history" in schema["paths"]
     health = client.get("/db/health").json()
     assert health["formal_training"] == {
-        "specification": "xiaohan-60q-150pt-v2",
+        "specification": "xiaohan-60q-300pt-v4",
         "questions": 60,
-        "points": 150,
+        "points": 300,
         "duration_seconds": 3600,
     }
     from migrate import SQL_DIR

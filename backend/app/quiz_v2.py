@@ -16,7 +16,10 @@ from app.question_quality import (
 )
 from app.common import today_cn
 from app.training_spec import COUNTS, SUBJECTS, validate_items
-from app import training_spec_v2 as spec_v2
+from app import training_spec_v2 as spec_v2, training_spec_v4 as spec_v4
+
+# Every versioned 60-question specification; v2 stays readable, v4 is the current one.
+SPEC_MODULES = {spec_v2.SPECIFICATION: spec_v2, spec_v4.SPECIFICATION: spec_v4}
 
 
 class PreparationPaused(ValueError):
@@ -155,8 +158,9 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     day = day or today_cn()
     lock_bank(conn)
     spec = blueprint.model_dump()
-    is_v2 = spec["specification"] == spec_v2.SPECIFICATION
-    spec_counts = spec_v2.COUNTS if is_v2 else COUNTS
+    spec_module = SPEC_MODULES.get(spec["specification"])
+    is_v2 = spec_module is not None  # any versioned 60-question specification
+    spec_counts = spec_module.COUNTS if is_v2 else COUNTS
     existing = conn.execute(
         "SELECT * FROM papers_v2 WHERE user_id=%s AND paper_date=%s", (user_id, day)
     ).fetchone()
@@ -235,7 +239,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         except ValueError:
             reasons.append("invalid_question_or_rubric")
         if not reasons:
-            supported_points = spec_v2.POINTS if is_v2 else {
+            supported_points = spec_module.POINTS if is_v2 else {
                 "single_choice": 2, "fill_blank": 3, "term": 4,
                 "short_answer": 8, "essay": 20,
             }
@@ -393,7 +397,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
             )
     if shortages:
         raise BankShortage(shortages)
-    (spec_v2.validate_items if is_v2 else validate_items)([r["content"] for r in selected])
+    (spec_module.validate_items if is_v2 else validate_items)([r["content"] for r in selected])
     from app.answer_cues import conflict
 
     if any(
@@ -483,7 +487,7 @@ def load_paper(conn, user_id, paper_id):
     return {
         "paper_id": paper_id,
         "date": row["paper_date"].isoformat(),
-        "mode": "reviewed_60" if row["blueprint"].get("specification") == spec_v2.SPECIFICATION else "reviewed_28",
+        "mode": "reviewed_60" if row["blueprint"].get("specification") in SPEC_MODULES else "reviewed_28",
         "blueprint": row["blueprint"],
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),

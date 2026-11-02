@@ -8,7 +8,7 @@ by the AI generator. Scientific answers remain textbook-evidence-only.
 from collections import defaultdict
 from app.source_policy import current_source_sql, pinned_source_bytes
 from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
-from app.training_spec_v2 import SUBJECTS, COUNTS
+from app.training_spec_v4 import SUBJECTS, COUNTS
 
 UNRESOLVED_IMAGE = set(STYLE_SOURCE_BLOCKERS)  # Includes tables, OCR doubts, figures
 BOUNDARY_ISSUES = {"question_boundary_unconfirmed", "question_type_unknown", "year_unassigned"}
@@ -28,8 +28,9 @@ def report(conn):
     years = defaultdict(set)
     blocked = defaultdict(int)
     for row in rows:
-        key = (row["subject"], row["question_type"])
-        if row["subject"] not in SUBJECTS or row["question_type"] not in COUNTS:
+        kind = "essay" if row["question_type"] in ("essay", "question_answer") else row["question_type"]
+        key = (row["subject"], kind)
+        if row["subject"] not in SUBJECTS or kind not in COUNTS:
             continue
         if not row["question_number"]:
             continue  # A section heading or continuation is not another question.

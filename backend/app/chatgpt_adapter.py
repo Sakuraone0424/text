@@ -20,7 +20,7 @@ class TrainingAdapter:
         return response.json()
 
     def prepare(self, historical_blueprint=None):
-        from app.training_spec_v2 import default_blueprint
+        from app.training_spec_v4 import default_blueprint
 
         # Only the public default is 60q; an existing 28q integration test
         # may still pass its immutable legacy blueprint explicitly.

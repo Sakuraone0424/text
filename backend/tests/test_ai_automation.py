@@ -141,6 +141,9 @@ def test_authorization_required_before_any_real_request(monkeypatch):
 
 def synthetic_result(job, db, passed=True, quote=None):
     u = job["payload"]["evidence"][0]
+    rubric_size = len(db.execute(
+        "SELECT content FROM reviewed_questions WHERE id=%s", (job["payload"]["question_id"],)
+    ).fetchone()["content"]["rubric"])
     result = dict(
         real_api=True,
         usage=dict(input_tokens=10, output_tokens=10, cache_read_input_tokens=0),
@@ -164,7 +167,7 @@ def synthetic_result(job, db, passed=True, quote=None):
                     unit_id=u["unit_id"],
                     excerpt=quote or u["text"],
                     claim="Synthetic test-only supported claim with no real scientific assertion",
-                    criterion_indices=[0],
+                    criterion_indices=list(range(rubric_size)),
                 )
             ],
             unresolved=[] if passed else ["Synthetic uncertainty"],

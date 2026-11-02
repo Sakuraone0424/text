@@ -396,7 +396,7 @@ def summary(conn):
             qualified += 1
             pair = (q["content"]["subject"], q["content"]["question_type"])
             qualified_by[pair] = qualified_by.get(pair, 0) + 1
-    from app.training_spec_v2 import SUBJECTS, COUNTS
+    from app.training_spec_v4 import SUBJECTS, COUNTS
 
     breakdown = []
     for subject in SUBJECTS:

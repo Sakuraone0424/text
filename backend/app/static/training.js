@@ -5,7 +5,7 @@ const names = {
   fill_blank: "填空",
   term: "名词解释",
   short_answer: "简答",
-  essay: "论述",
+  essay: "问答",
 };
 let paper = null,
   version = 0,
@@ -542,6 +542,7 @@ function render() {
         article,
       );
       input.value = value.text || "";
+      input.dataset.kind = q.question_type; // textarea height grows with the answer's size
       input.setAttribute("aria-label", `第${q.position}题答案`);
       input.oninput = () => change(q.id, { text: input.value });
       if (q.question_type !== "fill_blank" && paper.photo_answers_enabled) {
@@ -1031,7 +1032,7 @@ function cachedPaper(user, paperId = null) {
       !Number.isSafeInteger(p.paper_id) ||
       p.paper_id <= 0 ||
       ![28, 60].includes(p.count) ||
-      p.max_points !== 150 ||
+      ![150, 300].includes(p.max_points) ||
       p.duration_seconds !== 3600 ||
       !["not_started", "in_progress", "submitted"].includes(t?.status) ||
       !Number.isSafeInteger(saved.version) ||
@@ -1418,7 +1419,7 @@ $("source-status").onclick = async () => {
   ];
   const answers = await Promise.allSettled(endpoints.map(([path]) => api(path)));
   const display = {biochemistry: "生物化学", cell_biology: "细胞生物学"};
-  const typeName = {single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答"};
+  const typeName = {single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答", essay: "问答"};
   answers.forEach((answer, index) => {
     const section = element("section", undefined, root);
     element("h3", endpoints[index][1], section);

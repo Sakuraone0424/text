@@ -12,9 +12,9 @@ from test_api_v2 import LEARNER
 def test_no_sources_means_all_eight_style_buckets_missing(db, client):
     status = report(db)
     assert status["source_status"] == "user_provided_genuine_past_exams"
-    assert len(status["buckets"]) == 8
+    assert len(status["buckets"]) == 10
     assert status["ready_for_same_type_style"] is False
-    assert len(status["missing_same_type_style"]) == 8
+    assert len(status["missing_same_type_style"]) == 10
     assert all(b["safe_style_anchors"] == 0 for b in status["buckets"])
     response = client.get("/v2/quality/genuine-exam-style-readiness", headers=LEARNER)
     assert response.status_code == 200
@@ -35,7 +35,7 @@ def test_genuine_source_parsing_counts_only_real_question_starts(db, tmp_path, m
     assert find("term")["safe_style_anchors"] == 1
     assert find("fill_blank")["safe_style_anchors"] == 0
     assert find("single_choice")["years_with_safe_anchors"] == [2023]
-    assert len(status["missing_same_type_style"]) == 5  # 1 biochem + 4 cell
+    assert len(status["missing_same_type_style"]) == 7  # 2 biochem (fill-in, essay) + 5 cell
     assert status["scope"] == "parsed_question_starts_only_not_official_answer_verification"
 
 

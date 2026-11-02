@@ -6,7 +6,7 @@ from difflib import SequenceMatcher
 from typing import Literal
 
 from app.training_spec import POINTS, DURATION_SECONDS, validate_quotas
-from app import training_spec_v2 as v2
+from app import training_spec_v2 as v2, training_spec_v4 as v4
 
 from pydantic import (
     BaseModel,
@@ -113,10 +113,15 @@ class Question(StrictModel):
         if sum(c.points for c in self.rubric) != self.max_points:
             raise ValueError("Rubric points must sum to max_points")
         permissible = {POINTS[self.question_type]}
-        if self.question_type in v2.POINTS:
-            permissible.add(v2.POINTS[self.question_type])
+        for module in (v2, v4):
+            if self.question_type in module.POINTS:
+                permissible.add(module.POINTS[self.question_type])
         if self.max_points not in permissible:
             raise ValueError("max_points must match a supported versioned training specification")
+        if self.question_type == "essay" and self.max_points == v4.POINTS["essay"]:
+            low, high = v4.RUBRIC_ITEMS["essay"]
+            if not low <= len(self.rubric) <= high:
+                raise ValueError("Essay needs 4 to 6 scoring points")
         if self.question_type == "single_choice":
             if set(self.options) != set("ABCD") or self.answer not in self.options:
                 raise ValueError(
@@ -182,16 +187,19 @@ class Blueprint(StrictModel):
 
     @model_validator(mode="before")
     @classmethod
-    def v2_default_scoring(cls, value):
-        if isinstance(value, dict) and value.get("specification") == v2.SPECIFICATION and "points" not in value:
-            return {**value, "points": dict(v2.POINTS)}
+    def versioned_default_scoring(cls, value):
+        if isinstance(value, dict) and "points" not in value:
+            for module in (v2, v4):
+                if value.get("specification") == module.SPECIFICATION:
+                    return {**value, "points": dict(module.POINTS)}
         return value
 
     @model_validator(mode="after")
     def total(self):
-        if self.specification == v2.SPECIFICATION:
-            v2.validate_blueprint(self.model_dump())
-            return self
+        for module in (v2, v4):
+            if self.specification == module.SPECIFICATION:
+                module.validate_blueprint(self.model_dump())
+                return self
         if set(self.quotas) != {"biochemistry", "cell_biology"}:
             raise ValueError("Both subjects are required")
         if any(set(q) != set(TYPES) for q in self.quotas.values()):

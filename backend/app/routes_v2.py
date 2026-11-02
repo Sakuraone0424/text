@@ -34,7 +34,7 @@ def training_specification():
     ):
         from app.training_spec import formal_specification
     else:
-        from app.training_spec_v2 import formal_specification
+        from app.training_spec_v4 import formal_specification
     from app.training_sessions import photo_answers_enabled
 
     return {**formal_specification(), "photo_answers_enabled": photo_answers_enabled()}
@@ -124,7 +124,7 @@ def withdraw(question_id: int):
 @router.post("/papers")
 def paper(blueprint: Blueprint, username: str = Depends(require_auth)):
     if (os.environ.get("QUIZ_DEPLOYMENT_PROFILE") == "ustc-exam-ocr-qa"
-            and blueprint.specification != "xiaohan-60q-150pt-v2"):
+            and blueprint.specification != "xiaohan-60q-300pt-v4"):
         raise HTTPException(409, "QA training requires 60-question specification")
     return operation(lambda c, u: service.create_paper(c, u, blueprint), username)
 
@@ -902,7 +902,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             "training": [
                 {
                     **r,
-                    "mode": "reviewed_60" if r["specification"] == "xiaohan-60q-150pt-v2" else "reviewed_28",
+                    "mode": "reviewed_60" if r["specification"] in ("xiaohan-60q-150pt-v2", "xiaohan-60q-300pt-v4") else "reviewed_28",
                     "score": None if r["pending"] else r["graded_points"],
                 }
                 for r in recent

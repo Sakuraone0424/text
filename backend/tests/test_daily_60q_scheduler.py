@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app import automation, training_spec_v2 as v2
+from app import automation, training_spec_v4 as v2
 from app.training_spec import SPECIFICATION as V1_SPECIFICATION
 
 
@@ -15,12 +15,12 @@ def test_unset_specification_defaults_to_sixty_v2(env):
     assert plan.specification == v2.SPECIFICATION
     for subject in v2.SUBJECTS:
         assert plan.quotas[subject] == {
-            "single_choice": 18, "fill_blank": 7, "term": 4, "short_answer": 1,
+            "single_choice": 10, "fill_blank": 14, "term": 4, "short_answer": 1, "essay": 1,
         }
-    assert plan.points == {"single_choice": 2, "fill_blank": 2, "term": 4, "short_answer": 9}
+    assert plan.points == {"single_choice": 4, "fill_blank": 4, "term": 6, "short_answer": 12, "essay": 18}
     assert sum(
         n * plan.points[k] for q in plan.quotas.values() for k, n in q.items()
-    ) == 150
+    ) == 300
 
 
 def test_retired_28q_specification_cannot_be_selected_for_new_papers():
@@ -58,7 +58,7 @@ def test_old_or_malformed_paper_cannot_be_marked_as_prepared_sixty(changed):
         "mode": "reviewed_60",
         "blueprint": {"specification": v2.SPECIFICATION},
         "count": 60,
-        "max_points": 150,
+        "max_points": 300,
     }
     result.update(changed)
     with pytest.raises(ValueError, match="daily_60q_paper_not_proven"):
@@ -73,7 +73,7 @@ def test_good_v2_paper_is_retained_untouched():
         "mode": "reviewed_60",
         "blueprint": {"specification": v2.SPECIFICATION},
         "count": 60,
-        "max_points": 150,
+        "max_points": 300,
         "paper_id": 41,
     }
     assert automation.verified_daily_paper_response(result, blueprint) is result

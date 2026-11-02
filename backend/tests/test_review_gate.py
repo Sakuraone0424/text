@@ -12,7 +12,8 @@ from psycopg.types.json import Jsonb
 
 from app import auto_quality as quality, auto_worker, quiz_v2, source_policy, training_sessions
 from app.candidate_review import create_packet, snapshot_unit
-from app.training_spec_v2 import COUNTS, POINTS, SPECIFICATION, SUBJECTS, default_blueprint
+from spec_helpers import rubric
+from app.training_spec_v4 import COUNTS, POINTS, SPECIFICATION, SUBJECTS, default_blueprint
 from test_ai_automation import setup_ai, synthetic_result  # noqa: F401  (fixture/helper)
 from test_candidate_review import packet as packet_fixture
 from test_gap_generation import corpus, review_jobs, tweak, written  # noqa: F401  (fixtures/helpers)
@@ -293,6 +294,9 @@ def test_a_full_60_question_bank_reaches_a_paper_with_no_human_record(db, tmp_pa
                 q.update(subject=subject, question_type=kind, max_points=POINTS[kind],
                          stem=f"{uuid4()} {uuid4()} Synthetic isolated question")
                 q["rubric"][0]["points"] = POINTS[kind]
+                if kind == "essay":  # four to six scoring points, each bound to evidence
+                    q["rubric"] = [dict(r, knowledge_tags=[]) for r in rubric(kind, POINTS[kind])]
+                    p["ai_analysis"]["rubric_evidence"] = [deepcopy(p["ai_analysis"]["rubric_evidence"][0]) for _ in q["rubric"]]
                 if kind != "single_choice":
                     q.update(options={}, answer="fixture solution")
                 if kind == "fill_blank":
@@ -305,7 +309,7 @@ def test_a_full_60_question_bank_reaches_a_paper_with_no_human_record(db, tmp_pa
     from app.question_quality import Blueprint
 
     paper = quiz_v2.create_paper(db, setup_ai, Blueprint.model_validate(spec))
-    assert (paper["count"], paper["max_points"]) == (60, 150)
+    assert (paper["count"], paper["max_points"]) == (60, 300)
     training_sessions.start(db, setup_ai, paper["paper_id"])
     for table in ("question_audits", "candidate_human_decisions", "source_review_events", "exam_annotations"):
         assert db.execute(f"SELECT count(*) AS n FROM {table}").fetchone()["n"] == 0, table

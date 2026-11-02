@@ -339,7 +339,8 @@ def test_source_context_stays_in_same_version_and_is_private(db, reviewer, packe
 
 def test_complete_quota_preview_is_read_only(db, reviewer, packet):
     from app.question_quality import Question
-    from app.training_spec_v2 import COUNTS, SUBJECTS, POINTS
+    from spec_helpers import rubric
+    from app.training_spec_v4 import COUNTS, SUBJECTS, POINTS
     from psycopg.types.json import Jsonb
 
     # This fixture checks preview arithmetic/side effects only, not source approval.
@@ -372,11 +373,8 @@ def test_complete_quota_preview_is_read_only(db, reviewer, packet):
                         accepted_answers=["Synthetic reference"],
                     )
                 q["rubric"] = [
-                    dict(
-                        description="Synthetic scoring criterion only",
-                        points=POINTS[kind],
-                        knowledge_tags=q["knowledge_tags"],
-                    )
+                    dict(description=r["description"], points=r["points"], knowledge_tags=q["knowledge_tags"])
+                    for r in rubric(kind, POINTS[kind], "Synthetic scoring criterion only")
                 ]
                 q = Question.model_validate(q).model_dump()
                 qid = db.execute(
