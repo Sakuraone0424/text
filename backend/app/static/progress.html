@@ -25,6 +25,14 @@
       </header>
       <p id="notice" role="status" hidden></p>
       <div id="content" hidden>
+        <section class="card" aria-labelledby="h-batch">
+          <h2 id="h-batch">入库进度</h2>
+          <div id="batch-progress"></div>
+          <dl class="facts">
+            <div><dt>今日入库</dt><dd id="admitted-today"></dd></div>
+            <div><dt>今日审核通过率</dt><dd id="review-rate"></dd></div>
+          </dl>
+        </section>
         <section class="card" aria-labelledby="h-paper">
           <h2 id="h-paper">下一张完整卷子</h2>
           <p id="paper-main" class="big"></p>
@@ -41,6 +49,10 @@
         <section class="card" aria-labelledby="h-bank">
           <h2 id="h-bank">题库（已入库 / 目标）</h2>
           <div id="bank"></div>
+          <details id="legacy" class="legacy" hidden>
+            <summary id="legacy-summary"></summary>
+            <ul id="legacy-list" class="legacy-list"></ul>
+          </details>
         </section>
         <section class="card" aria-labelledby="h-spend">
           <h2 id="h-spend">费用</h2>

@@ -22,12 +22,68 @@ def _by_bucket(rows):
     return out
 
 
+def _current_points(type_expr, points_expr):
+    """SQL: the question's point value is the current specification's value for its type."""
+    from app.training_spec_v4 import POINTS
+
+    cases = " ".join(f"WHEN '{kind}' THEN {points}" for kind, points in POINTS.items())
+    return f"(({points_expr})::int IS NOT DISTINCT FROM (CASE {type_expr} {cases} END))"
+
+
+# Only work created under the current specification counts in the stages. A job or question written on an
+# earlier point scale (old 2/2/4/9 points, the GPT-era trials) belongs to the folded "history" line instead.
+JOB_CURRENT = _current_points("payload->>'question_type'", "payload->>'max_points'")
+QUESTION_CURRENT = _current_points("q.content->>'question_type'", "q.content->>'max_points'")
+
+
+def legacy_summary(conn):
+    """Blocked work from before the current specification, folded into one line with reasons."""
+    jobs = conn.execute(
+        "SELECT COALESCE(result->'dispatch_failure'->>'code',error_code,'unspecified') AS code,count(*) AS n FROM ai_jobs "
+        f"WHERE state='blocked' AND kind IN ('generation','quality_review','repair') AND NOT {JOB_CURRENT} "
+        "AND COALESCE(error_code,'')<>'superseded_scoring' GROUP BY 1"
+    ).fetchall()
+    states = conn.execute(
+        "SELECT COALESCE(NULLIF(st.reason,''),'unspecified') AS code,count(*) AS n FROM auto_question_states st "
+        f"JOIN reviewed_questions q ON q.id=st.question_id WHERE st.status='blocked' AND NOT {QUESTION_CURRENT} GROUP BY 1"
+    ).fetchall()
+    merged = defaultdict(int)
+    for r in list(jobs) + list(states):
+        merged[r["code"]] += r["n"]
+    return dict(count=sum(merged.values()), reasons=[dict(code=k, count=v) for k, v in sorted(merged.items(), key=lambda kv: -kv[1])])
+
+
+def admitted_today(conn):
+    return {
+        (r["s"], r["t"]): r["n"]
+        for r in conn.execute(
+            "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,count(*) AS n "
+            "FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+            f"WHERE st.status='ready' AND q.status='published' AND {QUESTION_CURRENT} "
+            f"AND st.updated_at>={cost_control.DAY_START} GROUP BY 1,2"
+        ).fetchall()
+    }
+
+
+def review_pass_rate_today(conn):
+    """Of today's finished reviews of current-specification questions, how many passed."""
+    row = conn.execute(
+        "SELECT count(*) FILTER (WHERE st.status IN ('ready','blocked','retired')) AS reviewed,"
+        "count(*) FILTER (WHERE st.status='ready') AS passed "
+        "FROM ai_jobs j JOIN reviewed_questions q ON q.id=(j.payload->>'question_id')::bigint "
+        "JOIN auto_question_states st ON st.question_id=q.id "
+        f"WHERE j.kind='quality_review' AND j.state='succeeded' AND {QUESTION_CURRENT} "
+        f"AND j.finished_at>={cost_control.DAY_START}"
+    ).fetchone()
+    return dict(reviewed=row["reviewed"], passed=row["passed"], rate=round(row["passed"] / row["reviewed"], 4) if row["reviewed"] else None)
+
+
 def buckets(conn, uid):
     states = conn.execute(
         "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,"
         "CASE WHEN st.status='blocked' THEN 'blocked' ELSE 'reviewing' END AS k,count(*) AS n "
         "FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
-        "WHERE st.status IN ('candidate','checking','repairing','blocked') GROUP BY 1,2,3"
+        f"WHERE st.status IN ('candidate','checking','repairing','blocked') AND {QUESTION_CURRENT} GROUP BY 1,2,3"
     ).fetchall()
     state_reasons = conn.execute(
         "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,"
@@ -36,13 +92,13 @@ def buckets(conn, uid):
         "  AND j.payload->>'question_id'=st.question_id::text AND j.result->'dispatch_failure' IS NOT NULL ORDER BY j.id DESC LIMIT 1) END,"
         " NULLIF(st.reason,''),'unspecified') AS code,count(*) AS n "
         "FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
-        "WHERE st.status='blocked' GROUP BY 1,2,3"
+        f"WHERE st.status='blocked' AND {QUESTION_CURRENT} GROUP BY 1,2,3"
     ).fetchall()
     jobs = conn.execute(
         "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,"
         "CASE WHEN state IN ('pending','retrying') THEN 'queued' WHEN state='running' THEN 'generating' "
         "WHEN state='succeeded' THEN 'generating' ELSE 'blocked' END AS k,count(*) AS n "
-        "FROM ai_jobs WHERE kind='generation' AND ("
+        f"FROM ai_jobs WHERE kind='generation' AND {JOB_CURRENT} AND ("
         " state IN ('pending','retrying','running') OR (state='succeeded' AND dispatched_at IS NULL)"
         " OR (state='blocked' AND COALESCE(error_code,'')<>'superseded_scoring' AND created_at>clock_timestamp()-%s*interval '1 day')"
         ") GROUP BY 1,2,3",
@@ -51,7 +107,7 @@ def buckets(conn, uid):
     job_reasons = conn.execute(
         "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,"
         "COALESCE(result->'dispatch_failure'->>'code',error_code,'unspecified') AS code,count(*) AS n "
-        "FROM ai_jobs WHERE kind='generation' AND state='blocked' AND COALESCE(error_code,'')<>'superseded_scoring' "
+        f"FROM ai_jobs WHERE kind='generation' AND state='blocked' AND {JOB_CURRENT} AND COALESCE(error_code,'')<>'superseded_scoring' "
         "AND created_at>clock_timestamp()-%s*interval '1 day' GROUP BY 1,2,3",
         (BLOCKED_JOB_DAYS,),
     ).fetchall()
@@ -62,6 +118,8 @@ def buckets(conn, uid):
     reasons = defaultdict(lambda: defaultdict(int))
     for r in list(state_reasons) + list(job_reasons):
         reasons[(r["s"], r["t"])][r["code"]] += r["n"]
+    today = admitted_today(conn)
+    first_batch = cost_control.bank_target() is not None
     result = []
     for subject in SUBJECTS:
         for kind, required in COUNTS.items():
@@ -69,7 +127,8 @@ def buckets(conn, uid):
             result.append(dict(
                 subject=subject, question_type=kind, required=required,
                 target=cost_control.reserve_target(required, STARTUP_RESERVE_DAYS),
-                stocked=eligible_reserve_count(conn, uid, subject, kind),
+                target_kind="first_batch" if first_batch else "two_day_reserve",
+                stocked=eligible_reserve_count(conn, uid, subject, kind), admitted_today=today.get((subject, kind), 0),
                 queued=c["queued"], generating=c["generating"], reviewing=c["reviewing"], blocked=c["blocked"],
                 blocked_reasons=dict(sorted(reasons[(subject, kind)].items(), key=lambda kv: -kv[1])),
             ))
@@ -219,7 +278,10 @@ def report(conn, uid):
     return dict(
         generated_at=now,
         buckets=rows,
-        totals={k: sum(b[k] for b in rows) for k in ("required", "target", "stocked", "queued", "generating", "reviewing", "blocked")},
+        totals={k: sum(b[k] for b in rows) for k in ("required", "target", "stocked", "queued", "generating", "reviewing", "blocked", "admitted_today")},
+        target_kind=rows[0]["target_kind"],
+        review_today=review_pass_rate_today(conn),
+        legacy=legacy_summary(conn),
         recent_jobs=recent_jobs(conn),
         spend={k: spend[k] for k in (
             "today_cny", "month_cny", "month_counted_cny", "month_cap_cny", "grading_reserve_cny",

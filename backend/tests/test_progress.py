@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 
 from app import ai_jobs, auto_worker, cost_control, progress
 from app.question_quality import Question
-from app.training_spec_v4 import COUNTS, SUBJECTS
+from app.training_spec_v4 import COUNTS, POINTS, SUBJECTS
 from spec_helpers import rubric
 from test_ai_automation import setup_ai  # noqa: F401  (fixture)
 from test_api_v2 import LEARNER
@@ -34,7 +34,7 @@ def add_question(db, status, reason=None, subject="biochemistry", kind="term", p
 def add_job(db, uid, key, state, kind="generation", subject="biochemistry", qtype="term", error=None):
     return db.execute(
         "INSERT INTO ai_jobs(job_key,user_id,kind,state,settings_snapshot,payload,error_code) VALUES (%s,%s,%s,%s,'{}',%s,%s) RETURNING id",
-        (key, uid, kind, state, Jsonb({"subject": subject, "question_type": qtype}), error)).fetchone()["id"]
+        (key, uid, kind, state, Jsonb({"subject": subject, "question_type": qtype, "max_points": POINTS[qtype]}), error)).fetchone()["id"]
 
 
 def bucket(report, subject, kind):
@@ -185,3 +185,61 @@ def test_the_endpoint_needs_login_and_returns_only_numbers(client, db, monkeypat
     assert page.status_code == 200 and "出题进度" in page.text and page.headers["cache-control"] == "no-store"
     home = client.get("/training").text
     assert 'href="/progress"' in home
+
+
+# ---- only the current specification counts in the stages --------------------------------------------------
+
+
+def old_job(db, uid, key, state="blocked", error="invalid_qa_automation_grant", points=2, kind="generation"):
+    return db.execute(
+        "INSERT INTO ai_jobs(job_key,user_id,kind,state,settings_snapshot,payload,error_code) VALUES (%s,%s,%s,%s,'{}',%s,%s) RETURNING id",
+        (key, uid, kind, state, Jsonb({"subject": "biochemistry", "question_type": "single_choice", "max_points": points}), error)).fetchone()["id"]
+
+
+def test_work_from_an_earlier_scale_is_folded_into_one_history_line(db, setup_ai):
+    old_job(db, setup_ai, "o1")
+    old_job(db, setup_ai, "o2", error="OSError")
+    old_job(db, setup_ai, "o3", state="pending")  # a stale queued job: neither a stage nor history
+    db.execute("INSERT INTO ai_jobs(job_key,user_id,kind,state,settings_snapshot,payload,error_code) VALUES ('nopoints',%s,'generation','blocked','{}',%s,'OSError')",
+               (setup_ai, Jsonb({"subject": "cell_biology", "question_type": "term"})))  # GPT-era trial job without a point value
+    add_question(db, "blocked", "unresolved_quality_findings", kind="term", points=4)  # the old term scale was 4
+    add_question(db, "blocked", "rubric_not_fully_evidenced", kind="term", points=6)  # current: stays in its cell
+    add_job(db, setup_ai, "now", "pending")
+    report = progress.report(db, setup_ai)
+    term = bucket(report, "biochemistry", "term")
+    assert (term["queued"], term["blocked"]) == (1, 1) and term["blocked_reasons"] == {"rubric_not_fully_evidenced": 1}
+    assert bucket(report, "biochemistry", "single_choice")["blocked"] == 0 and bucket(report, "cell_biology", "term")["blocked"] == 0
+    assert report["legacy"]["count"] == 4
+    assert {r["code"]: r["count"] for r in report["legacy"]["reasons"]} == {"invalid_qa_automation_grant": 1, "OSError": 2, "unresolved_quality_findings": 1}
+    assert sum(b["blocked"] for b in report["buckets"]) == 1  # the stage totals never include history
+
+
+def test_each_cell_shows_how_many_were_admitted_today_and_the_review_pass_rate(db, setup_ai):
+    from stats_helpers import publish
+
+    first = add_question(db, "ready")
+    second = add_question(db, "ready")
+    third = add_question(db, "blocked", "rubric_not_fully_evidenced")
+    publish(db, [first, second])
+    db.execute("UPDATE auto_question_states SET updated_at=clock_timestamp()-interval '3 days' WHERE question_id=%s", (second,))  # admitted earlier
+    for qid, key in ((first, "a"), (second, "b"), (third, "c")):
+        db.execute(
+            "INSERT INTO ai_jobs(job_key,user_id,kind,state,settings_snapshot,payload,finished_at) VALUES (%s,%s,'quality_review','succeeded','{}',%s,clock_timestamp())",
+            (key, setup_ai, Jsonb({"question_id": qid})))
+    report = progress.report(db, setup_ai)
+    assert bucket(report, "biochemistry", "term")["admitted_today"] == 1 and report["totals"]["admitted_today"] == 1
+    assert report["review_today"] == {"reviewed": 3, "passed": 2, "rate": round(2 / 3, 4)}
+    assert progress.report(db, setup_ai) and True
+
+
+def test_the_target_says_whether_it_is_the_first_batch_or_the_two_day_reserve(db, setup_ai, monkeypatch):
+    monkeypatch.delenv("AI_BANK_TARGET_PER_BUCKET", raising=False)
+    report = progress.report(db, setup_ai)
+    assert report["target_kind"] == "two_day_reserve" and {b["target_kind"] for b in report["buckets"]} == {"two_day_reserve"}
+    monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", "5")
+    report = progress.report(db, setup_ai)
+    assert report["target_kind"] == "first_batch" and report["totals"]["target"] == 50
+
+
+def test_no_reviews_today_means_no_rate_not_zero(db, setup_ai):
+    assert progress.report(db, setup_ai)["review_today"] == {"reviewed": 0, "passed": 0, "rate": None}
