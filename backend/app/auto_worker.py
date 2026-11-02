@@ -305,7 +305,11 @@ def run(report):
         ):
             model_router.refresh(conn)
         for user in users:
-            model_compatibility.auto_upgrade(conn, user["user_id"])
+            upgrade = model_compatibility.auto_upgrade(conn, user["user_id"])
+            report["upgrade"] = upgrade["status"] + (
+                ":" + ",".join(f"{c['model']}={c['reason']}" for c in upgrade.get("candidates", []))
+                if upgrade.get("candidates") else ":" + upgrade["model"] if upgrade.get("model") else ""
+            )
             if (
                 not user["stopped"]
                 and private
@@ -323,7 +327,9 @@ def run(report):
                     pass  # Not admitted is not a success; job/probe status remains visible.
         # Retry budget/stopped jobs only when user explicitly enabled new attempts.
         conn.execute(
-            "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' AND j.error_code IN ('budget_exceeded','automation_stopped')"
+            "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' "
+            "AND (j.error_code IN ('budget_exceeded','automation_stopped') OR j.error_code LIKE ANY(%s))",
+            ([c + "%" for c in ai_jobs.MODEL_GONE_CODES],),
         )
         states, held, head = queue_snapshot(conn)
         report["queue"] = ",".join(f"{k}={v}" for k, v in sorted(states.items())) or "empty"

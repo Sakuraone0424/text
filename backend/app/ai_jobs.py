@@ -76,6 +76,47 @@ def _note(outcome, **detail):
     LAST_CLAIM.update(outcome=outcome, **detail)
 
 
+# Jobs that were blocked only because their frozen model disappeared; they are retried once a usable
+# replacement exists (see auto_worker), never left silently blocked.
+MODEL_GONE_CODES = (
+    "model_delisted_no_replacement",
+    "replacement_effort_not_probed",
+    "replacement_unusable",
+)
+SCOPED = ("limited_trial", "review_campaign", "qa_automation")
+
+
+def refreeze_on_current_model(conn, job):
+    """The model a queued job was frozen with is gone from the catalog (or its metadata changed).
+
+    Ordinary jobs carry no model-specific input, so they are re-frozen on the model that is
+    selected, probed and priced NOW. Returns (job, None) when re-frozen, else (job, reason) with a
+    specific code. Scoped (frozen trial / campaign / QA) and compatibility jobs are never moved.
+    """
+    s = job["settings_snapshot"]
+    if job["kind"] == "compatibility" or any(k in s for k in SCOPED):
+        return job, "model_delisted_or_catalog_changed"
+    live = model_router.settings(conn, job["user_id"])
+    row = conn.execute("SELECT * FROM ai_model_catalog WHERE model_id=%s", (live["model_id"],)).fetchone()
+    if not row or not row["available"] or (live["model_id"] == s.get("model_id") and row["metadata"] == s.get("official_metadata")):
+        return job, "model_delisted_no_replacement"
+    from app import cost_control
+
+    try:
+        fresh = model_router.snapshot(conn, job["user_id"])
+    except ValueError as exc:
+        return job, "replacement_unusable:" + str(exc)
+    level = cost_control.effort_for(job["kind"])
+    if level and level != fresh["effort"]:
+        if level not in fresh["capabilities"].get("efforts", []):
+            return job, "replacement_effort_not_probed:" + level
+        fresh["effort"] = level
+    moved = conn.execute(
+        "UPDATE ai_jobs SET settings_snapshot=%s WHERE id=%s RETURNING *", (Jsonb(fresh), job["id"])
+    ).fetchone()
+    return moved, None
+
+
 def claim(conn, scope_id=None, scope_kind="limited_trial"):
     _note("not_started")
     if scope_kind not in ("limited_trial", "review_campaign", "qa_automation"):
@@ -119,7 +160,12 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         else s.get("official_metadata")
     )
     if not model or not model["available"] or model["metadata"] != expected:
-        reason = "model_delisted_or_catalog_changed"
+        job, reason = refreeze_on_current_model(conn, job)
+        if reason is None:
+            s = job["settings_snapshot"]
+            model = conn.execute(
+                "SELECT * FROM ai_model_catalog WHERE model_id=%s", (s["model_id"],)
+            ).fetchone()
     if live["stopped"]:
         reason = "automation_stopped"
     running = conn.execute(

@@ -1551,3 +1551,12 @@
   border-radius: 12px;
   text-decoration: none;
 }
+
+.training-app .submit-warning {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #ffedd5;
+  color: #c2410c;
+  font-weight: 700;
+}

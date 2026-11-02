@@ -196,6 +196,7 @@ $("price-refresh").onclick = async () => {
   try {
     await api("/v2/model/prices/refresh", {});
     await load();
+    say("人民币价格已从官方价格页刷新。");
   } catch (e) {
     say(e.message);
   }

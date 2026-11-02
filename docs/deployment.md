@@ -57,6 +57,12 @@ worker 真正开始调用模型，需要同时满足：
 
 `deploy/railway-automation/worker.railway.json` 只作为上述设置的参考，不会被任何服务读取。正式站（`xiao-ustc-quiz`）运行 `main`，不受此变更影响；第 10 步切换时需在其服务级设置里同样写明。
 
+## 自动升级与已下架模型
+
+- 「允许升级」只是**允许**：新模型必须先由人工在第 8.5 步质量对比通过后记录（`POST /v2/model/benchmark-approval`，需要登录并带 `x-review-api-key: <QUIZ_REVIEW_API_KEY>`，body `{"model_id": "...", "approved": true, "note": "..."}`；没有探测过的模型会被拒绝）。探测不会改动这个记录；模型元数据变化会清掉它。
+- worker 每次运行评估一次，**不会静默**：`worker-run` 里的 `upgrade=` 字段是 `off` / `none` / `waiting:<模型>=<原因>` / `switched:<模型>`。切换前必须同时满足：设置档（判分）、出题档（off）、审核档（low）都已对该模型探测通过；当前人民币价格已核实；最坏单次费用在每日/每月/单任务（及试验）预算内。缺的探测会自动排队（只发合成算术，费用极小）。
+- 已排队任务冻结的模型下架或目录变化时：普通任务按当前选定、已探测、有价格的模型**重新冻结后继续**（输入不变）；不能重排的标明原因 `model_delisted_no_replacement` / `replacement_effort_not_probed:<档>` / `replacement_unusable:<原因>`，出现可用替代后 worker 自动把它们放回队列。冻结试验、审核活动、QA 授权任务和兼容性探测任务不会被移到别的模型。
+
 ## 出题进度页
 
 登录后打开 `/progress`（首页「出题进度」卡片和「我的」里都有入口），每 30 秒自动刷新，只读。数据来自 `GET /v2/model/progress`（需登录），只返回数字、代码和时间，不含题干、教材原文、提示词和密钥：
