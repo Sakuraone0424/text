@@ -135,7 +135,10 @@ def test_empty_state_pages(engine, live_app, mode, scheme):
     assert page.locator(".stat-card").first.evaluate("(n) => getComputedStyle(n).backgroundColor") == card
     assert page.evaluate("document.querySelector('meta[name=theme-color][media*=dark]').content") == "#0E1014"
     nav = page.locator(".sidebar").bounding_box()
-    assert nav["height"] == 56 and abs(nav["y"] + nav["height"] - page.evaluate("innerHeight")) < 1  # the bar sits at the bottom, nothing below it
+    # Safari: the bar is 56 px; home-screen mode adds a fixed 28-34 px gap below the icons (no viewport-fit=cover)
+    expected = 56 if mode == "safari" else range(56 + 28, 56 + 34 + 1)
+    assert (nav["height"] == expected) if mode == "safari" else (nav["height"] in expected)
+    assert abs(nav["y"] + nav["height"] - page.evaluate("innerHeight")) < 1  # the bar sits at the bottom, nothing below it
     clear_of_the_top_inset(page, mode)
     fits(page)
     snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "home")

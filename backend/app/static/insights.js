@@ -143,7 +143,7 @@
       banner.hidden = false;
     } else banner.hidden = true;
     if (overview.status !== "fulfilled") {
-      $("stat-avg-note").textContent = "统计暂时读取失败，未将未知数据当作 0。";
+      $("stat-avg-note").textContent = "统计暂时读取失败，未将未知数据当作0。";
       let retry = $("home-retry");
       if (!retry) {
         retry = el("button", "重试", $("stat-avg-note").parentElement, "secondary");
@@ -228,7 +228,7 @@
     try {
       data = await read("/v2/stats/profile");
     } catch (error) {
-      if (error.name !== "AuthRequired") retryCard(root, error.message + "。未将未知数据当作 0。", loadProfile);
+      if (error.name !== "AuthRequired") retryCard(root, error.message + "。未将未知数据当作0。", loadProfile);
       return;
     }
     root.replaceChildren();
