@@ -16,7 +16,7 @@ from collections import Counter, defaultdict
 from psycopg.types.json import Jsonb
 from pydantic import Field, StrictBool, StrictInt
 
-from app import cost_control
+from app import cost_control, evidence_filter
 from app.ai_jobs import content_sha, enqueue
 from app.auto_execution import MAX_EVIDENCE_CHARS, MAX_EVIDENCE_UNITS  # one definition, enforced at the call
 from app.candidate_review import create_packet, snapshot_unit
@@ -359,6 +359,8 @@ def retrieve_evidence(conn, subject, text, page_hints=None):
             continue
         if len(chosen) >= MAX_EVIDENCE_UNITS or chars + len(unit["text"]) > MAX_EVIDENCE_CHARS:
             continue
+        if not evidence_filter.usable(unit["text"], unit.get("quality_flags") or ()):
+            continue  # too short, a caption, table, contents or heading: it cannot support an answer
         chosen.append({**unit, "printed_page": printed})
         chars += len(unit["text"])
     return chosen

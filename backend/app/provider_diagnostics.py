@@ -48,6 +48,8 @@ def inspect_sse(raw):
 
 def parse_completed_result(result):
     """Never reinterpret thinking, partial JSON or a token stop as an answer."""
+    if result.finish_reason == "max-tokens":
+        return None, "output_truncated"  # cut off by the output length limit: not a format error
     if result.finish_reason != "completed":
         return None, "incomplete_model_response"
     if not result.final_response.strip():
@@ -93,7 +95,7 @@ def safe_diagnostic(value):
     if not isinstance(value, dict):
         return {}
     result = {}
-    if value.get("failure_stage") in ("sdk_exception", "incomplete_model_response", "empty_final_response", "invalid_response_json", "response_object_required"):
+    if value.get("failure_stage") in ("sdk_exception", "output_truncated", "incomplete_model_response", "empty_final_response", "invalid_response_json", "response_object_required"):
         result["failure_stage"] = value["failure_stage"]
     if value.get("sdk_finish_reason") in ("completed", "max-tokens", "error", "cancelled", "interrupted"):
         result["sdk_finish_reason"] = value["sdk_finish_reason"]

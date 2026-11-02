@@ -225,12 +225,36 @@ def set_stopped(data: Stopped, request: Request, name=Depends(require_auth)):
     return operation(name, apply)
 
 
+@router.get("/reconciliation")
+def reconciliation(name=Depends(require_auth)):
+    """What the counted spend is made of, the last balance reading and the last corrections (time, before, after, difference)."""
+    from app import cny_billing, cost_reconcile
+
+    return operation(name, lambda c, u: dict(breakdown=cny_billing.ledger_breakdown(c, u), **cost_reconcile.status(c)))
+
+
+@router.post("/reconcile")
+def reconcile_now(request: Request, name=Depends(require_auth)):
+    """Read the real balance now and reconcile (the worker does this hourly and at Beijing midnight)."""
+    origin(request)
+    from app import cost_reconcile
+
+    def run(c, u):
+        try:
+            balance = cost_reconcile.fetch_balance()
+        except ValueError as exc:
+            raise ValueError("balance_unavailable:" + str(exc))
+        return dict(result=cost_reconcile.reconcile(c, u, balance, "manual"))
+
+    return operation(name, run)
+
+
 @router.get("/waste/stats")
 def waste_stats(hours: int = Query(24, ge=1, le=168), name=Depends(require_auth)):
     """Why finished model work was thrown away in the last `hours`, most frequent first, with how each is handled now."""
     from app import waste_report
 
-    return operation(name, lambda c, u: waste_report.blocked_stats(c, hours))
+    return operation(name, lambda c, u: waste_report.full_stats(c, hours))
 
 
 @router.get("/waste/replay")

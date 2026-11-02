@@ -89,14 +89,12 @@ DAY_START = "(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') A
 
 
 def month_split(conn, uid):
-    """(reserved-group spend, writing/review spend) this Shanghai month."""
+    """(reserved-group spend, writing/review spend) this Shanghai month, by what each attempt counts (cny_billing.COUNTED)."""
     row = conn.execute(
-        "SELECT COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE j.kind=ANY(%s)),0) AS reserved, "
-        "COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE NOT j.kind=ANY(%s)),0) AS other "
-        "FROM ai_cny_reservations r JOIN ai_jobs j ON j.id=r.job_id "
-        "LEFT JOIN ai_cny_events e ON e.job_id=r.job_id AND e.attempt=r.attempt AND e.kind='usage_estimate' "
-        f"WHERE j.user_id=%s AND r.created_at>={MONTH_START}",
-        (list(RESERVED_FOR), list(RESERVED_FOR), uid),
+        f"SELECT COALESCE(sum({cny_billing.COUNTED}) FILTER(WHERE j.kind=ANY(%(rf)s)),0) AS reserved, "
+        f"COALESCE(sum({cny_billing.COUNTED}) FILTER(WHERE NOT j.kind=ANY(%(rf)s)),0) AS other "
+        f"{cny_billing._ATTEMPTS} WHERE j.user_id=%(uid)s AND r.created_at>={MONTH_START}",
+        {"rf": list(RESERVED_FOR), "uid": uid, "med": cny_billing.medians(conn, uid)},
     ).fetchone()
     return Decimal(row["reserved"]), Decimal(row["other"])
 

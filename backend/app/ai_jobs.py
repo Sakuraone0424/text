@@ -6,6 +6,8 @@ from collections.abc import MutableMapping
 import json
 from decimal import Decimal
 from uuid import uuid4
+
+RUN_ID = str(uuid4())  # this worker process; written on every lease it takes
 from psycopg.types.json import Jsonb
 from app import model_router, cny_billing
 
@@ -223,22 +225,31 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         # Freeze model/effort, not a stale tariff. Each attempt snapshots the current
         # admitted CNY version and reserves its own ceiling before any request.
         price = cny_billing.current_price(conn, s["model_id"])
-        amount = model_router.cost_bound({**s, "price_snapshot": price})
+        # Ordinary jobs reserve at the price of the current period; the frozen owner scopes (trial, campaign, QA)
+        # were approved at the higher ceiling and keep it.
+        amount = model_router.cost_bound({**s, "price_snapshot": price}, at=None if any(k in s for k in SCOPED) else cny_billing.utcnow())
     except ValueError:
         price = {}
         amount = Decimal(0)
         reason = "verified_cny_price_required"
     totals = cny_billing.totals(conn, uid)
-    if (
-        (live.get("daily_limit_enabled", True) and totals["day"] + amount > live["daily_cny"])
-        or (live.get("monthly_limit_enabled", True) and totals["month"] + amount > live["monthly_cny"])
-        or (live["trial_active"] and totals["trial"] + amount > live["trial_cny"])
-        or (live.get("task_limit_enabled", True) and job["reserved_cny"] + amount > live["task_cny"])
-    ):
+    budget_scope = None  # which limit stopped it: daily | monthly | trial | task | cap
+    if live.get("daily_limit_enabled", True) and totals["day"] + amount > live["daily_cny"]:
+        budget_scope = "daily"
+    elif live.get("monthly_limit_enabled", True) and totals["month"] + amount > live["monthly_cny"]:
+        budget_scope = "monthly"
+    elif live["trial_active"] and totals["trial"] + amount > live["trial_cny"]:
+        budget_scope = "trial"
+    elif live.get("task_limit_enabled", True) and job["reserved_cny"] + amount > live["task_cny"]:
+        budget_scope = "task"
+    if budget_scope:
         reason = "budget_exceeded"
     if s.get("billing_currency") != "CNY":
         reason = "legacy_currency_job_requires_requeue"
-    reason = reason or cost_control.cap_reason(conn, uid, job["kind"], amount)
+    capped = None if reason else cost_control.cap_reason(conn, uid, job["kind"], amount)
+    if capped:
+        budget_scope = "cap"
+    reason = reason or capped
     from app.limited_trial import claim_reason
 
     trial_reason = claim_reason(conn, job, amount)
@@ -257,11 +268,11 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
             "UPDATE ai_jobs SET state='blocked',error_code=%s WHERE id=%s",
             (reason, job["id"]),
         )
-        _note("blocked:" + str(reason), job_id=job["id"], kind=job["kind"])
+        _note("blocked:" + str(reason), job_id=job["id"], kind=job["kind"], **({"scope": budget_scope} if budget_scope else {}))
         return None
     claimed = conn.execute(
-        "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_until=clock_timestamp()+%s*interval '1 second',started_at=clock_timestamp() WHERE id=%s RETURNING *",
-        (amount, str(uuid4()), 600 if extended_limits(s) else 180, job["id"]),
+        "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_run=%s,lease_until=clock_timestamp()+%s*interval '1 second',started_at=clock_timestamp() WHERE id=%s RETURNING *",
+        (amount, str(uuid4()), RUN_ID, 600 if extended_limits(s) else 180, job["id"]),
     ).fetchone()
     conn.execute(
         "INSERT INTO ai_cny_reservations(job_id,attempt,amount_cny,price_snapshot) VALUES(%s,%s,%s,%s)",
@@ -271,13 +282,27 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     return claimed
 
 
+def failure_code(error):
+    """The task's failure code: application-owned text only (never a model's words or a path)."""
+    import re
+
+    if isinstance(error, ProviderFailure):
+        stage = (error.diagnostic or {}).get("failure_stage") if isinstance(error.diagnostic, dict) else None
+        if not error.request_confirmed and stage:
+            return "provider_" + stage  # e.g. provider_output_truncated
+        return "provider_http_" + str(error.status)
+    if isinstance(error, ValueError) and re.fullmatch(r"[a-z_]{3,80}", str(error)):
+        return "ValueError:" + str(error)  # our own fixed reason, e.g. ValueError:payload_exceeds_hard_cap
+    return type(error).__name__
+
+
 def finish(conn, job, result=None, error=None):
     locked = conn.execute(
         "SELECT * FROM ai_jobs WHERE id=%s FOR UPDATE", (job["id"],)
     ).fetchone()
     if locked["state"] != "running" or locked["lease_token"] != job["lease_token"]:
         raise ValueError("stale_lease")
-    if result is not None and len(json.dumps(result).encode()) > (
+    if result is not None and len(json.dumps(result, ensure_ascii=False).encode()) > (
         1048576 if extended_limits(locked["settings_snapshot"]) else 131072
     ):
         raise ValueError("oversized_result")
@@ -287,27 +312,21 @@ def finish(conn, job, result=None, error=None):
         and result.get("returned_model_id") != locked["settings_snapshot"]["model_id"]
     ):
         error = ProviderFailure(200, usage=result.get("usage"))
+    # A ValueError from our own code (a size cap, a guard) fails the same way every time: one retry at most.
+    retry_room = locked["settings_snapshot"]["retry_limit"] if not isinstance(error, ValueError) else min(1, locked["settings_snapshot"]["retry_limit"])
     state = (
         "succeeded"
         if error is None
         else (
             "retrying"
-            if locked["attempts"] <= locked["settings_snapshot"]["retry_limit"]
+            if locked["attempts"] <= retry_room
             else "blocked"
         )
     )
     if isinstance(error, ProviderFailure) and error.status in (400, 401, 402, 403, 404):
         state = "blocked"
     # Error messages/prompts/credentials are not logged. Codes are application-owned.
-    code = (
-        None
-        if error is None
-        else (
-            "provider_http_" + str(error.status)
-            if isinstance(error, ProviderFailure)
-            else type(error).__name__
-        )
-    )
+    code = None if error is None else failure_code(error)
     usage = (result or {}).get("usage", {}) or getattr(error, "usage", {})
     if result is None and isinstance(error, ProviderFailure):
         # A failed response remains a failure; retain safe metadata, not prose.
@@ -345,6 +364,38 @@ def finish(conn, job, result=None, error=None):
     return state
 
 
+class Released(Exception):
+    """Raised by an executor that has not sent anything yet and must give the job back (worker shutting down)."""
+
+
+def release(conn, job):
+    """Give back a leased job that never reached the provider: no cost, and it is claimable again at once."""
+    conn.execute(
+        "INSERT INTO ai_cny_adjustments(job_id,attempt,amount_cny,reason) VALUES (%s,%s,0,'released_before_request')",
+        (job["id"], job["attempts"]),
+    )
+    conn.execute(
+        "UPDATE ai_jobs SET state='retrying',lease_token=NULL,lease_run=NULL,next_retry=clock_timestamp(),error_code='released_on_shutdown' "
+        "WHERE id=%s AND lease_token=%s",
+        (job["id"], job["lease_token"]),
+    )
+
+
+def reclaim_orphans(conn, grace_seconds=40):
+    """Hand back jobs that a PREVIOUS worker process still holds (it was restarted by a deploy): their leases would
+    otherwise keep the concurrency slots busy for minutes. Calls count as unknown (an estimate) until reconciliation."""
+    lost = conn.execute(
+        "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,"
+        "lease_token=NULL,error_code='worker_restarted' WHERE state='running' AND lease_run IS DISTINCT FROM %s "
+        "AND started_at<clock_timestamp()-%s*interval '1 second' RETURNING *",
+        (RUN_ID, grace_seconds),
+    ).fetchall()
+    for job in lost:
+        if job["settings_snapshot"].get("billing_currency") == "CNY":
+            cny_billing.settle(conn, job, None, TimeoutError())
+    return len(lost)
+
+
 def run_once(get_db, executor, scope_id=None, scope_kind="limited_trial"):
     with get_db() as c:
         job = claim(c, scope_id=scope_id, scope_kind=scope_kind)
@@ -353,6 +404,10 @@ def run_once(get_db, executor, scope_id=None, scope_kind="limited_trial"):
     try:
         model_router.authorized(private=job["kind"] != "compatibility")
         result = executor(job)
+    except Released:
+        with get_db() as c:
+            release(c, job)
+        return True
     except Exception as exc:
         with get_db() as c:
             metadata = ({"execution_failure": {"type": type(exc).__name__, "errno": exc.errno}}

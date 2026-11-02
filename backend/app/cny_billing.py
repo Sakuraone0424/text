@@ -171,8 +171,14 @@ def upper_rates(price):
     }
 
 
-def reserve_bound(price, token_limit):
+def reserve_bound(price, token_limit, at=None):
+    """Worst case for one call. With `at` and a verified calendar, at the price of that moment's period
+    (off-peak calls reserve the off-peak price); otherwise the higher of the two."""
     rates = upper_rates(price)
+    if at is not None:
+        band = period(at, calendar_2026())
+        if band in ("peak", "off_peak"):
+            rates = {k: money(price["rules"][band][k]) for k in ("cache_hit", "cache_miss", "output")}
     # Match relay input byte limit; adversarial cache miss and output both at peak.
     return (
         Decimal(32000) * max(rates["cache_hit"], rates["cache_miss"])
@@ -246,16 +252,69 @@ def tool_cost(tool, successes, at, mode="direct", price=None):
     )
 
 
+MEDIAN_CALLS = 50  # a finished call without usage counts as the median of the last 50 of its kind
+
+_ATTEMPTS = """FROM ai_cny_reservations r JOIN ai_jobs j ON j.id=r.job_id
+ LEFT JOIN ai_cny_events e ON e.job_id=r.job_id AND e.attempt=r.attempt AND e.kind='usage_estimate'
+ LEFT JOIN LATERAL (SELECT x.amount_cny FROM ai_cny_adjustments x WHERE x.job_id=r.job_id AND x.attempt=r.attempt
+                    ORDER BY x.id DESC LIMIT 1) a ON true"""
+_LIVE = "(j.state='running' AND j.attempts=r.attempt AND j.lease_until>clock_timestamp())"
+# What one attempt counts against the budget:
+#   reconciled amount > settled usage > (still running: its worst-case reservation, released the moment it ends)
+#   > (ended without usage: the median real cost of the last 50 calls of that kind, until reconciliation corrects it)
+COUNTED = (
+    "COALESCE(a.amount_cny, e.amount_cny, CASE WHEN " + _LIVE + " THEN r.amount_cny "
+    "ELSE LEAST(r.amount_cny, COALESCE((%(med)s::jsonb->>j.kind)::numeric, r.amount_cny)) END)"
+)
+CATEGORY = (
+    "CASE WHEN a.amount_cny IS NOT NULL THEN 'reconciled' WHEN e.amount_cny IS NOT NULL THEN 'settled' "
+    "WHEN " + _LIVE + " THEN 'running' ELSE 'estimated' END"
+)
+DAY_FROM = "(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')"
+MONTH_FROM = "(date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')"
+
+
+def medians(conn, uid):
+    """JSON {kind: median real cost of the last 50 settled calls of that kind} (empty kinds are left out)."""
+    import json
+
+    rows = conn.execute(
+        "SELECT kind, percentile_cont(0.5) WITHIN GROUP (ORDER BY amount_cny) AS med FROM ("
+        " SELECT j.kind, e.amount_cny, row_number() OVER (PARTITION BY j.kind ORDER BY e.id DESC) AS rn"
+        " FROM ai_cny_events e JOIN ai_jobs j ON j.id=e.job_id"
+        " WHERE j.user_id=%s AND e.kind='usage_estimate' AND e.amount_cny IS NOT NULL) t "
+        "WHERE rn<=%s GROUP BY kind",
+        (uid, MEDIAN_CALLS),
+    ).fetchall()
+    return json.dumps({r["kind"]: str(Decimal(str(r["med"])).quantize(Decimal("0.00000001"))) for r in rows})
+
+
 def totals(conn, uid):
-    """Spend counted against the limits: settled usage; a failed, uncertain or running
-    attempt is counted at its worst-case reservation (never forgotten)."""
+    """Spend counted against the limits (see COUNTED): actual settled cost, plus running calls at their reservation,
+    plus an estimate for finished calls whose usage never arrived (restart, timeout) until reconciliation."""
     return conn.execute(
-        """SELECT COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE r.created_at>=(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS day,
-     COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)) FILTER(WHERE r.created_at>=(date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')),0) AS month,
-     COALESCE(sum(COALESCE(e.amount_cny,r.amount_cny)),0) AS trial FROM ai_cny_reservations r JOIN ai_jobs j ON j.id=r.job_id
-     LEFT JOIN ai_cny_events e ON e.job_id=r.job_id AND e.attempt=r.attempt AND e.kind='usage_estimate' WHERE j.user_id=%s""",
-        (uid,),
+        f"""SELECT COALESCE(sum({COUNTED}) FILTER(WHERE r.created_at>={DAY_FROM}),0) AS day,
+     COALESCE(sum({COUNTED}) FILTER(WHERE r.created_at>={MONTH_FROM}),0) AS month,
+     COALESCE(sum({COUNTED}),0) AS trial {_ATTEMPTS} WHERE j.user_id=%(uid)s""",
+        {"uid": uid, "med": medians(conn, uid)},
     ).fetchone()
+
+
+def ledger_breakdown(conn, uid):
+    """What the counted amount is made of, today and this month: count, counted amount and worst-case reservation per kind."""
+    out = {}
+    med = medians(conn, uid)
+    for label, start in (("today", DAY_FROM), ("month", MONTH_FROM)):
+        rows = conn.execute(
+            f"SELECT {CATEGORY} AS category, count(*) AS n, COALESCE(sum({COUNTED}),0) AS counted, "
+            f"COALESCE(sum(r.amount_cny),0) AS reserved {_ATTEMPTS} "
+            f"WHERE j.user_id=%(uid)s AND r.created_at>={start} GROUP BY 1",
+            {"uid": uid, "med": med},
+        ).fetchall()
+        by = {r["category"]: dict(count=r["n"], counted_cny=str(r["counted"]), reserved_cny=str(r["reserved"])) for r in rows}
+        out[label] = {k: by.get(k, dict(count=0, counted_cny="0", reserved_cny="0")) for k in ("settled", "reconciled", "running", "estimated")}
+        out[label]["counted_cny"] = str(sum(Decimal(v["counted_cny"]) for v in out[label].values()))
+    return out
 
 
 def settle(conn, job, result, error):
@@ -325,8 +384,8 @@ def summary(conn, uid):
         (uid,),
     ).fetchone()
     unresolved = conn.execute(
-        "SELECT COALESCE(sum(r.amount_cny),0) AS n FROM ai_cny_reservations r JOIN ai_jobs j ON j.id=r.job_id WHERE j.user_id=%s AND NOT EXISTS(SELECT 1 FROM ai_cny_events e WHERE e.job_id=r.job_id AND e.attempt=r.attempt AND e.kind='usage_estimate')",
-        (uid,),
+        f"SELECT COALESCE(sum({COUNTED}),0) AS n {_ATTEMPTS} WHERE j.user_id=%(uid)s AND ({CATEGORY})='estimated'",
+        {"uid": uid, "med": medians(conn, uid)},
     ).fetchone()["n"]
     try:
         p = current_price(conn, s["model_id"])

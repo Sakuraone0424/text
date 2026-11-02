@@ -218,3 +218,14 @@ def wall_clock_is_off_peak(monkeypatch):
         cost_control, "is_peak",
         lambda at=None, calendar=None: False if at is None else real(at, calendar),
     )
+
+
+@pytest.fixture(autouse=True)
+def no_real_balance_calls(monkeypatch):
+    """Tests never ask DeepSeek for the balance; a test that wants a reading passes its own."""
+    from app import cost_reconcile
+
+    def refuse(timeout=10):
+        raise ValueError("balance_disabled_in_tests")
+
+    monkeypatch.setattr(cost_reconcile, "fetch_balance", refuse)

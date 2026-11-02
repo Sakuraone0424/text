@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app import cny_billing, cost_control
+from app import cny_billing, cost_control, cost_reconcile
 from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count
 from app.training_spec_v4 import COUNTS, SUBJECTS
 
@@ -300,7 +300,7 @@ def trailing_window(now, off_peak_hours=RATE_OFF_PEAK_HOURS, limit_hours=RATE_WI
     return round(back, 2), seen
 
 
-def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horizon_hours=ETA_HORIZON_HOURS, observed_off_peak_hours=None):
+def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horizon_hours=ETA_HORIZON_HOURS, observed_off_peak_hours=None, start_at=None):
     """When will `missing` more questions be in the bank?
 
     The rate is approvals per OFF-PEAK hour over the last window (nothing is written in peak hours), and the
@@ -316,7 +316,7 @@ def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horiz
         return "estimating", None, None, None
     rate = approved / window_hours_off
     needed_off_peak = missing / rate
-    moment, done, step = now, 0.0, timedelta(minutes=15)
+    moment, done, step = max(now, start_at) if start_at else now, 0.0, timedelta(minutes=15)
     while done < needed_off_peak:
         if (moment - now).total_seconds() / 3600 > horizon_hours:
             return "slow", None, None, round(rate, 3)
@@ -326,15 +326,47 @@ def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horiz
     return "estimated", moment, round((moment - now).total_seconds() / 3600, 1), round(rate, 3)
 
 
+def budget_state(conn, now):
+    """Is today's AI budget used up? Then writing resumes by itself at the next Beijing midnight."""
+    from datetime import timedelta
+
+    local = now.astimezone(cny_billing.SHANGHAI)
+    resume = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    out = dict(daily_exhausted=False, resume_at=resume, remaining_daily_cny=None)
+    user = conn.execute("SELECT user_id FROM ai_settings ORDER BY user_id LIMIT 1").fetchone()
+    if not user:
+        return out
+    try:
+        from app import model_router
+
+        settings = model_router.settings(conn, user["user_id"])
+        if not settings.get("daily_limit_enabled", True):
+            return out
+        used = cny_billing.totals(conn, user["user_id"])["day"]
+        remaining = max(Decimal(0), Decimal(settings["daily_cny"]) - Decimal(used))
+        try:
+            snap = model_router.snapshot(conn, user["user_id"])
+            one_call = model_router.cost_bound({**snap, "price_snapshot": cny_billing.current_price(conn, snap["model_id"])}, at=now)
+        except ValueError:
+            one_call = Decimal(0)
+        out.update(remaining_daily_cny=str(remaining), daily_exhausted=remaining <= 0 or remaining < one_call)
+    except (ValueError, KeyError):
+        pass
+    return out
+
+
 def next_paper(conn, rows, now):
     """How long until the bank holds one complete paper (counting each cell only up to one paper's need)."""
     missing = sum(max(0, b["required"] - b["stocked"]) for b in rows)
     back, off_hours = trailing_window(now)
     admitted = approved_recently(conn, back)
-    state, eta_at, eta_hours, per_off_peak = estimate_ready(now, missing, admitted, back, observed_off_peak_hours=off_hours)
+    budget = budget_state(conn, now)
+    state, eta_at, eta_hours, per_off_peak = estimate_ready(
+        now, missing, admitted, back, observed_off_peak_hours=off_hours,
+        start_at=budget['resume_at'] if budget['daily_exhausted'] else None)
     return dict(missing_questions=missing, approved_last_hours=round(back), approved_in_window=admitted,
                 per_hour=round(admitted / back, 3) if back else 0, per_off_peak_hour=per_off_peak, rate_off_peak_hours=round(off_hours, 2),
-                complete=missing == 0, eta_state=state, eta_hours=eta_hours, eta_at=eta_at)
+                complete=missing == 0, eta_state=state, eta_hours=eta_hours, eta_at=eta_at, budget=budget)
 
 
 def daily_spend(conn, uid):
@@ -348,11 +380,18 @@ def daily_spend(conn, uid):
     return [dict(day=r["day"], cny=str(r["cny"])) for r in rows]
 
 
+def _reconciliation(conn):
+    status = cost_reconcile.status(conn)
+    return dict(last_checked_at=status["last_checked_at"], balance_cny=status["balance_cny"], last_correction=(status["corrections"] or [None])[0])
+
+
 def _waste(conn):
     from app import waste_report
 
     stats = waste_report.blocked_stats(conn, 24)
-    return dict(hours=24, blocked=stats["blocked"][:8], auto_fixed=stats["auto_fixed"], evidence_layers=stats["evidence_layers"])
+    recurring = [i for i in stats["blocked"] if not i.get("one_time")]
+    once = [i for i in stats["blocked"] if i.get("one_time")]
+    return dict(hours=24, blocked=recurring[:8], one_time=once, auto_fixed=stats["auto_fixed"], evidence_layers=stats["evidence_layers"])
 
 
 def report(conn, uid):
@@ -368,6 +407,7 @@ def report(conn, uid):
         legacy=legacy_summary(conn),
         recent_jobs=recent_jobs(conn),
         waste=_waste(conn),
+        ledger=dict(breakdown=cny_billing.ledger_breakdown(conn, uid), reconciliation=_reconciliation(conn)),
         spend={k: spend[k] for k in (
             "today_cny", "month_cny", "month_counted_cny", "month_cap_cny", "grading_reserve_cny",
             "writing_review_limit_cny", "remaining_writing_review_cny", "remaining_grading_cny",

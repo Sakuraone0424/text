@@ -15,8 +15,8 @@ from app.provider_diagnostics import (
 
 
 @pytest.mark.parametrize("reason,text,expected", [
-    ("max-tokens", "", "incomplete_model_response"),
-    ("max-tokens", '{"passed":true}', "incomplete_model_response"),
+    ("max-tokens", "", "output_truncated"),
+    ("max-tokens", '{"passed":true}', "output_truncated"),
     ("completed", "{", "invalid_response_json"),
     ("completed", "", "empty_final_response"),
     ("completed", "[]", "response_object_required"),
@@ -35,7 +35,7 @@ def test_sdk_reasoning_only_session_replays_token_exhaustion():
         {"type": "turn/end", "data": {"reason": {"kind": "max-tokens"}}},
     ]
     assert final_response(events) == ""
-    assert parse_completed_result(SimpleNamespace(finish_reason=finish_reason(events), final_response=final_response(events)))[1] == "incomplete_model_response"
+    assert parse_completed_result(SimpleNamespace(finish_reason=finish_reason(events), final_response=final_response(events)))[1] == "output_truncated"
 
 
 def sse(items):
