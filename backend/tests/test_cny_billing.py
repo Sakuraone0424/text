@@ -439,7 +439,9 @@ def test_upgrade_does_not_use_unknown_model_price(db, setup_ai):
         (Jsonb(cap),),
     )
     m.configure(db, setup_ai, "deepseek-flash", "high", auto_upgrade=True)
-    assert auto_upgrade(db, setup_ai) is None
+    out = auto_upgrade(db, setup_ai)  # never switched, and never silent about why
+    assert out["status"] == "waiting" and out["candidates"] == [{"model": "unknown-price-new", "reason": "price_not_verified"}]
+    assert m.settings(db, setup_ai)["model_id"] == "deepseek-flash"
 
 
 def test_lease_recovery_records_unknown_and_stop_blocks_new_calls(db, setup_ai):
