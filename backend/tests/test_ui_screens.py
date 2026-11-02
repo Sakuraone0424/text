@@ -61,10 +61,12 @@ def open_page(engine, mode, base, path="/training", logged_in=True, overview=Non
     page.on("pageerror", lambda e: errors.append(str(e)))
     top, bottom = INSETS[mode]
     if logged_in:
-        page.goto(base + "/training")
-        page.locator("#password").fill("test-live-login")
-        page.locator("#login button").click()
-        page.locator("#login").wait_for(state="hidden")
+        # The session cookie is Secure, which WebKit refuses over plain http; sign in over the API and
+        # hand the cookie to the browser context (a real device uses https).
+        import httpx
+        reply = httpx.post(base + "/auth/login", json={"password": "test-live-login"}, trust_env=False)
+        reply.raise_for_status()
+        context.add_cookies([{"name": "ustc_quiz_session", "value": reply.cookies["ustc_quiz_session"], "url": base}])
     page.goto(base + path)
     page.add_style_tag(content=f":root, .training-app {{ --sat-test: {top}px; --sab-test: {bottom}px; }}")
     return page, errors
