@@ -134,7 +134,7 @@ function batch(report) {
   $("batch-number").textContent = t.stocked;
   $("batch-target").textContent = " / " + t.target;
   $("batch-number").parentElement.classList.toggle("done", t.stocked >= t.target);
-  C().progress($("batch-progress"), { label: "已入库", text: `${t.stocked} / ${t.target}`, value: t.stocked, max: t.target, color: t.stocked >= t.target ? "#15803D" : "#2563EB" });
+  C().progress($("batch-progress"), { label: "已入库", text: `${t.stocked} / ${t.target}`, value: t.stocked, max: t.target, color: t.stocked >= t.target ? "var(--up)" : "var(--primary)" });
   const today = $("admitted-today");
   today.hidden = false;
   today.textContent = "今日入库 " + t.admitted_today + " 道";
@@ -232,7 +232,7 @@ function spend(report) {
   const cap = Number(s.month_cap_cny), stop = Number(s.writing_review_limit_cny);
   Charts.columns($("spend-chart"), {
     title: "本月累计花费", hideTitle: true, unit: "元", items, max: Math.max(cap, running), format: (v) => "¥" + Math.round(v),
-    refLines: [{ value: stop, label: "出题停止线 ¥" + Math.round(stop), color: Charts.COLORS.cell_biology }, { value: cap, label: "上限 ¥" + Math.round(cap), color: "#B91C1C" }],
+    refLines: [{ value: stop, label: "出题停止线 ¥" + Math.round(stop), color: Charts.COLORS.cell_biology }, { value: cap, label: "上限 ¥" + Math.round(cap), color: Charts.COLORS.danger }],
     conclusion: items.length ? `本月累计 ${yuan(running)}，距出题停止线还有 ${yuan(Math.max(0, stop - Number(s.month_counted_cny)))}。` : "",
     empty: "本月还没有花费", emptyHint: "出题、审核、判分产生费用后，每天一根柱子。",
   });

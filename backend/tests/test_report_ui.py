@@ -119,6 +119,6 @@ def test_without_photo_answers_the_exam_offers_typing_only(photos_off, live_app,
 def test_the_service_worker_cache_only_holds_static_files_and_was_bumped(live_app):
     client, _, _ = live_app
     worker = client.get("/training-sw.js").text
-    assert "v14-ui-redesign" in worker
+    assert "v15-dark-mode" in worker
     for private in ("/v2/", "result", "grading", "history"):
         assert private not in worker.split("const ASSETS")[1].split("];")[0]

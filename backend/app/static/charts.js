@@ -4,16 +4,19 @@
 "use strict";
 (() => {
   const NS = "http://www.w3.org/2000/svg";
+  // Colours are CSS variables (tokens.css), so every chart follows light / dark with no redraw.
   const COLORS = {
-    biochemistry: "#2563EB",
-    cell_biology: "#EA580C",
-    total: "#111827",
-    grid: "#EEF1F5",
-    axis: "#556070",
-    good: "#15803D",
-    warn: "#C2410C",
-    soft: "#DBEAFE",
-    track: "#E5E9F0",
+    biochemistry: "var(--chart-bio)",
+    cell_biology: "var(--chart-cell)",
+    total: "var(--chart-total)",
+    grid: "var(--chart-grid)",
+    axis: "var(--chart-axis)",
+    good: "var(--up)",
+    warn: "var(--accent-ink)",
+    danger: "var(--danger)",
+    soft: "var(--primary-soft)",
+    track: "var(--chart-track)",
+    surface: "var(--card)",
   };
   const html = (tag, text, parent, cls) => {
     const node = document.createElement(tag);
@@ -24,7 +27,11 @@
   };
   const svg = (tag, attrs, parent) => {
     const node = document.createElementNS(NS, tag);
-    Object.entries(attrs || {}).forEach(([k, v]) => node.setAttribute(k, String(v)));
+    Object.entries(attrs || {}).forEach(([k, v]) => {
+      // a colour given as var(--x) must go through style: presentation attributes do not resolve variables
+      if (["fill", "stroke", "stop-color"].includes(k) && String(v).startsWith("var(")) node.style.setProperty(k, String(v));
+      else node.setAttribute(k, String(v));
+    });
     if (parent) parent.append(node);
     return node;
   };
@@ -123,7 +130,7 @@
         if (!pt) return;
         // a larger invisible hit area for thumbs sits UNDER the visible dot and forwards taps to it
         const hit = svg("circle", { cx: pt[0], cy: pt[1], r: 12, fill: "transparent" }, chart);
-        const dot = svg("circle", { cx: pt[0], cy: pt[1], r: 4, fill: "#fff", stroke: s.color, "stroke-width": 2, class: "chart-dot" }, chart);
+        const dot = svg("circle", { cx: pt[0], cy: pt[1], r: 4, fill: COLORS.surface, stroke: s.color, "stroke-width": 2, class: "chart-dot" }, chart);
         bind(dot, f.readout, `${s.name} ${pt[2].label}：${format(pt[2].value)}${spec.unit ? " " + spec.unit : ""}${pt[2].note ? "（" + pt[2].note + "）" : ""}`);
         hit.addEventListener("click", () => dot.dispatchEvent(new Event("click")));
         hit.addEventListener("touchstart", () => dot.dispatchEvent(new Event("click")), { passive: true });
@@ -250,7 +257,7 @@
       const level = cell.value > 0 ? Math.max(1, Math.min(4, Math.ceil(cell.value * 4))) : 0; // five levels: 0..4
       const rect = svg("rect", {
         x: L + col * (size + gap), y: row * (size + gap), width: size, height: size, rx: 4,
-        fill: level ? COLORS.biochemistry : COLORS.track, "fill-opacity": level ? [0, 0.25, 0.45, 0.7, 1][level] : 1, class: "heat-cell",
+        fill: `var(--heat-${level})`, class: "heat-cell",
         ...(cell.today ? { stroke: COLORS.biochemistry, "stroke-width": 1.5, "stroke-dasharray": "3 2" } : {}),
       }, chart);
       bind(rect, f.readout, `${cell.day}：${cell.note}`);
@@ -259,8 +266,7 @@
     legend.append("少");
     [0, 1, 2, 3, 4].forEach((l) => {
       const chip = html("i", undefined, legend);
-      chip.style.background = l ? COLORS.biochemistry : COLORS.track;
-      chip.style.opacity = l ? [0, 0.25, 0.45, 0.7, 1][l] : 1;
+      chip.style.background = `var(--heat-${l})`;
     });
     legend.append("多");
     return root;

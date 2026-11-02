@@ -1497,13 +1497,11 @@ $("archive").onclick = async () => {
         : "Notion尚未配置，未向外部发送答题数据",
       $("learning"),
     );
-    const label = element(
-      "label",
-      "允许向已配置的私有Notion归档 ",
-      $("learning"),
-    );
+    const label = element("label", undefined, $("learning"));
+    label.className = "check-row";
     const box = element("input", undefined, label);
     box.type = "checkbox";
+    element("span", "允许向已配置的私有 Notion 归档", label);
     box.checked = result.consented;
     box.onchange = async () => {
       try {
@@ -1652,8 +1650,13 @@ $("insights").onclick = async () => {
     const reports = await api("/v2/model/insights");
     const root = $("learning");
     root.replaceChildren();
-    if (!reports.length)
-      element("p", "尚无已完成的AI学习建议；不会编造成绩或薄弱点。", root);
+    if (!reports.length) {
+      // a normal empty state (thin icon + one short sentence), not a system notice
+      const line = element("div", undefined, root);
+      line.className = "empty-line";
+      line.innerHTML = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></svg>';
+      element("span", "还没有学习建议，做完几套卷子后会出现", line);
+    }
     for (const report of reports) {
       element(
         "h3",
