@@ -73,7 +73,7 @@ const fmtTime = (iso) =>
     ? new Date(iso).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
     : "—";
 const yuan = (value) => (value === null || value === undefined ? "—" : "¥" + Number(value).toFixed(2));
-const reasonText = (code) => REASON[code] || REASON[String(code).split(":")[0]] || code;
+const reasonText = (code) => REASON[code] || REASON[String(code).split(":")[0]] || "原因未归类";
 
 function duration(hours) {
   if (hours < 1) return "不到 1 小时";
@@ -118,28 +118,61 @@ function status(report) {
   if (w.stale || w.outcome !== "ok") note.classList.add("warn");
 }
 
+function batch(report) {
+  const t = report.totals;
+  const label = report.target_kind === "first_batch" ? "首批目标" : "两天储备";
+  C().progress($("batch-progress"), { label: `${label}已入库`, text: `${t.stocked} / ${t.target}`, value: t.stocked, max: t.target, color: t.stocked >= t.target ? "#15803D" : "#2563EB" });
+  $("admitted-today").textContent = t.admitted_today + " 道";
+  const r = report.review_today;
+  $("review-rate").textContent = r.rate === null ? "今天还没有审核" : `${Math.round(r.rate * 100)}%（${r.passed}/${r.reviewed}）`;
+}
+const C = () => window.Charts;
+
+function reasonList(root, reasons) {
+  const box = el("details", undefined, root, "reasons-detail");
+  el("summary", "查看原因", box);
+  Object.entries(reasons).forEach(([code, n]) => {
+    const line = el("p", undefined, box, "reason-line");
+    line.append(`${reasonText(code)} ×${n} `);
+    el("code", code, line);
+  });
+}
+
 function bank(report) {
   const root = $("bank");
   root.replaceChildren();
+  const label = report.target_kind === "first_batch" ? "首批目标" : "两天储备";
   for (const subject of Object.keys(SUBJECT)) {
     el("p", SUBJECT[subject], root, "subject");
     for (const b of report.buckets.filter((x) => x.subject === subject)) {
       const row = el("div", undefined, root, "row");
       const head = el("div", undefined, row, "head");
       el("span", TYPE[b.question_type], head, "name");
-      el("span", b.stocked + " / " + b.target, head, "count");
+      el("span", `${b.stocked} / ${b.target} ${label}`, head, "count");
       const bar = el("div", undefined, row, "bar" + (b.stocked >= b.target ? " full" : ""));
       bar.setAttribute("role", "img");
-      bar.setAttribute("aria-label", SUBJECT[subject] + TYPE[b.question_type] + "已入库 " + b.stocked + "，目标 " + b.target);
+      bar.setAttribute("aria-label", SUBJECT[subject] + TYPE[b.question_type] + "已入库 " + b.stocked + "，" + label + " " + b.target);
       el("i", undefined, bar).style.width = Math.min(100, b.target ? (b.stocked / b.target) * 100 : 0) + "%";
       const chips = el("div", undefined, row, "chips");
+      el("span", "今日入库 " + b.admitted_today, chips, "chip" + (b.admitted_today ? " good" : ""));
       el("span", "排队中 " + b.queued, chips, "chip");
       el("span", "出题中 " + b.generating, chips, "chip");
       el("span", "审核中 " + b.reviewing, chips, "chip review");
       el("span", "被挡住 " + b.blocked, chips, "chip" + (b.blocked ? " blocked" : ""));
-      const codes = Object.entries(b.blocked_reasons);
-      if (codes.length) el("p", codes.map(([code, n]) => reasonText(code) + " ×" + n).join("；"), row, "reasons");
+      if (Object.keys(b.blocked_reasons).length) reasonList(row, b.blocked_reasons);
     }
+  }
+  const legacy = $("legacy");
+  legacy.hidden = !report.legacy.count;
+  if (report.legacy.count) {
+    $("legacy-summary").textContent = `历史记录（旧规格）${report.legacy.count} 条，点开查看明细`;
+    const list = $("legacy-list");
+    list.replaceChildren();
+    report.legacy.reasons.forEach((r) => {
+      const li = el("li", undefined, list);
+      li.append(`${reasonText(r.code)} ×${r.count} `);
+      el("code", r.code, li);
+    });
   }
 }
 
@@ -188,12 +221,24 @@ function jobs(report) {
     if (job.outcome) bits.push(job.outcome.status === "ready" ? "通过，已入库" : job.outcome.status === "blocked" ? "未通过：" + reasonText(job.outcome.reason || "unspecified") : "题目状态：" + job.outcome.status);
     if (job.reason) bits.push(reasonText(job.reason));
     el("span", bits.join(" · "), li, "meta");
-    if (job.detail) {
-      const readable = job.detail.split("；").map((part) => {
-        const [field, reason] = part.split(":");
-        return reason ? `${field}（${reasonText(reason)}）` : reasonText(field);
+    // Reason codes live only in the expandable details; the row itself says it in Chinese.
+    if (job.detail || job.reason || job.outcome?.reason) {
+      const more = el("details", undefined, li, "meta detail");
+      el("summary", "详情", more);
+      if (job.detail) {
+        job.detail.split("；").forEach((part) => {
+          const [field, reason] = part.split(":");
+          const line = el("p", undefined, more, "reason-line");
+          line.append(reason ? `${field}（${reasonText(reason)}） ` : `${reasonText(field)} `);
+          el("code", part, line);
+        });
+      }
+      [job.reason, job.outcome?.reason].filter(Boolean).forEach((code) => {
+        const line = el("p", undefined, more, "reason-line");
+        line.append(reasonText(code) + " ");
+        el("code", code, line);
       });
-      el("span", "具体原因：" + readable.join("；"), li, "meta detail");
+      el("p", `任务 ${job.id} · 已尝试 ${job.attempts} 次`, more, "reason-line");
     }
     if (["pending", "retrying", "running"].includes(job.state)) {
       const button = el("button", "取消任务", li, "cancel");
@@ -241,6 +286,7 @@ async function load() {
     const report = await response.json();
     $("notice").hidden = true;
     $("content").hidden = false;
+    batch(report);
     paper(report);
     status(report);
     bank(report);
