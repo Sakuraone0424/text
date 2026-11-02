@@ -94,6 +94,7 @@ def patch_worker(db, monkeypatch, run_once=lambda *a, **k: False):
                             lambda conn, uid, _n=name: calls.append(_n))
     monkeypatch.setattr(gen, "plan", lambda conn, uid: calls.append("knowledge_generation"))
     monkeypatch.setattr(auto_worker, "get_db", test_db)
+    db.execute("UPDATE ai_settings SET max_concurrency=1")  # these tests share one connection: no threads
     monkeypatch.setattr(auto_worker, "tick", lambda: None)
     monkeypatch.setattr(auto_worker, "integrations_tick", lambda: None)
     monkeypatch.setattr(auto_worker.auto_insights, "plan", lambda conn, uid: None)

@@ -217,6 +217,7 @@ def test_the_upgrade_status_is_in_the_worker_log_line(db, candidate, monkeypatch
     for key, value in dict(AI_AUTOMATION_ENABLED="1", QUIZ_DB_SCHEMA="source_staging_x", DEEPSEEK_PRIVATE_DATA_AUTHORIZED="1").items():
         monkeypatch.setenv(key, value)
     monkeypatch.setattr(auto_worker, "get_db", test_db)
+    db.execute("UPDATE ai_settings SET max_concurrency=1")  # these tests share one connection: no threads
     monkeypatch.setattr(auto_worker, "tick", lambda: None)
     monkeypatch.setattr(auto_worker, "integrations_tick", lambda: None)
     monkeypatch.setattr(auto_worker.model_router, "authorized", lambda private=False: None)

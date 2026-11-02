@@ -3,6 +3,8 @@
 import httpx
 import os
 import sys
+import threading
+import time
 from app.db import get_db
 from app import cost_control
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
@@ -230,6 +232,119 @@ def calls_per_run(env=None):
     return min(max(value, 1), MAX_CALLS_PER_RUN)
 
 
+# A cron run every 5 minutes must never overlap the next one, so a whole run is held to 4 minutes.
+# A model call takes about 45 s (150 s is the hard HTTP timeout), so a new call is only started while
+# there is still room for one more typical call before the deadline.
+DEFAULT_RUN_SECONDS = 240
+EXPECTED_CALL_SECONDS = 60
+SAFETY_SECONDS = 15
+
+
+def run_seconds(env=None):
+    """AI_RUN_SECONDS: whole-run time budget, default 240, between 60 and 270."""
+    raw = (os.environ if env is None else env).get("AI_RUN_SECONDS", "")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_RUN_SECONDS
+    return min(max(value, 60), 270)
+
+
+class CallPool:
+    """Up to `workers` model calls at once, at most `limit` calls and `seconds` seconds in all.
+
+    Each worker thread claims (one claim at a time: ai_jobs.claim holds a database lock, so every claim
+    sees the reservations of the claims before it and the budget stays exact), runs the call, hands the
+    finished result on (so its review can be claimed by the next call), and loops. Nothing here decides
+    whether a job may run: that stays in ai_jobs.claim.
+    """
+
+    def __init__(self, get_db_, executor, workers, limit, seconds, clock=time.monotonic):
+        self.get_db, self.executor = get_db_, executor
+        self.workers, self.limit, self.seconds, self.clock = max(1, workers), limit, seconds, clock
+        self.lock = threading.Lock()
+        self.started = 0           # calls begun (a claim attempt counts until it turns out to be empty)
+        self.calls = 0             # calls actually made
+        self.in_flight = 0
+        self.peak = 0              # most calls running at the same moment
+        self.longest = 0.0         # slowest call of this run, seconds
+        self.claimed = []
+        self.stop = False
+        self.stopped_because = None
+        self.last_claim = {}
+        self.errors = []
+        self.deadline = None
+        self.t0 = None
+        self.overran = False
+
+    def _room_for_another_call(self):
+        expected = max(EXPECTED_CALL_SECONDS, self.longest)
+        return self.clock() + expected <= self.deadline - SAFETY_SECONDS
+
+    def _worker(self):
+        while True:
+            with self.lock:
+                if self.stop or self.started >= self.limit:
+                    return
+                if not self._room_for_another_call():
+                    self.stopped_because = self.stopped_because or "run_time_budget"
+                    self.stop = True
+                    return
+                self.started += 1
+            began = self.clock()
+            try:
+                did = ai_jobs.run_once(self.get_db, self._execute)
+            except Exception as exc:  # database trouble: stop the whole run and report it
+                with self.lock:
+                    self.errors.append(exc)
+                    self.stop = True
+                return
+            with self.lock:
+                if not did:
+                    self.started -= 1
+                    self.last_claim = dict(ai_jobs.LAST_CLAIM)
+                    self.stopped_because = self.stopped_because or ai_jobs.LAST_CLAIM.get("outcome")
+                    self.stop = True
+                    return
+                self.calls += 1
+                self.longest = max(self.longest, self.clock() - began)
+                self.claimed.append(ai_jobs.LAST_CLAIM.get("job_id"))
+            try:
+                with self.get_db() as conn:
+                    # Hand each finished result on at once so its review jobs can be claimed by a later call.
+                    dispatch_completed(conn)
+            except Exception as exc:
+                with self.lock:
+                    self.errors.append(exc)
+                    self.stop = True
+                return
+
+    def _execute(self, job):
+        """The model call itself; counts how many are running at the same moment."""
+        with self.lock:
+            self.in_flight += 1
+            self.peak = max(self.peak, self.in_flight)
+        try:
+            return self.executor(job)
+        finally:
+            with self.lock:
+                self.in_flight -= 1
+
+    def run(self):
+        self.t0 = self.clock()
+        self.deadline = self.t0 + self.seconds
+        if self.workers == 1:
+            self._worker()  # one call at a time: no thread needed
+            return self
+        threads = [threading.Thread(target=self._worker, name=f"call-{i}", daemon=True) for i in range(self.workers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(max(0.0, self.deadline - self.clock()))
+        self.overran = any(t.is_alive() for t in threads)
+        return self
+
+
 def queue_snapshot(conn):
     """Read-only picture of the queue: counts, and the job a claim would look at first."""
     states = {
@@ -254,6 +369,7 @@ def _fmt(value):
 
 def run(report):
     """One worker run. Fills `report` (ids, counts and codes only; no secrets, no textbook text)."""
+    run_began = time.monotonic()
     raw = os.environ.get("AI_AUTOMATION_ENABLED")
     report["enabled"] = "yes" if raw == "1" else "NO(value=" + repr(raw) + ")"
     report["autoplan"] = "1" if os.environ.get("AI_QUEUE_AUTOPLAN") == "1" else "0"
@@ -338,25 +454,23 @@ def run(report):
             f"{head['id']}:{head['kind']}:{head['state']}:scope={_fmt(head['scope'])}:err={_fmt(head['error_code'])}"
             if head else "-"
         )
-    report["calls"] = 0
-    claimed = []
-    for _ in range(calls_per_run()):
-        if not ai_jobs.run_once(get_db, execute):
-            break  # nothing claimable: queue empty, budget spent or retries pending
-        report["calls"] += 1
-        claimed.append(ai_jobs.LAST_CLAIM.get("job_id"))
-        with get_db() as conn:
-            # Hand each finished result on at once so its review jobs can be
-            # claimed by the next call of this same run.
-            dispatch_completed(conn)
-    report["claimed"] = ",".join(str(c) for c in claimed) or "-"
+    limit = calls_per_run()
+    workers = min(report.get("max_concurrency") or 1, limit)
+    pool = CallPool(get_db, execute, workers, limit, run_seconds() - (time.monotonic() - run_began)).run()
+    report["calls"] = pool.calls
+    report["concurrency"] = workers
+    report["parallel_peak"] = pool.peak
+    report["claimed"] = ",".join(str(c) for c in pool.claimed) or "-"
+    if pool.overran:
+        report["overran"] = "yes"  # a call was still running at the deadline; its lease expires and it is retried
+    if pool.errors:
+        raise pool.errors[0]
     # Why the run stopped early (set by ai_jobs.claim; ids, kinds and codes only).
-    if report["calls"] < calls_per_run():
-        last = ai_jobs.LAST_CLAIM
-        report["stopped_because"] = _fmt(last.get("outcome"))
+    if pool.calls < limit:
+        report["stopped_because"] = _fmt(pool.stopped_because)
         for key in ("job_id", "kind", "running", "limit", "held_back"):
-            if key in last:
-                report["why_" + key] = _fmt(last[key])
+            if key in pool.last_claim:
+                report["why_" + key] = _fmt(pool.last_claim[key])
     with get_db() as conn:
         dispatch_completed(conn)
         spent = conn.execute(
@@ -391,9 +505,11 @@ def record_heartbeat(report, started, error):
         with get_db() as conn:
             conn.execute("DELETE FROM worker_heartbeats WHERE finished_at<clock_timestamp()-interval '14 days'")
             conn.execute(
-                "INSERT INTO worker_heartbeats(started_at,outcome,calls,cost_cny,stopped_because,queue) VALUES (%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO worker_heartbeats(started_at,outcome,calls,cost_cny,stopped_because,queue,concurrency,duration_seconds) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
                 (started, outcome, int(report.get("calls", 0) or 0), Decimal(str(report.get("cost_cny", "0") or "0")),
-                 report.get("stopped_because"), ai_jobs.Jsonb(queue)),
+                 report.get("stopped_because"), ai_jobs.Jsonb(queue),
+                 int(report.get("parallel_peak") or 1),
+                 Decimal(str(report.get("duration_s", "0") or "0"))),
             )
     except Exception:
         pass  # a missing table or database hiccup must not turn a good run into a failed one
@@ -412,6 +528,7 @@ def main():
         safe = isinstance(exc, (PermissionError, ValueError)) and getattr(exc, "errno", None) is None  # ours, not the OS's
         report["error"] = type(exc).__name__ + (":" + str(exc)[:120].replace(" ", "_") if safe else "")
         code = 1
+    report["duration_s"] = f"{(datetime.now(timezone.utc) - started).total_seconds():.1f}"  # the whole run
     record_heartbeat(report, started, report.get("error", "").split(":")[0] if code else "")
     report.pop("since", None)
     print("worker-run " + " ".join(f"{k}={_fmt(v)}" for k, v in report.items()), flush=True)
