@@ -156,6 +156,7 @@ $("login").onsubmit = async (e) => {
     });
     $("password").value = "";
     await bootstrap(true);
+    window.dispatchEvent(new Event("signed-in")); // the page that asked for the sign-in loads itself now
     status("已登录"); // shown once, right after signing in; clears itself after 2 s, above the bottom nav
   } catch (e) {
     status(e.message);
@@ -1016,6 +1017,10 @@ function rejectAccess(
   $("submit").hidden = true;
   status(message);
 }
+// Any page's data layer saw a 401: the one sign-in form of the app opens, the page stays where it is.
+window.addEventListener("auth-required", () => {
+  if ($("login").hidden) rejectAccess("登录状态失效，请重新登录。", false);
+});
 function cachedPaper(user, paperId = null) {
   try {
     const pointer = paperId

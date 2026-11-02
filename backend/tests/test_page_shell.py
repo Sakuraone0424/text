@@ -48,7 +48,7 @@ def test_an_in_page_anchor_scrolls_the_content_area_not_the_document(engine, liv
     client, dsn, _ = live_app
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
-    page, _ = open_page(engine, "safari", base, "/static/model.html")
+    page, _ = open_page(engine, "safari", base, "/training#/model")
     expect(page.locator("#controls")).to_be_visible()
     page.evaluate("document.querySelector('#h-danger').scrollIntoView()")
     page.wait_for_timeout(300)
@@ -61,7 +61,7 @@ def test_an_in_page_anchor_scrolls_the_content_area_not_the_document(engine, liv
 def test_a_field_that_gets_focus_is_scrolled_into_the_visible_area(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, _ = open_page(engine, "safari", base, "/static/model.html")
+    page, _ = open_page(engine, "safari", base, "/training#/model")
     expect(page.locator("#controls")).to_be_visible()
     # the page script brings a focused field to the middle of the content area (the keyboard needs the room)
     page.evaluate("document.querySelector('main.page').scrollTop = 0")

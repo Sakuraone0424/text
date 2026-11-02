@@ -19,19 +19,34 @@
   };
   const pct = (v) => (v === null || v === undefined ? "—" : Math.round(v * 100) + "%");
   const sign = (v) => (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(Math.round(v * 10) / 10);
+  // Reads go through the shared data layer: a 401 means "sign in" (never a different page) and every successful
+  // read is kept, so a page seen before can be drawn from the kept copy while a fresh one is on its way.
+  let cachedOnly = false;
   async function read(path) {
-    const response = await fetch(path, { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) throw new Error("读取失败（" + response.status + "）");
-    return response.json();
-  }
-  async function send(path, body) {
-    const response = await fetch(path, {
-      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "请求失败（" + response.status + "）");
+    if (cachedOnly) {
+      const kept = Data.peek(path);
+      if (!kept) throw new Error("no kept copy");
+      return kept.data;
+    }
+    const data = await Data.fetchJSON(path);
+    Data.store(path, data);
     return data;
   }
+  /* Draw from what was seen before at once (if every read has a kept copy), then draw again from the fresh reads. */
+  async function swrLoad(loader, paths) {
+    if (paths.every((path) => Data.peek(path))) {
+      cachedOnly = true;
+      try {
+        await loader();
+      } catch {
+        /* the fresh load below will report */
+      } finally {
+        cachedOnly = false;
+      }
+    }
+    await loader();
+  }
+  const send = (path, body) => Data.fetchJSON(path, { method: "POST", body: JSON.stringify(body) });
   const dateLabel = (iso) => {
     const d = new Date(iso + "T00:00:00");
     return d.getMonth() + 1 + "/" + d.getDate();
@@ -105,7 +120,7 @@
     $("paper-state").classList.toggle("green-pill", lock.complete);
     $("prepare-note").hidden = !lock.complete;
   }
-  async function loadHome() {
+  async function loadHomeNow() {
     a2hsHint();
     const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", {
       timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", weekday: "short",
@@ -186,7 +201,7 @@
 
   /* ---------------- my learning data ---------------- */
   let trendMode = "rate";
-  async function loadProfile() {
+  async function loadProfileNow() {
     const root = $("profile-data");
     let data;
     try {
@@ -677,10 +692,12 @@
     }
   }
 
+  const loadHome = () => swrLoad(loadHomeNow, ["/v2/stats/overview"]);
+  const loadProfile = () => swrLoad(loadProfileNow, ["/v2/stats/profile"]);
   function onView(view) {
     if (view === "profile") loadProfile();
     if (view === "mistakes") {
-      facets = null;
+      facetsLoaded = false; // counts refresh; the chosen filters stay as they were
       loadMistakes();
       loadDue();
     }

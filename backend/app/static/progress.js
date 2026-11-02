@@ -1,4 +1,5 @@
 "use strict";
+(() => {
 const $ = (id) => document.getElementById(id);
 const SUBJECT = { biochemistry: "生物化学", cell_biology: "细胞生物学" };
 const TYPE = { single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答", essay: "问答" };
@@ -390,55 +391,64 @@ async function cancelJob(job, button) {
   if (!confirm(text)) return;
   button.disabled = true;
   try {
-    const response = await fetch("/v2/model/jobs/" + job.id + "/cancel", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-    });
-    if (!response.ok) throw new Error("取消失败（" + response.status + "）");
-    await load();
+    await Data.fetchJSON("/v2/model/jobs/" + job.id + "/cancel", { method: "POST", body: "{}" });
+    Data.invalidate("/v2/model/progress");
+    await load(true);
   } catch (error) {
     button.disabled = false;
-    $("notice").hidden = false;
-    $("notice").textContent = error.message;
+    if (error.name !== "AuthRequired") showError(error.message);
   }
 }
 
-let signedInOnce = false;
-async function load() {
-  try {
-    const response = await fetch("/v2/model/progress", { credentials: "same-origin", cache: "no-store" });
-    if (response.status === 401) {
-      // The same sign-in as everywhere else (one cookie); once signed in the page loads itself.
-      $("content").hidden = true;
-      if (signedInOnce) throw new Error("登录状态没有生效（401）");
-      await Session.ensure($("login-slot"));
-      signedInOnce = true;
-      return load();
-    }
-    if (!response.ok) throw new Error("读取失败（" + response.status + "）");
-    const report = await response.json();
-    $("notice").hidden = true;
-    $("content").hidden = false;
-    signedInOnce = false;
-    batch(report);
-    paper(report);
-    status(report);
-    bank(report);
-    spend(report);
-    waste(report);
-    jobs(report);
-    $("updated").textContent = "每 30 秒自动刷新 · 更新于 " + fmtTime(report.generated_at);
-  } catch (error) {
-    $("notice").hidden = false;
-    $("notice").textContent = error.message + "。稍后会自动重试。";
+function showError(message, hadCache) {
+  $("pv-error-text").textContent = message + (hadCache ? "（先显示上次的内容）" : "");
+  $("pv-error").hidden = false;
+  if (!hadCache) {
+    $("pv-skeleton").hidden = true;
+    $("pv-content").hidden = true;
   }
 }
-load();
+
+function render(report, meta) {
+  $("pv-skeleton").hidden = true;
+  $("pv-error").hidden = true;
+  $("pv-content").hidden = false;
+  batch(report);
+  paper(report);
+  status(report);
+  bank(report);
+  spend(report);
+  waste(report);
+  jobs(report);
+  $("updated").textContent = (meta && meta.stale ? "上次的内容，正在更新… · " : "") + "每 30 秒自动刷新 · 更新于 " + fmtTime(report.generated_at);
+}
+
+let loading = false;
+async function load(fresh = false) {
+  if (loading) return;
+  loading = true;
+  try {
+    await Data.swr("/v2/model/progress", {
+      render,
+      fetcher: () => Data.fetchJSON("/v2/model/progress" + (fresh ? "?fresh=1" : "")),
+      error: (error, meta) => showError(error.message, meta.hadCache),
+    });
+  } finally {
+    loading = false;
+  }
+}
+
+const visible = () => !$("progress-view").hidden && !document.hidden;
+$("pv-retry").onclick = () => {
+  $("pv-error").hidden = true;
+  $("pv-skeleton").hidden = !Data.peek("/v2/model/progress");
+  load(true);
+};
 setInterval(() => {
-  if (!document.hidden) load();
+  if (visible()) load(true);
 }, 30000);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) load();
+  if (visible()) load(true);
 });
+window.ProgressView = { show: () => load(), reload: () => load(true) };
+})();

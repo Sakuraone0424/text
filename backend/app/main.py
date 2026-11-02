@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -81,6 +81,17 @@ async def model_privacy(request, call_next):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
+
+
+@app.get("/progress", include_in_schema=False)
+def progress_page():
+    """The old address keeps working: the page is now a view inside the one application shell."""
+    return RedirectResponse("/training#/progress", status_code=302)
+
+
+@app.get("/static/model.html", include_in_schema=False)
+def model_page():
+    return RedirectResponse("/training#/model", status_code=302)
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -178,6 +189,14 @@ def logout(response: Response):
     return {"ok": True}
 
 
+@app.get("/v2/perf")
+def perf_report(username: str = Depends(require_auth)):
+    """Response time per route: p50 / p95 / max over the last 500 requests of each."""
+    from app import perf
+
+    return {"slow_ms": perf.SLOW_MS, "routes": perf.report()}
+
+
 @app.get("/auth/me")
 def me(username: str = Depends(require_auth)):
     return {"authenticated": True, "username": username}
@@ -241,11 +260,6 @@ def web_manifest():
         media_type="application/manifest+json",
         headers={"Cache-Control": "no-cache"},
     )
-
-
-@app.get("/progress", include_in_schema=False)
-def progress_page():
-    return FileResponse(STATIC_DIR / "progress.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/training-sw.js", include_in_schema=False)

@@ -398,3 +398,22 @@
 .training-app input[type="checkbox"], .training-app input[type="radio"] { width: 22px; min-height: 0; height: 22px; padding: 0; flex: none; accent-color: var(--primary); }
 .training-app.focus-mode .status-message { bottom: calc(64px + 12px); }
 .training-app #due-note:empty { display: none; }
+
+/* Home-screen (standalone) mode: without viewport-fit=cover the page ends above the Home indicator but the indicator's strip
+   still lies over the bottom bar on iPhone, so the bottom bar and the exam's fixed bar get a fixed bottom gap there.
+   Safari keeps the bar as it is. (html.standalone is set by shell.js for iOS' navigator.standalone.) */
+@media (display-mode: standalone) and (max-width: 767px) {
+  .training-app .sidebar { height: calc(var(--nav) + 30px); padding-bottom: 30px; }
+  .training-app .focus-actions { padding-bottom: 38px; }
+  .training-app .status-message { bottom: calc(var(--nav) + 30px + 12px); }
+  .training-app.focus-mode .status-message { bottom: calc(64px + 30px + 12px); }
+  .training-app.focus-mode .shell { padding-bottom: 110px; }
+  .training-app .view-model .savebar { margin-bottom: -24px; }
+}
+@media (max-width: 767px) {
+  html.standalone .training-app .sidebar { height: calc(var(--nav) + 30px); padding-bottom: 30px; }
+  html.standalone .training-app .focus-actions { padding-bottom: 38px; }
+  html.standalone .training-app .status-message { bottom: calc(var(--nav) + 30px + 12px); }
+  html.standalone .training-app.focus-mode .status-message { bottom: calc(64px + 30px + 12px); }
+  html.standalone .training-app.focus-mode .shell { padding-bottom: 110px; }
+}

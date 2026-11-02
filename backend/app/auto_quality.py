@@ -663,6 +663,24 @@ def complete_usage(usage):
     )
 
 
+_READY_SEEN = {}  # (question id, content sha) -> (monotonic time, result): only for pages that DISPLAY counts
+
+
+def ready_cached(conn, qid, max_age=60):
+    """ready() for display (counts on the home and progress pages): a result up to `max_age` seconds old is reused,
+    so a page that counts the whole bank does not re-verify every question every time it is opened."""
+    import time
+
+    row = conn.execute("SELECT content_sha256 FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()
+    key = (qid, row["content_sha256"] if row else None)
+    seen = _READY_SEEN.get(key)
+    if seen and time.monotonic() - seen[0] < max_age:
+        return seen[1]
+    value = ready(conn, qid)
+    _READY_SEEN[key] = (time.monotonic(), value)
+    return value
+
+
 def ready(conn, qid):
     """Published-quality: the free program checks AND one passed independent review, current content."""
     row = conn.execute(

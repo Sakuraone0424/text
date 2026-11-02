@@ -16,13 +16,13 @@ def test_the_page_asks_for_login_then_shows_ten_buckets_without_horizontal_scrol
     page = browser.new_context(**PHONE).new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(base + "/progress")
+    page.goto(base + "/training#/progress")
     expect(page.locator("#login")).to_be_visible()  # the same sign-in form as the other pages
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
-    expect(page.locator("#content")).to_be_visible()  # no reload needed
-    page.goto(base + "/progress")
-    expect(page.locator("#content")).to_be_visible()
+    expect(page.locator("#pv-content")).to_be_visible()  # no reload needed
+    page.goto(base + "/training#/progress")
+    expect(page.locator("#pv-content")).to_be_visible()
     expect(page.locator("#bank .row")).to_have_count(10)
     expect(page.locator("#bank .row:visible")).to_have_count(5)  # one subject at a time
     page.locator("[data-subject=cell_biology]").click()
@@ -31,7 +31,7 @@ def test_the_page_asks_for_login_then_shows_ten_buckets_without_horizontal_scrol
     expect(page.locator("#paper-main")).to_contain_text("还差 60 题")
     expect(page.locator("#worker")).to_have_text("没有记录")
     expect(page.locator("#worker-note")).to_contain_text("还没有留下运行记录")
-    expect(page.locator(".subbar h1")).to_have_text("出题进度")
+    expect(page.locator("#progress-view .subbar h1")).to_have_text("出题进度")
     expect(page.locator("#period")).not_to_be_empty()
     expect(page.locator("#spend-month")).to_contain_text("¥")
     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
@@ -64,7 +64,7 @@ def test_history_is_folded_reasons_are_chinese_and_codes_hide_in_details(live_ap
             "INSERT INTO ai_jobs(job_key,user_id,kind,state,settings_snapshot,payload,error_code,result) VALUES ('now-bad',%s,'generation','blocked','{}',%s,'invalid_or_uncertain_result',%s)",
             (uid, Jsonb({"subject": "biochemistry", "question_type": "term", "max_points": 6}),
              Jsonb({"dispatch_failure": {"code": "output_schema_violation", "errors": [{"field": "rubric", "reason": "rubric_points_mismatch"}]}})))
-    page.goto(base + "/progress")
+    page.goto(base + "/training#/progress")
     expect(page.locator("#legacy")).to_be_visible()
     expect(page.locator("#legacy-summary")).to_have_text("历史记录（旧规格）3 条，点开查看明细")
     assert not page.locator("#legacy").evaluate("(n) => n.open")  # folded until opened

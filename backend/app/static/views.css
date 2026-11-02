@@ -1,0 +1,138 @@
+/* Sub-views (出题进度, 模型与费用) inside the one application shell. Colours come from tokens.css; buttons, inputs, cards and
+   the top bar are the main app's. Only what is particular to these two views is here, each scoped to its own view. */
+.training-app .view { display: flex; flex-direction: column; gap: 14px; }
+.training-app .view .stack { display: flex; flex-direction: column; gap: 14px; }
+.training-app .view .card { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.training-app .view .card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.training-app .view .label { font-size: 12px; color: var(--muted); }
+.training-app .view .note { font-size: 12px; color: var(--muted); margin: 0; }
+.training-app .view .note:empty { display: none; }
+.training-app .view .center { text-align: center; }
+.training-app .view .warn { color: var(--accent-ink); }
+.training-app .view .field { display: flex; flex-direction: column; gap: 4px; }
+.training-app .view details > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 12px; list-style: none; }
+.training-app .view details > summary::-webkit-details-marker { display: none; }
+.training-app .view details > summary::after { content: "›"; margin-left: 8px; font-size: 16px; transform: rotate(90deg); }
+.training-app .view details[open] > summary::after { transform: rotate(-90deg); }
+.training-app .view details > :not(summary) { margin-top: 8px; }
+.training-app .view pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; background: var(--divider); border-radius: 12px; padding: 12px; max-height: 240px; overflow: auto; }
+.training-app .view .small-button { min-height: 44px; padding: 4px 12px; font-size: 13px; }
+.training-app .view .secondary { width: 100%; }
+.training-app .view select, .training-app .view input:not([type="checkbox"]) { min-width: 0; }
+.training-app .view-progress .card.key { background: var(--key); border-color: var(--key-line); }
+.training-app .view-progress .key-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.training-app .view-progress .key-head h2.label { font-weight: 500; }
+.training-app .view-progress .note:empty { display: none; }
+.training-app .view-progress .rate { margin: 0; font-size: 12px; color: var(--muted); }
+.training-app .view-progress .rate b { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.training-app .view-progress .big { margin: 0 0 8px; }
+.training-app .view-progress .big b { font-size: 30px; line-height: 1.2; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; }
+.training-app .view-progress .big.done b { color: var(--ok); }
+.training-app .view-progress .big .unit { font-size: 14px; color: var(--muted); margin-left: 4px; }
+.training-app .view-progress .hbar-track, .training-app .view-progress .bar { height: 6px; border-radius: 999px; background: var(--tag); overflow: hidden; margin: 8px 0; }
+.training-app .view-progress .hbar-track i, .training-app .view-progress .bar > i { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.training-app .view-progress .bar.full > i { background: var(--ok); }
+.training-app .view-progress .cells { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 12px; border-top: 1px solid var(--key-line); padding-top: 12px; }
+.training-app .view-progress .card:not(.key) .cells { border-top-color: var(--divider); }
+.training-app .view-progress .cells > div { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; border-left: 1px solid var(--divider); min-width: 0; }
+.training-app .view-progress .cells > div:first-child { padding-left: 0; border-left: 0; }
+.training-app .view-progress .cells b { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.training-app .view-progress .cells b.warn { color: var(--warn-ink); }
+.training-app .view-progress .segmented { display: inline-flex; background: var(--tag); border-radius: 999px; padding: 4px; }
+.training-app .view-progress .segmented button { border: 0; border-radius: 999px; min-height: 32px; padding: 4px 12px; font: inherit; font-size: 13px; background: transparent; color: var(--muted); cursor: pointer; }
+.training-app .view-progress .segmented button[aria-pressed="true"] { background: var(--card); color: var(--primary); font-weight: 700; }
+.training-app .view-progress .row { padding: 12px 0; border-top: 1px solid var(--divider); }
+.training-app .view-progress .row:first-child { border-top: 0; }
+.training-app .view-progress .row .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.training-app .view-progress .row .name { font-weight: 500; font-size: 14px; }
+.training-app .view-progress .row .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.training-app .view-progress .row .count b { color: var(--ink); font-size: 15px; }
+.training-app .view-progress .row .count .reached { color: var(--ok); font-weight: 700; margin-left: 8px; }
+.training-app .view-progress .row .notes { margin: 0; font-size: 11px; color: var(--muted); }
+.training-app .view-progress .row .notes .attn { color: var(--warn-ink); }
+.training-app .view-progress .reasons-detail { margin-top: 2px; font-size: 12px; }
+.training-app .view-progress .reasons-detail summary, .training-app .view-progress .meta.detail summary, .training-app .view-progress .legacy summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; color: var(--muted); font-size: 12px; }
+.training-app .view-progress .reason-line { margin: 2px 0; font-size: 12px; color: var(--muted); }
+.training-app .view-progress .reason-line code { background: var(--divider); border-radius: 6px; padding: 1px 6px; color: var(--tag-ink); font-size: 11px; overflow-wrap: anywhere; }
+.training-app .view-progress .legacy { margin-top: 8px; border-top: 1px solid var(--divider); }
+.training-app .view-progress .legacy-list { margin: 0 0 8px; padding-left: 16px; font-size: 12px; color: var(--muted); }
+.training-app .view-progress .quota { margin: 0; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.training-app .view-progress .quota b { font-size: 20px; color: var(--ink); }
+.training-app .view-progress .jobs { list-style: none; margin: 8px 0 0; padding: 0; }
+.training-app .view-progress .jobs li { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 12px 0; border-top: 1px solid var(--divider); }
+.training-app .view-progress .jobs li:first-child { border-top: 0; }
+.training-app .view-progress .jobs li.empty { display: block; border: 0; color: var(--disabled-ink); text-align: center; }
+.training-app .view-progress .jobs .kind { font-weight: 500; font-size: 14px; }
+.training-app .view-progress .jobs .meta { color: var(--muted); font-size: 11px; grid-column: 1 / -1; overflow-wrap: anywhere; }
+.training-app .view-progress .state { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--tag); color: var(--tag-ink); align-self: start; white-space: nowrap; }
+.training-app .view-progress .state.succeeded { background: var(--ok-soft); color: var(--ok); }
+.training-app .view-progress .state.blocked, .training-app .view-progress .state.failed { background: var(--warn-soft); color: var(--warn-ink); }
+.training-app .view-progress .state.running { background: var(--primary-soft); color: var(--primary-ink); }
+.training-app .view-progress .cancel { justify-self: start; min-height: 44px; padding: 0 16px; margin: 4px 0;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--warn-ink); font: inherit; cursor: pointer; }
+.training-app .view-progress .cancel:active { background: var(--divider); }
+.training-app .view-progress .cancel:disabled { background: var(--tag); color: var(--disabled-ink); cursor: not-allowed; }
+.training-app .view-progress #notice { background: var(--warn-soft); color: var(--warn-ink); border-radius: 12px; padding: 12px 14px; margin: 0 0 14px; }
+.training-app .view-progress .chart-block { display: flex; flex-direction: column; gap: 4px; }
+.training-app .view-progress .chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.training-app .view-progress .chart-title { margin: 0; font-size: 13px; }
+.training-app .view-progress .chart-unit { font-size: 11px; color: var(--muted); }
+.training-app .view-progress .chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.training-app .view-progress .chart-readout { margin: 0; font-size: 12px; color: var(--muted); min-height: 1.5em; }
+.training-app .view-progress .chart-readout.on { color: var(--ink); font-weight: 500; }
+.training-app .view-progress .chart-conclusion { margin: 0; font-size: 13px; font-weight: 500; }
+.training-app .view-progress .chart-conclusion:empty { display: none; }
+.training-app .view-progress .chart-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 0; color: var(--disabled-ink); font-size: 13px; white-space: nowrap; }
+.training-app .view-progress .chart-empty .ico { width: 20px; height: 20px; flex: none; }
+.training-app .view-progress .chart-svg [tabindex] { cursor: pointer; }
+.training-app .view-progress .card:not(.key) .cells.four { grid-template-columns: repeat(4, 1fr); }
+.training-app .view-progress .cells.four > div { padding: 0 6px; }
+.training-app .view-progress .waste-row { border-top: 1px solid var(--divider); }
+.training-app .view-progress .waste-row:first-child { border-top: 0; }
+.training-app .view-progress .waste-row > summary { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; }
+.training-app .view-progress .waste-row > summary::after { display: none; }
+.training-app .view-progress .waste-count { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.training-app .view-model .row.switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; }
+.training-app .view-model .row.switch span { display: flex; flex-direction: column; min-width: 0; }
+.training-app .view-model .row.switch small { color: var(--muted); font-size: 12px; }
+.training-app .view-model input[type="checkbox"][role="switch"] { appearance: none; -webkit-appearance: none; flex: none; width: 48px; height: 28px; border-radius: 999px; background: var(--disabled); border: 0; position: relative; margin: 0; cursor: pointer; transition: background 0.15s; }
+.training-app .view-model input[type="checkbox"][role="switch"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 24px; height: 24px; border-radius: 50%; background: var(--card); transition: transform 0.15s; }
+.training-app .view-model input[type="checkbox"][role="switch"]:checked { background: var(--primary); }
+.training-app .view-model input[type="checkbox"][role="switch"]:checked::after { transform: translateX(20px); }
+.training-app .view-model .limit { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; border-top: 1px solid var(--divider); }
+.training-app .view-model .limit:first-of-type { border-top: 0; padding-top: 0; }
+.training-app .view-model .limit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.training-app .view-model .limit-head .used { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.training-app .view-model .limit-input { display: flex; align-items: center; gap: 8px; }
+.training-app .view-model .limit-input input:not([type="checkbox"]) { flex: 1 1 0; }
+.training-app .view-model .yen { color: var(--muted); }
+.training-app .view-model .mini-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; color: var(--muted); flex: none; }
+.training-app .view-model .price-grid { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 16px; font-variant-numeric: tabular-nums; }
+.training-app .view-model .price-grid .head { font-size: 12px; color: var(--muted); }
+.training-app .view-model .price-grid .num { text-align: right; font-weight: 700; }
+.training-app .view-model .probe { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 4px 0; border-top: 1px solid var(--divider); }
+.training-app .view-model .probe:first-child { border-top: 0; }
+.training-app .view-model .tag { padding: 2px 12px; border-radius: 999px; font-size: 12px; background: var(--tag); color: var(--tag-ink); white-space: nowrap; }
+.training-app .view-model .tag.ok { background: var(--up-soft); color: var(--up); }
+.training-app .view-model .tag.wait { background: var(--primary-soft); color: var(--primary-soft-ink); }
+.training-app .view-model .more > summary { color: var(--ink); font-weight: 700; font-size: 15px; }
+.training-app .view-model .more-body { display: flex; flex-direction: column; gap: 12px; }
+.training-app .view-model .danger { border-color: var(--danger-line); }
+.training-app .view-model .danger h2 { color: var(--danger); }
+.training-app .view-model .danger-button { color: var(--danger); border-color: var(--danger-line); width: 100%; }
+.training-app .view-model .savebar { grid-row: 3; z-index: 30; padding: 8px 18px; background: var(--card); border-top: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+.training-app .view-model .savebar .note { flex: 1; min-width: 0; }
+.training-app .view-model .savebar .note.dirty { color: var(--accent-ink); font-weight: 500; }
+.training-app .view-model .savebar .primary { flex: 0 0 120px; }
+.training-app .view-model .savebar { position: sticky; bottom: 0; z-index: 30; margin: 0 -18px -24px; padding: 8px 18px; background: var(--card); border-top: 1px solid var(--line); display: flex; align-items: center; gap: 12px; }
+.training-app .view-model .toast { position: fixed; left: 16px; right: 16px; bottom: calc(var(--nav) + 76px); margin: 0 auto; max-width: 480px; z-index: 60; padding: 8px 12px; border-radius: 12px; background: var(--toast-bg); color: var(--toast-ink); font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.training-app .view-model .toast.show { opacity: 1; }
+.training-app .view-model .toast:empty { display: none; }
+/* loading and failure states */
+.training-app .skeleton-stack { display: flex; flex-direction: column; gap: 14px; }
+.training-app .skeleton { background: var(--divider); animation: pulse 1.2s ease-in-out infinite; border-radius: 16px; }
+.training-app .skeleton.card-sk { height: 120px; }
+.training-app .skeleton.card-sk.tall { height: 180px; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.training-app .error-card { background: var(--accent-faint); border: 1px solid var(--accent-line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; color: var(--accent-ink); }
+.training-app .error-card p { margin: 0; }

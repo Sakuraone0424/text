@@ -55,17 +55,21 @@
   const active = () => latest.paper?.timing.status === "in_progress";
   const storageKey = () =>
     `quiz-ui-question:${account}:${latest.paper?.paper_id}`;
-  // Only the content area scrolls (the document does not): remember where each page was left.
+  // Only the content area scrolls (the document does not): remember where each route was left.
   const scroller = () => document.querySelector(".workspace");
   const scrollMemory = {};
-  function showView(next) {
-    if (view && scroller()) scrollMemory[view] = scroller().scrollTop;
+  let currentKey = null;
+  const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", exam: "home", profile: "home" };
+  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile" };
+  function renderView(next, key) {
+    if (currentKey && scroller()) scrollMemory[currentKey] = scroller().scrollTop;
     view = next;
+    currentKey = key || "#/" + next;
     document.querySelectorAll("[data-page]").forEach((node) => {
       node.hidden = node.dataset.page !== view;
     });
     document.querySelectorAll("[data-view]").forEach((node) => {
-      if (node.dataset.view === view) node.setAttribute("aria-current", "page");
+      if (node.dataset.view === (NAV_FOR[view] || view)) node.setAttribute("aria-current", "page");
       else node.removeAttribute("aria-current");
     });
     document.body.classList.toggle("focus-mode", view === "exam" && active());
@@ -81,8 +85,57 @@
     else byId("learning").hidden = true;
     if (roots[view]) byId("learning").hidden = false;
     window.Insights?.onView(view);
-    if (scroller()) scroller().scrollTop = scrollMemory[view] || 0;
+    if (view === "progress") window.ProgressView?.show();
+    if (view === "model") window.ModelView?.show();
+    if (scroller()) scroller().scrollTop = scrollMemory[currentKey] || 0;
   }
+
+  /* ---- routes: one shell, hash URLs, the browser's own back stack ---- */
+  const VIEWS = ["home", "exam", "mistakes", "stats", "profile", "progress", "model"];
+  const SUBS = ["weekly", "history", "insights", "archive", "source-status"];
+  let routeChanges = 0;
+  let suppressRoute = false;
+  let alreadyLoaded = null; // the hash whose page content was just loaded by the click that navigated to it
+  const parseHash = () => {
+    const m = /^#\/([a-z]+)(?:\/([a-z-]+))?/.exec(location.hash);
+    return m ? { view: VIEWS.includes(m[1]) ? m[1] : "home", sub: m[2] || null } : { view: "home", sub: null };
+  };
+  function apply() {
+    const { view: next, sub } = parseHash();
+    const key = location.hash || "#/home";
+    if (view === "model" && next !== "model" && window.ModelView && !window.ModelView.leave()) {
+      history.replaceState(null, "", "#/model"); // unsaved settings: stay
+      return;
+    }
+    routeChanges += 1;
+    window.Data?.setUser(account);
+    renderView(next, key);
+    if (sub && SUBS.includes(sub)) {
+      if (alreadyLoaded === key) alreadyLoaded = null;
+      else {
+        suppressRoute = true;
+        byId(sub).click();
+        suppressRoute = false;
+      }
+    }
+  }
+  function go(next, sub = null, { replace = false } = {}) {
+    const target = "#/" + next + (sub ? "/" + sub : "");
+    if (location.hash === target || (!location.hash && target === "#/home")) return apply();
+    if (replace) {
+      history.replaceState(null, "", target);
+      apply();
+    } else location.hash = target;
+  }
+  function back() {
+    // the previous page of this session if there is one (its scroll position and filters are still there), else its parent
+    if (routeChanges > 1 && history.length > 1) history.back();
+    else go(PARENT[view] || "home", null, { replace: true });
+  }
+  window.addEventListener("hashchange", apply);
+  window.addEventListener("signed-in", apply);
+  window.addEventListener("shell-ready", apply);
+  const showView = (next) => go(next);
   function navigate(index, focus = true) {
     const questions = active() ? latest.paper.questions || [] : [];
     if (!active() || !questions.length) return;
@@ -450,8 +503,11 @@
       dialog.addEventListener("close", () => resolve(accepted), { once: true });
     });
   }
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.onclick = () => showView(button.dataset.view);
+  document.querySelectorAll("button[data-view]").forEach((button) => {
+    button.onclick = () => go(button.dataset.view);
+  });
+  document.querySelectorAll("[data-back]").forEach((button) => {
+    button.onclick = back;
   });
   document.querySelectorAll("[data-action]").forEach((button) => {
     button.onclick = () => byId(button.dataset.action).click();
@@ -459,11 +515,13 @@
   document.querySelector("[data-prepare-proxy]").onclick = () =>
     byId("prepare").click();
   ["memory", "weekly", "history", "insights", "archive", "source-status"].forEach((id) =>
-    byId(id).addEventListener("click", () =>
-      showView(
-        id === "memory" ? "mistakes" : id === "archive" ? "profile" : "stats",
-      ),
-    ),
+    byId(id).addEventListener("click", () => {
+      if (suppressRoute) return; // a back/forward navigation re-opening this page: the URL is already right
+      if (id === "memory") return go("mistakes");
+      alreadyLoaded = id === "archive" ? "#/profile/archive" : "#/stats/" + id;
+      if (id === "archive") go("profile", "archive");
+      else go("stats", id);
+    }),
   );
   // Messages appear as a short toast at the top, not as a permanent status line on the page.
   const statusEl = byId("status");
@@ -474,8 +532,8 @@
     clearTimeout(statusTimer);
     statusTimer = setTimeout(() => statusEl.classList.remove("show"), statusEl.textContent.trim() === "已登录" ? 2000 : 5000);
   }).observe(statusEl, { childList: true, characterData: true, subtree: true });
-  byId("result-back").onclick = () => showView("home");
-  byId("stats-back").onclick = () => showView("profile");
+  byId("result-back").onclick = () => go("home");
+  byId("stats-back").onclick = back;
   byId("leave-focus").onclick = () => {
     showView("home");
     byId("status").textContent = "已返回概览，考试计时仍在继续。";
@@ -575,6 +633,8 @@
       actions = value;
     },
     showView,
+    go,
+    back,
   };
-  showView("home");
+  apply();
 })();
