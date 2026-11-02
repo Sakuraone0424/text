@@ -447,3 +447,11 @@ Railway 保留上一次部署，可在部署列表中一键回退；数据库变
 - 出题提示词：单选的每个错误选项都必须能在所给段落里找到可逐字引用的反驳依据，找不到就换掉这个选项。
 - 兼容：旧契约（9 及更早）的审核记录按它们自己的契约重算与比对，已入库题的审核记录仍然有效。
 - 前后对比：`/v2/model/waste/stats` 的 `review_by_contract` 按审核契约（9=旧、10=新）× 题型 × 思考强度给出近 72 小时的审核数、通过数、通过率和平均每次审核费用；单选在 high 下的通过率和平均费用就在这里和旧契约并排。
+
+## One application shell (hash routes)
+
+All learner pages are views of `/training`: `#/home`, `#/exam`, `#/mistakes`, `#/stats` (+ `/weekly`, `/insights`, `/history`, `/source-status`, `/archive`), `#/profile`, `#/progress` (出题进度), `#/model` (模型与费用). `/progress` and `/static/model.html` redirect into the shell. Moving between pages never reloads the document; the browser's back stack (and the iPhone edge swipe) restores the previous page with its scroll position; the subbar (back + centred title) is the same on every sub page. One login: an unauthenticated visit shows the login page and returns to the page asked for.
+
+Speed: `Data.swr` shows the cached copy of a page at once and refreshes it behind (a visible retry card on network errors); the server keeps a 30 s `StaleCache` for the progress page (`?fresh=1` bypasses it, cancelling a job invalidates it) and memoises the OCR file integrity hash per `(document, sha)`. `GET /v2/perf` (learner key) returns p50/p95/max per route over the last 500 requests; requests over 300 ms are logged as `slow request`. Every response carries `Server-Timing: app;dur=…`.
+
+Home-screen (standalone) mode: the bottom bar and the exam's fixed bar get a fixed 30 px bottom gap through `@media (display-mode: standalone)` (and `html.standalone` for iOS' `navigator.standalone`); `viewport-fit=cover` stays off and Safari is unchanged. The service worker cache is `v17-one-shell`.

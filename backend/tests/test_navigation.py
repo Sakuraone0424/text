@@ -117,3 +117,30 @@ def test_a_filter_and_the_scroll_position_survive_leaving_and_coming_back(engine
     assert abs(page.evaluate("document.querySelector('.workspace').scrollTop") - here) <= 2
     assert same_document(page)
     assert not errors, errors
+
+
+def test_a_visited_page_is_shown_from_the_cache_in_under_100_ms(engine, live_app):
+    client, dsn, _ = live_app
+    seed(client, dsn)
+    base = str(client.base_url).rstrip("/")
+    page, errors = open_page(engine, "safari", base)
+    expect(page.locator("#stat-avg")).not_to_have_text("—")
+    for view in ("mistakes", "profile", "home"):        # visit once so the data layer holds a copy
+        page.locator(f'nav.primary-nav [data-view="{view}"]').click()
+        page.wait_for_timeout(600)
+    page.route("**/v2/**", lambda route: (page.wait_for_timeout(1500), route.continue_()))   # a slow network
+    timings = {}
+    for view in ("mistakes", "profile", "home"):
+        timings[view] = page.evaluate("""(view) => new Promise((done) => {
+            const began = performance.now();
+            document.querySelector(`nav.primary-nav [data-view="${view}"]`).click();
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                const page = document.querySelector(`[data-page="${view}"]`);
+                done({ms: performance.now() - began, visible: !page.hidden, filled: page.textContent.trim().length > 20});
+            }));
+        })""", view)
+        page.wait_for_timeout(200)
+    print("cached page switch (ms):", {k: round(v["ms"]) for k, v in timings.items()})
+    for view, t in timings.items():
+        assert t["visible"] and t["filled"] and t["ms"] < 100, (view, t)
+    assert not errors, errors
