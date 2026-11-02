@@ -131,7 +131,7 @@ def command(data: Command, request: Request, name=Depends(require_auth)):
 class Limits(StrictModel):
     token_limit: StrictInt = Field(default=4096, ge=128, le=32768)
     retry_limit: StrictInt = Field(default=2, ge=0, le=5)
-    max_concurrency: StrictInt = Field(default=1, ge=1, le=4)
+    max_concurrency: StrictInt = Field(default=2, ge=1, le=4)
     daily_cny: Decimal = Field(ge=0, le=1000, allow_inf_nan=False)
     monthly_cny: Decimal = Field(ge=0, le=10000, allow_inf_nan=False)
     trial_active: StrictBool = True

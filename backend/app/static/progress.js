@@ -115,7 +115,7 @@ function status(report) {
   }
   cell.textContent = w.minutes_ago < 1 ? "刚刚运行" : w.minutes_ago + " 分钟前";
   const outcome = w.outcome === "ok" ? "正常" : w.outcome === "disabled" ? "未启用" : "出错（" + w.outcome.replace("error:", "") + "）";
-  const parts = ["上次 " + fmtTime(w.last_run_at) + " · " + outcome, "调用 " + w.calls + " 次", "费用 " + yuan(w.cost_cny)];
+  const parts = ["上次 " + fmtTime(w.last_run_at) + " · " + outcome, "调用 " + w.calls + " 次", "同时最多 " + (w.concurrency || 1) + " 个", "用时 " + Math.round(w.duration_seconds || 0) + " 秒", "费用 " + yuan(w.cost_cny)];
   if (w.stopped_because) parts.push("停止原因：" + reasonText(w.stopped_because));
   note.textContent = parts.join(" · ") + (w.stale ? "。已超过 15 分钟没有运行（正常每 5 分钟一次）。" : "。");
   if (w.stale || w.outcome !== "ok") {

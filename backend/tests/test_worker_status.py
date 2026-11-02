@@ -24,6 +24,7 @@ def worker(db, setup_ai, monkeypatch):
                             DEEPSEEK_API_KEY=SECRET, AI_CALLS_PER_RUN="2").items():
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(auto_worker, "get_db", test_db)
+    db.execute("UPDATE ai_settings SET max_concurrency=1")  # these tests share one connection: no threads
     monkeypatch.setattr(auto_worker, "tick", lambda: None)
     monkeypatch.setattr(auto_worker, "integrations_tick", lambda: None)
     monkeypatch.setattr(auto_worker.model_router, "authorized", lambda private=False: None)

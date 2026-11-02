@@ -250,7 +250,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 2. 创建 worker 服务（b），配置变量、**不部署**，把 worker 服务 ID 发给我；我改守卫、过 CI、合并，之后你再部署。
 3. 先部署 `training-api-qa`：preDeploy 阶段无；启动命令里的 `python migrate.py` 先跑迁移，再启动 uvicorn。验收：
    - `GET /health` → `{"status":"healthy"}`；
-   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 33，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
+   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 34，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
    - 登录后 `GET /v2/model/spend` 返回今日/本月、上限 90、预留 15。
 4. 再部署 worker：日志出现正常结束（cron 任务每 5 分钟起一次、`restartPolicyType: NEVER`）；若报 `Railway target identity mismatch: SERVICE`，说明第 1 点的代码改动还没合并。
 5. 做 c) 的设置与探测，再把 `AI_QUEUE_AUTOPLAN` 改 `1`，然后通知我做第 8.5 步。
@@ -384,3 +384,11 @@ Railway 保留上一次部署，可在部署列表中一键回退；数据库变
 - 全站 `viewport-fit=cover`；顶部留 `env(safe-area-inset-top)`，底部导航高 56 + `env(safe-area-inset-bottom)`；样式里不使用 `backdrop-filter` / `filter: blur`（有测试检查）。
 - `backend/tests/test_ui_screens.py` 用 iPhone 15 描述（DPR 3）分别截「Safari 模式」和「添加到主屏幕（standalone）」两种安全区，每页各截空数据与有数据两种状态。WebKit 在本地沙箱下载不到，会被跳过；CI 里三种浏览器都装了，截图作为 `ui-screenshots` 附件上传。
 - 出题进度页：首批目标卡、科目切换的题库库存、本月花费、最近任务（状态标签；取消按钮在「详情」展开后）。
+
+## 并行出题（PR C）
+
+- 一次 worker 运行里最多同时发起 `max_concurrency` 个模型请求（模型页「并发上限」，1–4；新用户默认 2，**已有用户的值不会被迁移改动，需在模型页自己改成 2**）。总调用数仍受 `AI_CALLS_PER_RUN` 限制。
+- 整次运行不超过 4 分钟（`AI_RUN_SECONDS`，默认 240，范围 60–270）：剩余时间放不下一次典型调用（约 60 秒 + 15 秒余量）就不再发起新调用；到点仍在跑的调用不再等待，它的租约到期后自动重试，费用按预留额度计入。
+- 每次领取任务时先拿一把数据库全局锁：后一个领取一定看到前一个已写入的预留，所以日预算、本月上限、单任务上限、`max_concurrency` 在并行下仍然精确（有多连接竞速测试）。同一道题的出题/审核/修复不会同时被两个请求领取。
+- 运行日志多了 `concurrency=`（本次开的并发数）、`parallel_peak=`（实际同时在跑的最大数）、`duration_s=`（整次运行秒数，含运行前后的准备工作）；`worker_heartbeats` 记录同样的并发数和用时，出题进度页的「后台服务」说明里能看到。
+- 建议起步：`AI_CALLS_PER_RUN=4`、`max_concurrency=2`（约 2 轮，每轮 45 秒左右，一次运行 1.5–2 分钟）。观察几次 `duration_s` 都小于 150、没有 `overran=yes`，再把 `AI_CALLS_PER_RUN` 提到 6。并发不要高于 3：花费上限与限速都是按预留额度计，并发越高，临近额度时越早被挡住。

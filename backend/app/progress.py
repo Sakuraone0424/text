@@ -234,6 +234,7 @@ def worker_status(conn, now):
     return dict(
         last_run_at=row["finished_at"], outcome=row["outcome"], calls=row["calls"], cost_cny=str(row["cost_cny"]),
         stopped_because=row["stopped_because"], queue=row["queue"], minutes_ago=minutes,
+        concurrency=row["concurrency"], duration_seconds=float(row["duration_seconds"]),
         stale=minutes > STALE_AFTER_MINUTES,
     )
 

@@ -126,6 +126,7 @@ def test_a_heartbeat_is_written_each_run_and_read_back(db, setup_ai, monkeypatch
             yield db
 
     monkeypatch.setattr(auto_worker, "get_db", test_db)
+    db.execute("UPDATE ai_settings SET max_concurrency=1")  # these tests share one connection: no threads
     monkeypatch.setattr(auto_worker, "tick", lambda: None)
     monkeypatch.setattr(auto_worker, "integrations_tick", lambda: None)
     monkeypatch.setattr(auto_worker.model_router, "authorized", lambda private=False: None)
@@ -162,6 +163,7 @@ def test_heartbeats_older_than_two_weeks_are_pruned(db, setup_ai, monkeypatch):
             yield db
 
     monkeypatch.setattr(auto_worker, "get_db", test_db)
+    db.execute("UPDATE ai_settings SET max_concurrency=1")  # these tests share one connection: no threads
     auto_worker.record_heartbeat({"enabled": "yes"}, datetime.now(timezone.utc), "")
     assert db.execute("SELECT count(*) AS n FROM worker_heartbeats").fetchone()["n"] == 1
 

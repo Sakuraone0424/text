@@ -1,6 +1,8 @@
 """Budgeted leased jobs. Reservations survive uncertain calls and crash recovery."""
 
 import hashlib
+import threading
+from collections.abc import MutableMapping
 import json
 from decimal import Decimal
 from uuid import uuid4
@@ -68,7 +70,35 @@ def enqueue(conn, user_id, key, kind, payload):
 
 # Why the most recent claim() did or did not hand out a job. Read by the worker's
 # one-line status log; contains ids, kinds and application-owned codes only.
-LAST_CLAIM = {}
+class _PerThreadDict(MutableMapping):
+    """A dict that every thread sees as its own: parallel worker threads each keep their own last claim."""
+
+    def __init__(self):
+        self._local = threading.local()
+
+    def _d(self):
+        if not hasattr(self._local, "d"):
+            self._local.d = {}
+        return self._local.d
+
+    def __getitem__(self, key):
+        return self._d()[key]
+
+    def __setitem__(self, key, value):
+        self._d()[key] = value
+
+    def __delitem__(self, key):
+        del self._d()[key]
+
+    def __iter__(self):
+        return iter(self._d())
+
+    def __len__(self):
+        return len(self._d())
+
+
+LAST_CLAIM = _PerThreadDict()
+CLAIM_LOCK = 810000000  # advisory lock key shared by every claim
 
 
 def _note(outcome, **detail):
@@ -133,6 +163,9 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     scope_filter = (
         " AND settings_snapshot->'" + scope_kind + "'->>'scope_id'=%s" if scope_id else ""
     )
+    # Parallel worker threads claim one at a time: each claim sees the reservations and running jobs of the
+    # claims before it, so the budget, the per-task limit, the monthly cap and max_concurrency stay exact.
+    conn.execute("SELECT pg_advisory_xact_lock(%s)", (CLAIM_LOCK,))
     expired = conn.execute(
         "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp()"
         + scope_filter
@@ -148,7 +181,11 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     job = conn.execute(
         "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp()"
         + scope_filter
-        + " AND NOT kind=ANY(%s) ORDER BY " + CLAIM_ORDER_SQL + " FOR UPDATE SKIP LOCKED LIMIT 1",
+        + " AND NOT kind=ANY(%s)"
+        # one question is never written/reviewed/repaired by two calls at once
+        + " AND NOT (payload ? 'question_id' AND EXISTS(SELECT 1 FROM ai_jobs r WHERE r.state='running' AND r.id<>ai_jobs.id"
+        " AND r.payload->>'question_id'=ai_jobs.payload->>'question_id'))"
+        + " ORDER BY " + CLAIM_ORDER_SQL + " FOR UPDATE SKIP LOCKED LIMIT 1",
         ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(),),
     ).fetchone()
     if not job:
