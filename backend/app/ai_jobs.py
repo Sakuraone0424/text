@@ -76,6 +76,14 @@ def _note(outcome, **detail):
     LAST_CLAIM.update(outcome=outcome, **detail)
 
 
+# Claim order. Probes and grading first; then reviews and repairs (questions already written are checked
+# before any new question is written); everything else (writing, analysis) last. Within a class: oldest first.
+CLAIM_ORDER_SQL = (
+    "CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 "
+    "WHEN 'quality_review' THEN 2 WHEN 'repair' THEN 2 WHEN 'science_review' THEN 2 WHEN 'answer_review' THEN 2 "
+    "ELSE 3 END,id"
+)
+
 # Jobs that were blocked only because their frozen model disappeared; they are retried once a usable
 # replacement exists (see auto_worker), never left silently blocked.
 MODEL_GONE_CODES = (
@@ -140,7 +148,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     job = conn.execute(
         "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp()"
         + scope_filter
-        + " AND NOT kind=ANY(%s) ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id FOR UPDATE SKIP LOCKED LIMIT 1",
+        + " AND NOT kind=ANY(%s) ORDER BY " + CLAIM_ORDER_SQL + " FOR UPDATE SKIP LOCKED LIMIT 1",
         ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(),),
     ).fetchone()
     if not job:

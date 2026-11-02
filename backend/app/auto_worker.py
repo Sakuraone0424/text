@@ -124,10 +124,10 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                 else:
                     raise ValueError("unsupported_dispatch_kind")
         except (ValueError, KeyError, LookupError) as exc:
-            if "qa_automation" in job["settings_snapshot"]:
-                detail = safe_dispatch_failure(exc)
-                conn.execute("UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),"
-                             "'{dispatch_failure}',%s) WHERE id=%s", (ai_jobs.Jsonb(detail),job["id"]))
+            # The reason code (never the model's prose) is kept for every job: the progress page shows it.
+            detail = safe_dispatch_failure(exc)
+            conn.execute("UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),"
+                         "'{dispatch_failure}',%s) WHERE id=%s", (ai_jobs.Jsonb(detail), job["id"]))
             conn.execute(
                 "UPDATE ai_jobs SET state='blocked',error_code='invalid_or_uncertain_result' WHERE id=%s",
                 (job["id"],),
@@ -242,7 +242,7 @@ def queue_snapshot(conn):
         "array_to_string(ARRAY(SELECT k FROM unnest(ARRAY['limited_trial','review_campaign','qa_automation']) k "
         "WHERE settings_snapshot ? k),',') AS scope "
         "FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp() AND NOT kind=ANY(%s) "
-        "ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id LIMIT 1",
+        "ORDER BY " + ai_jobs.CLAIM_ORDER_SQL + " LIMIT 1",
         (held,),
     ).fetchone()
     return states, held, head
