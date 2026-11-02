@@ -378,3 +378,9 @@ worker 另需：`AI_AUTOMATION_ENABLED=1`、`AI_QUEUE_AUTOPLAN=1`、`AI_CALLS_PE
 ## 回滚
 
 Railway 保留上一次部署，可在部署列表中一键回退；数据库变更只追加，旧 28 题记录只读保留。
+
+## 界面规范与截图自检（PR B）
+
+- 全站 `viewport-fit=cover`；顶部留 `env(safe-area-inset-top)`，底部导航高 56 + `env(safe-area-inset-bottom)`；样式里不使用 `backdrop-filter` / `filter: blur`（有测试检查）。
+- `backend/tests/test_ui_screens.py` 用 iPhone 15 描述（DPR 3）分别截「Safari 模式」和「添加到主屏幕（standalone）」两种安全区，每页各截空数据与有数据两种状态。WebKit 在本地沙箱下载不到，会被跳过；CI 里三种浏览器都装了，截图作为 `ui-screenshots` 附件上传。
+- 出题进度页：首批目标卡、科目切换的题库库存、本月花费、最近任务（状态标签；取消按钮在「详情」展开后）。

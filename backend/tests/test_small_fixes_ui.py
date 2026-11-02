@@ -69,6 +69,7 @@ def test_the_progress_page_can_cancel_a_waiting_task(live_app, browser):
     page.on("dialog", lambda d: d.accept())
     login(page, base)
     page.goto(base + "/progress")
+    page.locator("#jobs details summary").first.click()  # the cancel button lives in the opened details
     button = page.locator("#jobs .cancel")
     expect(button).to_have_count(1)
     assert button.bounding_box()["height"] >= 44

@@ -22,8 +22,8 @@ def test_dashboard_focus_navigation_and_two_step_start(live_app, browser, width,
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
     expect(page.locator("#stat-avg")).to_have_text("—")  # no paper yet: an empty state, never a made-up number
-    expect(page.locator("#stat-avg-note")).to_contain_text("完成第一套卷子后显示")
-    expect(page.locator("#weak-chapters")).to_contain_text("完成第一套卷子后显示")
+    expect(page.locator("#stat-avg-note")).to_contain_text("做完首套后显示")
+    expect(page.locator("#weak-chapters")).to_contain_text("做完首套后")
     page.locator("#prepare").click()
     expect(page.locator("#start")).to_be_visible()
     assert page.locator("#questions article").count() == 0
@@ -117,7 +117,7 @@ def test_pending_grade_custom_confirmation_and_truthful_chart(live_app, browser)
     assert client.get(f"/v2/papers/{pid}").json()["timing"]["status"] == "in_progress"
     confirm_submission(page)
     expect(page.locator(".grade-title").first).to_have_text("1题待判分")
-    expect(page.locator(".grade-ring")).to_have_attribute("aria-label", "已判分27/28题，待判分1题")
+    expect(page.locator(".grade-card")).to_have_attribute("aria-label", "已判分27/28题，待判分1题")
     result = client.get(f"/v2/papers/{pid}/result").json()
     assert result["score"] is None and result["pending"] == 1
     repeated = client.post(f"/v2/papers/{pid}/submit", json={"expected_version": 0}).json()
@@ -141,7 +141,7 @@ def overview_fixture(**extra):
         "objective_rate": 0.72, "subjective_rate": 0.55,
         "weak_chapters": [{"subject": "biochemistry", "chapter": "合成统计章节", "rate": 0.4, "answers": 5},
                           {"subject": "cell_biology", "chapter": "合成膜章节", "rate": 0.6, "answers": 4}],
-        "reviews": {"due_now": 3, "next_7_days": [], "mastered": 0}, "tomorrow": {"ready": 42, "needed": 60}, "has_data": True,
+        "reviews": {"due_now": 3, "next_7_days": [], "mastered": 0}, "tomorrow": {"ready": 42, "needed": 60, "missing": 18, "complete": False, "eta_at": None, "per_hour": 0}, "has_data": True,
     }
     return {**base, **extra}
 
@@ -156,7 +156,7 @@ def test_dashboard_numbers_come_straight_from_the_statistics_endpoint(live_app, 
     expect(page.locator("#days-left")).to_have_text("49")
     expect(page.locator("#streak-days")).to_have_text("4")
     expect(page.locator("#stat-avg")).to_have_text("212")
-    expect(page.locator("#stat-avg-note")).to_have_text("较上周 +6 分")
+    expect(page.locator("#stat-avg-note")).to_have_text("较上周 +6")
     expect(page.locator("#stat-avg-note")).to_have_class("up")
     expect(page.locator("#stat-objective")).to_have_text("72%")
     expect(page.locator("#stat-subjective")).to_have_text("55%")

@@ -35,9 +35,11 @@
   function frame(root, spec) {
     root.replaceChildren();
     root.classList.add("chart-block");
-    const head = html("div", undefined, root, "chart-head");
-    html("h3", spec.title, head, "chart-title");
-    if (spec.unit) html("span", spec.unit, head, "chart-unit");
+    if (!spec.hideTitle) {
+      const head = html("div", undefined, root, "chart-head");
+      html("h3", spec.title, head, "chart-title");
+      if (spec.unit) html("span", spec.unit, head, "chart-unit");
+    }
     return {
       body: html("div", undefined, root, "chart-body"),
       readout: html("p", spec.readoutHint || "点按数据点查看具体数值", root, "chart-readout"),
@@ -47,11 +49,13 @@
   function empty(root, spec) {
     root.replaceChildren();
     root.classList.add("chart-block");
-    const head = html("div", undefined, root, "chart-head");
-    html("h3", spec.title, head, "chart-title");
+    if (!spec.hideTitle) {
+      const head = html("div", undefined, root, "chart-head");
+      html("h3", spec.title, head, "chart-title");
+    }
     const box = html("div", undefined, root, "chart-empty");
+    box.innerHTML = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>';
     html("strong", spec.empty || "暂无数据", box);
-    if (spec.emptyHint) html("p", spec.emptyHint, box);
     box.setAttribute("role", "img");
     box.setAttribute("aria-label", spec.title + "：" + (spec.empty || "暂无数据"));
   }
@@ -243,13 +247,22 @@
       const slot = index + lead,
         col = Math.floor(slot / 7),
         row = slot % 7;
-      const shade = cell.value > 0 ? 0.22 + 0.78 * Math.min(1, cell.value) : 0;
+      const level = cell.value > 0 ? Math.max(1, Math.min(4, Math.ceil(cell.value * 4))) : 0; // five levels: 0..4
       const rect = svg("rect", {
         x: L + col * (size + gap), y: row * (size + gap), width: size, height: size, rx: 4,
-        fill: shade ? COLORS.biochemistry : COLORS.track, "fill-opacity": shade || 1, class: "heat-cell",
+        fill: level ? COLORS.biochemistry : COLORS.track, "fill-opacity": level ? [0, 0.25, 0.45, 0.7, 1][level] : 1, class: "heat-cell",
+        ...(cell.today ? { stroke: COLORS.biochemistry, "stroke-width": 1.5, "stroke-dasharray": "3 2" } : {}),
       }, chart);
       bind(rect, f.readout, `${cell.day}：${cell.note}`);
     });
+    const legend = html("div", undefined, f.body, "heat-legend");
+    legend.append("少");
+    [0, 1, 2, 3, 4].forEach((l) => {
+      const chip = html("i", undefined, legend);
+      chip.style.background = l ? COLORS.biochemistry : COLORS.track;
+      chip.style.opacity = l ? [0, 0.25, 0.45, 0.7, 1][l] : 1;
+    });
+    legend.append("多");
     return root;
   }
 

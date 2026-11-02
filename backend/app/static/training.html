@@ -49,7 +49,7 @@
             <button class="primary" type="submit">进入学习空间 <span aria-hidden="true">→</span></button>
           </div>
         </form>
-        <p id="status" class="status-message" role="status" aria-live="polite">正在确认登录状态…</p>
+        <p id="status" class="status-message" role="status" aria-live="polite"></p>
         <section id="conflict" class="conflict-card" role="alert" hidden>
           <h2>发现另一台设备的较新答案</h2>
           <p>本机答案仍然保留，自动同步已暂停。请先核对，再选择保留的版本。</p>
@@ -68,7 +68,7 @@
             <h1>学习数据</h1>
           </header>
           <p id="quota-banner" class="notice" role="status" hidden></p>
-          <section class="card hero-card" aria-label="倒计时与今日训练卷">
+          <section class="card key-card hero-card" aria-label="倒计时与今日训练卷">
             <div class="hero-top">
               <div class="hero-stat">
                 <span class="stat-label" id="exam-label">距 12 月 21 日初试</span>
@@ -85,26 +85,30 @@
               <span id="paper-state" class="pill">状态待载入</span>
             </div>
             <p id="spec-summary" class="muted spec-line">生化 30 + 细胞 30 · 300 分 · 60 分钟</p>
+            <div id="bank-block" class="bank-block" hidden>
+              <div class="bank-line"><span>已入库 <strong id="bank-ready">—</strong> / <span id="bank-needed">60</span></span><span id="bank-eta"></span></div>
+              <div class="thin-bar" role="img" aria-label="题库进度"><i id="bank-bar"></i></div>
+            </div>
             <p id="today-result" class="today-result" hidden></p>
             <button id="prepare" class="primary hero-action">开始</button>
             <p id="prepare-note" class="micro-note">先准备试卷，确认后才开始60分钟计时</p>
           </section>
           <section class="stat-row" aria-label="近期成绩">
-            <div class="card stat-card"><span class="stat-label">近 7 次均分</span><strong id="stat-avg">—</strong><small id="stat-avg-note">完成第一套卷子后显示</small></div>
-            <div class="card stat-card"><span class="stat-label">客观题正确率</span><strong id="stat-objective">—</strong><small id="stat-objective-note">完成第一套卷子后显示</small></div>
-            <div class="card stat-card"><span class="stat-label">主观题得分率</span><strong id="stat-subjective">—</strong><small id="stat-subjective-note">判分完成后显示</small></div>
+            <div class="card stat-card"><span class="stat-label">近 7 次均分</span><strong id="stat-avg" class="none">—</strong><small id="stat-avg-note">做完首套后显示</small></div>
+            <div class="card stat-card"><span class="stat-label">客观题正确率</span><strong id="stat-objective" class="none">—</strong><small id="stat-objective-note">做完首套后显示</small></div>
+            <div class="card stat-card"><span class="stat-label">主观题得分率</span><strong id="stat-subjective" class="none">—</strong><small id="stat-subjective-note">判分后显示</small></div>
           </section>
           <section class="card weak-card" aria-labelledby="weak-title">
-            <div class="card-heading"><h2 id="weak-title">薄弱章节</h2><span class="muted small">正确率最低的 3 章</span></div>
+            <div class="card-heading"><h2 id="weak-title">薄弱章节</h2><span class="muted small">按正确率</span></div>
             <div id="weak-chapters"></div>
             <button id="weak-practice" class="text-button" type="button" hidden>再练一套薄弱题 →</button>
           </section>
           <section class="quick-row" aria-label="快捷入口">
             <button class="card quick-card" data-action="memory" id="quick-review" type="button">
-              <span class="quick-title">错题复习</span><span class="quick-line">今日到期 <b id="metric-due">—</b> 道</span>
+              <span class="quick-title">错题复习</span><span class="quick-line" id="quick-review-line">今日没有到期</span><b id="metric-due" hidden>0</b>
             </button>
             <a class="card quick-card" href="/progress" id="open-progress">
-              <span class="quick-title">出题进度</span><span class="quick-line">明日卷已备 <b id="tomorrow-ready">—</b></span>
+              <span class="quick-title">出题进度</span><span class="quick-line" id="quick-progress-line">已入库 <b id="tomorrow-ready">—</b></span>
             </a>
           </section>
         </section>
@@ -146,6 +150,11 @@
           <div class="focus-secondary" hidden>
             <button id="toggle-mark" class="mark-button" aria-pressed="false">☆ 标记稍后看</button>
           </div>
+          <div id="result-bar" class="subbar" hidden>
+            <button id="result-back" class="icon-button" aria-label="返回首页"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <h1 id="result-title">训练卷成绩</h1>
+            <span></span>
+          </div>
           <section id="result" aria-label="考试成绩与解析"></section>
           <div id="focus-actions" class="focus-actions" hidden>
             <button id="previous-question" class="secondary">上一题</button>
@@ -154,37 +163,35 @@
         </section>
 
         <section data-page="mistakes" id="mistakes-view" hidden>
-          <header class="page-head"><p class="date-line">错题与复习</p><h1>错题复习</h1></header>
-          <section class="card" aria-labelledby="mistake-chart-title">
-            <div class="card-heading"><h2 id="mistake-chart-title">错题分布</h2></div>
-            <div id="mistake-type-chart"></div>
-            <div id="due-chart"></div>
+          <header class="page-head"><h1>错题</h1></header>
+          <section class="card key-card due-card" aria-label="今日到期复习">
+            <div class="due-row">
+              <div><span class="stat-label">今日到期复习</span><p><span id="due-number" class="due-number zero">0</span><span class="unit">道</span></p></div>
+              <div id="due-mini" class="mini-bars" role="img" aria-label="未来 7 天每天到期的数量"></div>
+            </div>
+            <p id="due-note" class="muted small">右侧为未来 7 天每天到期数</p>
+            <button id="memory" class="primary full-width" disabled aria-disabled="true">今日没有到期复习</button>
           </section>
-          <button id="memory" class="primary full-width">读取到期复测</button>
           <div id="mistakes-content"></div>
           <section class="card" aria-labelledby="mistake-list-title">
             <div class="card-heading"><h2 id="mistake-list-title">错题本</h2><span id="mistake-count" class="muted small"></span></div>
             <div class="filter-bar" id="mistake-filters" role="group" aria-label="错题筛选">
-              <div class="chips" id="filter-subject" role="group" aria-label="科目"></div>
-              <div class="chips" id="filter-type" role="group" aria-label="题型"></div>
-              <label class="select-label">章节<select id="filter-chapter"><option value="">全部章节</option></select></label>
+              <div class="filter-row"><span>科目</span><div class="chips" id="filter-subject" role="group" aria-label="科目"></div></div>
+              <div class="filter-row"><span>题型</span><div class="chips" id="filter-type" role="group" aria-label="题型"></div></div>
+              <div class="filter-row"><span>章节</span><select id="filter-chapter" aria-label="章节"><option value="">全部章节</option></select></div>
             </div>
             <ul id="mistake-list" class="mistake-list"></ul>
-            <p id="mistake-empty" class="muted" hidden>没有符合条件的错题。</p>
+            <div id="mistake-empty" class="empty-line" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg><span>没有符合条件的错题</span></div>
             <button id="mistake-more" class="secondary full-width" type="button" hidden>显示更多</button>
-            <button id="chapter-practice" class="primary full-width" type="button" hidden>只练这一章 →</button>
+            <button id="chapter-practice" class="primary full-width" type="button" hidden>只练这一章</button>
           </section>
           <section id="practice-panel" class="card practice-panel" hidden aria-live="polite"></section>
         </section>
         <section data-page="stats" id="stats-view" hidden>
-          <div class="page-heading">
-            <div>
-              <p class="eyebrow">LEARNING ANALYTICS</p>
-              <h1>用数据，看清下一步。</h1>
-              <p class="muted">
-                已判分与待判分分别统计，不把待批题算成对或错。
-              </p>
-            </div>
+          <div class="subbar">
+            <button id="stats-back" class="icon-button" aria-label="返回我的"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <h1>历史与统计</h1>
+            <span></span>
           </div>
           <div class="button-row">
             <button id="weekly" class="secondary">近7天章节统计</button
@@ -195,7 +202,7 @@
           <div id="stats-content"></div>
         </section>
         <section data-page="profile" id="profile-view" hidden>
-          <header class="page-head"><p class="date-line">我的</p><h1>学习数据</h1></header>
+          <header class="page-head"><h1>我的学习数据</h1></header>
           <div id="profile-data" class="data-stack" aria-live="polite"><p class="muted">登录后读取你的真实学习记录。</p></div>
           <h2 class="section-title">设置与档案</h2>
           <section class="card settings-list">
