@@ -215,6 +215,7 @@ function spend(report) {
   const per = s.cost_per_admitted_question_cny.month;
   $("spend-per").textContent = per ? yuan(per) : "—";
   $("spend-per").title = per ? "本月入库 " + s.admitted_questions.month + " 题" : "本月还没有入库题目";
+  $("spend-daily-left").textContent = s.remaining_daily_cny === null || s.remaining_daily_cny === undefined ? "未设上限" : yuan(s.remaining_daily_cny);
   $("spend-left").textContent = yuan(s.remaining_writing_review_cny);
   $("spend-grading").textContent = yuan(s.remaining_grading_cny);
   $("spend-note").textContent = s.message || "";

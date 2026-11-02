@@ -1,3 +1,4 @@
+from decimal import Decimal
 """Part 2: the question-writing progress page. Read-only numbers; fake data only."""
 import json
 from datetime import datetime, timedelta, timezone
@@ -181,6 +182,11 @@ def test_the_endpoint_needs_login_and_returns_only_numbers(client, db, monkeypat
     body = response.json()
     assert len(body["buckets"]) == 10 and "spend" in body and "worker" in body and "next_paper" in body
     assert SECRET_TEXT not in response.text and "DEEPSEEK" not in response.text
+    # the same "today's remaining budget" the model page's ledger shows (daily budget minus today's usage)
+    assert body["spend"]["remaining_daily_cny"] == "0"  # no daily budget set yet
+    db.execute("UPDATE ai_settings SET daily_cny=15")
+    again = client.get("/v2/model/progress", headers=LEARNER).json()
+    assert Decimal(again["spend"]["remaining_daily_cny"]) == Decimal("15")
     page = client.get("/progress")
     assert page.status_code == 200 and "出题进度" in page.text and page.headers["cache-control"] == "no-store"
     home = client.get("/training").text

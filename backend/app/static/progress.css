@@ -98,3 +98,5 @@ body {
 .chart-empty { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 0; color: var(--disabled-ink); font-size: 13px; white-space: nowrap; }
 .chart-empty .ico { width: 20px; height: 20px; flex: none; }
 .chart-svg [tabindex] { cursor: pointer; }
+.card:not(.key) .cells.four { grid-template-columns: repeat(4, 1fr); }
+.cells.four > div { padding: 0 6px; }
