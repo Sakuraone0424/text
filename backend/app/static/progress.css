@@ -15,6 +15,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font: 14px/1.6 "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif;
+  color-scheme: light;
 }
 .page { max-width: 640px; margin: 0 auto; padding: 14px 18px calc(24px + env(safe-area-inset-bottom)); }
 .top { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -66,3 +67,16 @@ body {
 .state.running { background: var(--primary-soft); color: #1e40af; }
 #notice { background: #ffedd5; color: var(--warn); border-radius: 12px; padding: 12px 14px; margin: 0 0 14px; }
 .warn { color: var(--warn); }
+
+.chart-block { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.chart-title { margin: 0; font-size: 14px; }
+.chart-unit { font-size: 11px; color: var(--muted); }
+.chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart-readout { margin: 0; font-size: 12px; color: var(--muted); min-height: 1.6em; }
+.chart-readout.on { color: var(--text); font-weight: 500; }
+.chart-conclusion { margin: 0; font-size: 13px; font-weight: 500; }
+.chart-conclusion:empty { display: none; }
+.chart-empty { padding: 14px 12px; border-radius: 12px; background: #f8faff; border: 1px dashed var(--line); }
+.chart-empty p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.chart-svg [tabindex] { cursor: pointer; }

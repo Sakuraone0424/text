@@ -119,6 +119,20 @@ function spend(report) {
   $("spend-left").textContent = yuan(s.remaining_writing_review_cny);
   $("spend-grading").textContent = yuan(s.remaining_grading_cny);
   $("spend-note").textContent = s.message || "";
+  // cumulative spend this month by day, against the writing/review stop line and the monthly cap
+  const days = s.daily || [];
+  let running = 0;
+  const items = days.map((d) => {
+    running += Number(d.cny);
+    return { label: d.day.slice(8).replace(/^0/, "") + "日", value: Math.round(running * 100) / 100, note: "当日 " + yuan(d.cny) };
+  });
+  const cap = Number(s.month_cap_cny), stop = Number(s.writing_review_limit_cny);
+  Charts.columns($("spend-chart"), {
+    title: "本月累计花费", unit: "元", items, max: Math.max(cap, running), format: (v) => "¥" + Math.round(v),
+    refLines: [{ value: stop, label: "出题停止线 ¥" + Math.round(stop), color: Charts.COLORS.cell_biology }, { value: cap, label: "上限 ¥" + Math.round(cap), color: "#B91C1C" }],
+    conclusion: items.length ? `本月累计 ${yuan(running)}，距出题停止线还有 ${yuan(Math.max(0, stop - Number(s.month_counted_cny)))}。` : "",
+    empty: "本月还没有花费", emptyHint: "出题、审核、判分产生费用后，每天一根柱子。",
+  });
 }
 
 function jobs(report) {

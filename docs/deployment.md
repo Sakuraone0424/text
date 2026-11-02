@@ -63,6 +63,15 @@ worker 真正开始调用模型，需要同时满足：
 - worker 每次运行评估一次，**不会静默**：`worker-run` 里的 `upgrade=` 字段是 `off` / `none` / `waiting:<模型>=<原因>` / `switched:<模型>`。切换前必须同时满足：设置档（判分）、出题档（off）、审核档（low）都已对该模型探测通过；当前人民币价格已核实；最坏单次费用在每日/每月/单任务（及试验）预算内。缺的探测会自动排队（只发合成算术，费用极小）。
 - 已排队任务冻结的模型下架或目录变化时：普通任务按当前选定、已探测、有价格的模型**重新冻结后继续**（输入不变）；不能重排的标明原因 `model_delisted_no_replacement` / `replacement_effort_not_probed:<档>` / `replacement_unusable:<原因>`，出现可用替代后 worker 自动把它们放回队列。冻结试验、审核活动、QA 授权任务和兼容性探测任务不会被移到别的模型。
 
+## 学习数据、错题筛选、短练习与添加到主屏幕
+
+- **统计接口**（都需登录、只返回数字、不含密钥；题干只出现在错题列表里）：`GET /v2/stats/overview`（首页：倒计时、连续天数、近 7 次均分及较上周变化、客观/主观得分率、最薄弱 3 章、到期复习数、明日卷已备 N/60）、`GET /v2/stats/profile`（「我的 / 学习数据」页的全部图表数据）、`GET /v2/papers/{id}/timing`（成绩页：各题型实际用时与按分值分配的时间，超出 25% 且多于 1 分钟标为用时偏长）。不同满分的卷子一律按各自满分折算成百分比，分数模式只画与最近一套同规格的卷子；被反馈的题不计入。
+- **每题用时**：前端只在该题在屏幕上、考试进行中、页面可见时计时，随草稿保存（`seconds`，只增不减），交卷时写入新表 `answer_timings`（迁移 033）。
+- **错题本**：`GET /v2/mistakes?subject=&question_type=&chapter=&limit=&offset=`，返回失分的已判分题（反馈题除外）及各筛选项的数量；章节取每题第一条教材证据的章节。
+- **短练习**（`POST /v2/practice`、`POST /v2/practice/{id}/answer`、`GET /v2/practice/{id}`，表 `practice_sets` / `practice_answers`）：只用已入库的客观题（单选、填空），按错过的题优先，其次没做过的；**不属于任何一张卷子，不计入每日成绩和成绩趋势**，但会更新章节正确率和连续天数。正在作答中的卷子里的题不会出现在练习里。
+- **添加到主屏幕**：`/manifest.webmanifest`、`/static/icons/*`；iPhone/iPad 的 Safari 里首页会出现一次性提示（点「知道了」后不再出现，记在浏览器本地）：添加后需要重新登录一次。登录有效期 30 天。
+- 字体 Noto Sans SC 来自 Google Fonts；加载失败时自动回退到系统字体，不影响使用。
+
 ## 出题进度页
 
 登录后打开 `/progress`（首页「出题进度」卡片和「我的」里都有入口），每 30 秒自动刷新，只读。数据来自 `GET /v2/model/progress`（需登录），只返回数字、代码和时间，不含题干、教材原文、提示词和密钥：
@@ -225,7 +234,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 2. 创建 worker 服务（b），配置变量、**不部署**，把 worker 服务 ID 发给我；我改守卫、过 CI、合并，之后你再部署。
 3. 先部署 `training-api-qa`：preDeploy 阶段无；启动命令里的 `python migrate.py` 先跑迁移，再启动 uvicorn。验收：
    - `GET /health` → `{"status":"healthy"}`；
-   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 32，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
+   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 33，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
    - 登录后 `GET /v2/model/spend` 返回今日/本月、上限 90、预留 15。
 4. 再部署 worker：日志出现正常结束（cron 任务每 5 分钟起一次、`restartPolicyType: NEVER`）；若报 `Railway target identity mismatch: SERVICE`，说明第 1 点的代码改动还没合并。
 5. 做 c) 的设置与探测，再把 `AI_QUEUE_AUTOPLAN` 改 `1`，然后通知我做第 8.5 步。
