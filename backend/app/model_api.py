@@ -225,6 +225,22 @@ def set_stopped(data: Stopped, request: Request, name=Depends(require_auth)):
     return operation(name, apply)
 
 
+@router.get("/waste/stats")
+def waste_stats(hours: int = Query(24, ge=1, le=168), name=Depends(require_auth)):
+    """Why finished model work was thrown away in the last `hours`, most frequent first, with how each is handled now."""
+    from app import waste_report
+
+    return operation(name, lambda c, u: waste_report.blocked_stats(c, hours))
+
+
+@router.get("/waste/replay")
+def waste_replay(hours: int = Query(24, ge=1, le=168), limit: int = Query(300, ge=1, le=1000), name=Depends(require_auth)):
+    """Recent failed drafts run through today's rules again. No model call, nothing is written."""
+    from app import waste_report
+
+    return operation(name, lambda c, u: waste_report.replay(c, hours, limit))
+
+
 class Probe(StrictModel):
     model_id: str = Field(min_length=1, max_length=200)
     effort: str = Field(min_length=1, max_length=20)

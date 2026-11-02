@@ -59,6 +59,14 @@ const REASON = {
   evidence_version_changed: "审核期间教材依据被改动",
   completed_actual_model_call_required: "没有真实完成的模型调用",
   reliable_provider_usage_required: "缺少可靠的用量记录",
+  repair_requested: "草稿有可修复的问题，已转入修复一次（不算作废）",
+  repair_still_invalid: "修复一次后仍不合格，已作废",
+  review_reformat_requested: "审核答案的格式不对，已重新请求一次审核（不算题目不通过）",
+  review_format_failed: "审核两次格式都不对，判为审核失败（不是题目的问题）",
+  evidence_quote_unmatched: "引用在提供的教材段落里找不到",
+  rubric_item_count_out_of_range: "评分要点数量不在规定范围",
+  rubric_missing: "缺少评分要点",
+  repair_unfixed: "修复的版本仍有同样的问题",
 };
 
 function el(tag, text, parent, cls) {
@@ -210,6 +218,34 @@ function bank(report) {
   }
 }
 
+function waste(report) {
+  const root = $("waste");
+  root.replaceChildren();
+  const w = report.waste;
+  if (!w || !w.blocked.length) {
+    el("p", "近 24 小时没有被挡的任务", root, "note");
+    return;
+  }
+  for (const item of w.blocked) {
+    const row = el("details", undefined, root, "waste-row");
+    const head = el("summary", undefined, row);
+    el("span", reasonText(item.code), head, "waste-name");
+    el("span", item.count + " 次", head, "waste-count");
+    el("p", item.stage + " · " + item.handling, row, "reason-line");
+    item.fields.forEach((f) => el("p", f.field + " ×" + f.count, row, "reason-line"));
+    el("code", item.code, el("p", undefined, row, "reason-line"));
+  }
+  const fixed = Object.entries(w.auto_fixed || {});
+  if (fixed.length) el("p", "近 24 小时自动修正：" + fixed.map(([k, n]) => `${FIXES[k] || k} ${n}`).join("、"), root, "note");
+  const layers = Object.entries(w.evidence_layers || {});
+  if (layers.length) el("p", "引用匹配：" + layers.map(([k, n]) => `${k} ${n}`).join("、"), root, "note");
+}
+const FIXES = {
+  json_extracted: "提取 JSON", numbers_to_int: "数值转整数", removed_accepted_answers: "删多余可接受答案", removed_options: "删多余选项",
+  empty_accepted_answers_removed: "删空答案", choice_keys_normalized: "选项键统一", choice_prefix_removed: "去选项前缀", answer_letter_normalized: "答案字母统一",
+  blank_marker_unified: "空格写法统一", fill_answer_added_to_accepted: "标准答案补入", rubric_tags_merged: "标签并入", difficulty_mapped: "难度映射", max_points_set_to_spec: "满分改规格值",
+};
+
 function spend(report) {
   const s = report.spend;
   $("spend-today").textContent = yuan(s.today_cny);
@@ -270,7 +306,7 @@ function jobs(report) {
     el("span", bits.join(" · "), li, "meta");
     // Reason codes and the cancel button live only in the opened details; the row says it in Chinese.
     const cancellable = ["pending", "retrying", "running"].includes(job.state);
-    if (job.detail || job.reason || job.outcome?.reason || cancellable) {
+    if (job.detail || job.reason || job.outcome?.reason || cancellable || (job.notes && job.notes.length)) {
       const more = el("details", undefined, li, "meta detail");
       el("summary", "详情", more);
       if (job.detail) {
@@ -286,6 +322,7 @@ function jobs(report) {
         line.append(reasonText(code) + " ");
         el("code", code, line);
       });
+      (job.notes || []).forEach((line) => el("p", line, more, "reason-line"));
       el("p", `任务 ${job.id} · 已尝试 ${job.attempts} 次`, more, "reason-line");
       if (cancellable) {
         const button = el("button", "取消任务", more, "cancel");
@@ -342,6 +379,7 @@ async function load() {
     status(report);
     bank(report);
     spend(report);
+    waste(report);
     jobs(report);
     $("updated").textContent = "每 30 秒自动刷新 · 更新于 " + fmtTime(report.generated_at);
   } catch (error) {

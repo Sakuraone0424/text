@@ -31,7 +31,7 @@ def main():
     from app.ai_jobs import extended_limits
 
     guard = execution_guard(request)
-    from app.provider_diagnostics import parse_completed_result, safe_diagnostic
+    from app.provider_diagnostics import extract_json_object, parse_completed_result, safe_diagnostic
 
     def failure(measured, stage, result=None):
         diagnostic = safe_diagnostic(dict(
@@ -80,6 +80,7 @@ def main():
         json.dump(
             dict(
                 response=response,
+                json_extracted=extract_json_object(result.final_response)[1],
                 usage=measured["usage"],
                 model_version=measured["model_version"],
                 returned_model_id=measured.get("returned_model_id"),

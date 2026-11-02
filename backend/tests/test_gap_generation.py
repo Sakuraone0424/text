@@ -437,15 +437,14 @@ def test_review_without_option_checks_is_not_accepted(db, corpus, setup_ai):
         auto_quality.accept_round(db, review)
 
 
-def test_incomplete_option_checks_block(db, corpus, setup_ai):
+def test_incomplete_option_checks_are_a_review_format_problem_not_a_failed_question(db, corpus, setup_ai):
     def edit(job):
         db.execute("UPDATE ai_jobs SET result=result #- '{response,option_checks,B}' WHERE id=%s", (job["id"],))
         return db.execute("SELECT * FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()
 
     qid, review = review_round(db, setup_ai, edit)
-    assert not auto_quality.accept_round(db, review)
-    assert "option_checks_incomplete" in db.execute(
-        "SELECT reason FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()["reason"]
+    with pytest.raises(auto_quality.ReviewFormatError):
+        auto_quality.accept_round(db, review)  # the question is not judged; the worker asks for the review again
 
 
 # ---- essay (问答) in the 300-point specification ----------------------------

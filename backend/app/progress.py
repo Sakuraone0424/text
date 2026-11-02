@@ -98,7 +98,7 @@ def buckets(conn, uid):
         "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,"
         "CASE WHEN state IN ('pending','retrying') THEN 'queued' WHEN state='running' THEN 'generating' "
         "WHEN state='succeeded' THEN 'generating' ELSE 'blocked' END AS k,count(*) AS n "
-        f"FROM ai_jobs WHERE kind='generation' AND {JOB_CURRENT} AND ("
+        f"FROM ai_jobs WHERE (kind='generation' OR (kind='repair' AND payload ? 'repair_of_job')) AND {JOB_CURRENT} AND ("
         " state IN ('pending','retrying','running') OR (state='succeeded' AND dispatched_at IS NULL)"
         " OR (state='blocked' AND COALESCE(error_code,'')<>'superseded_scoring' AND created_at>clock_timestamp()-%s*interval '1 day')"
         ") GROUP BY 1,2,3",
@@ -107,7 +107,7 @@ def buckets(conn, uid):
     job_reasons = conn.execute(
         "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,"
         "COALESCE(result->'dispatch_failure'->>'code',error_code,'unspecified') AS code,count(*) AS n "
-        f"FROM ai_jobs WHERE kind='generation' AND state='blocked' AND {JOB_CURRENT} AND COALESCE(error_code,'')<>'superseded_scoring' "
+        f"FROM ai_jobs WHERE (kind='generation' OR (kind='repair' AND payload ? 'repair_of_job')) AND state='blocked' AND {JOB_CURRENT} AND COALESCE(error_code,'')<>'superseded_scoring' "
         "AND created_at>clock_timestamp()-%s*interval '1 day' GROUP BY 1,2,3",
         (BLOCKED_JOB_DAYS,),
     ).fetchall()
@@ -157,7 +157,28 @@ def failure_detail(result):
     for error in failure.get("errors") or []:
         parts.append(":".join(x for x in (error.get("field"), error.get("reason") or error.get("type")) if x))
     parts += failure.get("reasons") or []
+    after = failure.get("after")
+    if isinstance(after, dict) and after.get("code"):  # the one repair did not fix it
+        parts.append("修复后:" + after["code"])
+        for error in after.get("errors") or []:
+            parts.append("修复后:" + (error.get("reason") or error.get("code") or error.get("type") or "unspecified"))
+        parts += ["修复后:" + r for r in after.get("reasons") or []]
     return dict(code=failure["code"], text="；".join(dict.fromkeys(p for p in parts if p)))
+
+
+def _notes(norm):
+    """Plain-Chinese lines: what was corrected automatically and which layer matched each quote."""
+    if not isinstance(norm, dict):
+        return []
+    from app.auto_fixes import FIX_LABELS
+    from app.evidence_match import LAYER_NAMES
+
+    names = {1: "原样", 2: "规范化", 3: "去标点", 4: "省略号", 5: "跨段落", 6: "严格模糊"}
+    lines = ["自动修正：" + FIX_LABELS.get(f, f) for f in norm.get("fixes", [])]
+    layers = [f"第 {e['layer']} 层（{names.get(e['layer'], '')}）" for e in norm.get("evidence", []) if e.get("matched")]
+    if layers:
+        lines.append("引用匹配：" + "、".join(layers))
+    return lines
 
 
 def recent_jobs(conn, limit=20):
@@ -166,7 +187,7 @@ def recent_jobs(conn, limit=20):
         "SELECT id,kind,state,attempts,error_code,next_retry,dispatched_at,payload->>'subject' AS subject,"
         "payload->>'question_type' AS question_type,payload->>'origin' AS origin,payload->>'item_id' AS item_id,"
         "payload->>'question_id' AS question_id,settings_snapshot->>'effort' AS effort,settings_snapshot->>'model_id' AS model,"
-        "COALESCE(finished_at,started_at,created_at) AS at,result->'dispatch_failure' AS failure "
+        "COALESCE(finished_at,started_at,created_at) AS at,result->'dispatch_failure' AS failure,result->'normalization' AS norm "
         "FROM ai_jobs ORDER BY COALESCE(finished_at,started_at,created_at) DESC,id DESC LIMIT %s",
         (limit,),
     ).fetchall()
@@ -218,7 +239,7 @@ def recent_jobs(conn, limit=20):
             outcome = dict(status=q["status"], reason=q["reason"])
         out.append(dict(
             id=r["id"], kind=r["kind"], label=label, source=source, state=r["state"], reason=reason,
-            detail=detail["text"] if detail else None, at=r["at"], subject=r["subject"], question_type=r["question_type"],
+            detail=detail["text"] if detail else None, notes=_notes(r["norm"]), at=r["at"], subject=r["subject"], question_type=r["question_type"],
             question_id=q["id"] if q else None, attempts=r["attempts"],
             next_retry=r["next_retry"] if r["state"] == "retrying" else None, outcome=outcome,
             awaiting_dispatch=bool(r["state"] == "succeeded" and r["dispatched_at"] is None),
@@ -312,6 +333,13 @@ def daily_spend(conn, uid):
     return [dict(day=r["day"], cny=str(r["cny"])) for r in rows]
 
 
+def _waste(conn):
+    from app import waste_report
+
+    stats = waste_report.blocked_stats(conn, 24)
+    return dict(hours=24, blocked=stats["blocked"][:8], auto_fixed=stats["auto_fixed"], evidence_layers=stats["evidence_layers"])
+
+
 def report(conn, uid):
     now = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
     rows = buckets(conn, uid)
@@ -324,6 +352,7 @@ def report(conn, uid):
         review_today=review_pass_rate_today(conn),
         legacy=legacy_summary(conn),
         recent_jobs=recent_jobs(conn),
+        waste=_waste(conn),
         spend={k: spend[k] for k in (
             "today_cny", "month_cny", "month_counted_cny", "month_cap_cny", "grading_reserve_cny",
             "writing_review_limit_cny", "remaining_writing_review_cny", "remaining_grading_cny",

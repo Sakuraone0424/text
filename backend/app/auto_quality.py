@@ -7,9 +7,34 @@ from psycopg.types.json import Jsonb
 from app.question_quality import StrictModel, Question, AXES, duplicate
 from app.candidate_review import snapshot_unit
 from app.ai_jobs import content_sha, enqueue
+from app.evidence_match import locate
 
 POLICY = "auto-evidence/2"  # /2: one independent review round (older two-round events no longer count)
 MAX_REPAIRS = 1
+FORMAT_RETRY_SUFFIX = ":format_retry"
+
+
+class ReviewFormatError(ValueError):
+    """The reviewer's answer was not in the required shape. This says nothing about the question itself:
+    the review is asked for once more, and only a second malformed answer counts as a failed review."""
+
+
+def review_format_failure(conn, job):
+    """First malformed review answer: ask again ("retry"). Second: the review failed ("failed")."""
+    if job["job_key"].endswith(FORMAT_RETRY_SUFFIX):
+        conn.execute(
+            "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason='review_format_failed' WHERE question_id=%s",
+            (job["payload"]["question_id"],),
+        )
+        return "failed"
+    enqueue(conn, job["user_id"], job["job_key"] + FORMAT_RETRY_SUFFIX, "quality_review", job["payload"])
+    return "retry"
+
+
+def quoted(unit_id, text, sent_excerpts):
+    """Is `text` a quote of one of the excerpts that were sent to the reviewer (tolerating OCR formatting)?"""
+    units = [dict(unit_id=uid, text=excerpt) for uid, excerpts in sent_excerpts.items() for excerpt in excerpts]
+    return locate(text, units, unit_id).ok
 
 
 class Claim(StrictModel):
@@ -450,9 +475,14 @@ def accept_round(conn, job):
     full_view = p["phase"] in ("answer", "review")  # sees answer, scoring and (review) the style
     blind_view = p["phase"] in ("science", "review")  # must settle the unique-answer question
     choice_round = full_view and q["question_type"] == "single_choice"
-    finding = (ChoiceAnswerFinding if choice_round else Finding).model_validate(
-        job["result"]["response"]
-    )
+    from pydantic import ValidationError
+
+    try:
+        finding = (ChoiceAnswerFinding if choice_round else Finding).model_validate(
+            job["result"]["response"]
+        )
+    except ValidationError as exc:
+        raise ReviewFormatError("review_answer_format") from exc
     bound = {u["unit_id"]: u for u in refs}
     sent_excerpts = {}
     for cited in q["evidence"]:
@@ -498,10 +528,7 @@ def accept_round(conn, job):
     for claim in finding.claims:
         if (
             claim.unit_id not in bound
-            or not any(
-                claim.excerpt in excerpt
-                for excerpt in sent_excerpts.get(claim.unit_id, [])
-            )
+            or not quoted(claim.unit_id, claim.excerpt, sent_excerpts)
         ):
             issues.append("invented_quote")
         if any(i < 0 or i >= len(q["rubric"]) for i in claim.criterion_indices):
@@ -512,7 +539,7 @@ def accept_round(conn, job):
     if choice_round:
         verdicts = {k: v.verdict for k, v in finding.option_checks.items()}
         if set(verdicts) != set("ABCD"):
-            issues.append("option_checks_incomplete")
+            raise ReviewFormatError("option_checks_incomplete")
         else:
             if verdicts[q["answer"]] != "correct":
                 issues.append("answer_key_not_confirmed_correct")
@@ -522,9 +549,7 @@ def accept_round(conn, job):
             if sorted(finding.other_correct_options) != others:
                 issues.append("option_verdicts_inconsistent")
         for check in finding.option_checks.values():
-            if check.unit_id not in bound or not any(
-                check.excerpt in excerpt for excerpt in sent_excerpts.get(check.unit_id, [])
-            ):
+            if check.unit_id not in bound or not quoted(check.unit_id, check.excerpt, sent_excerpts):
                 issues.append("invented_quote")
     issues += hard_issues(conn, qid, q)
     conn.execute(
@@ -695,6 +720,8 @@ def repair(conn, qid, question, reason, max_revisions=MAX_REPAIRS):
 
 
 UNREPAIRABLE = ("unresolvable_ocr_or_image_dependency", "source_file_integrity_failed")
+# Blocked for a reason that is not the question's fault: not repaired (and not thrown away either).
+NOT_QUESTION_FAULT = ("review_format_failed",)
 
 
 def discard_unfixable(conn):

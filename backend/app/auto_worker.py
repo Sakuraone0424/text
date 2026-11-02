@@ -13,60 +13,7 @@ from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
 
-_SAFE_VALIDATOR_ERRORS = {
-    "Rubric knowledge tags must belong to the question": "rubric_tag_mismatch",
-    "Rubric points must sum to max_points": "rubric_points_mismatch",
-    "max_points must match a supported versioned training specification": "invalid_versioned_points",
-    "Single choice requires A-D options and one answer key": "incomplete_choice_or_key",
-    "Empty option": "empty_choice_option",
-    "Options must be distinct": "duplicate_choice_options",
-    "Only single choice accepts options": "unexpected_options",
-    "Multi-blank questions use blanks only": "invalid_blank_representation",
-    "Every blank needs a matching placeholder and points summing to max_points": "blank_count_or_points_mismatch",
-    "Fill blank requires explicit nonempty accepted answers": "missing_accepted_answers",
-    "Canonical answer must be accepted": "canonical_fill_answer_missing",
-    "Fill blank requires exactly one ____ blank": "blank_marker_count",
-    "accepted_answers is only for fill_blank": "unexpected_accepted_answers",
-    "A valid ISBN-10 or ISBN-13 checksum is required": "invalid_isbn_checksum",
-}
-_SAFE_QUALITY_CODES = frozenset((
-    "unknown_question_type", "unresolved_placeholder",
-    "unavailable_figure_reference", "unhelpful_all_or_none_distractor",
-    "missing_unique_answer_rationale", "missing_accepted_answer_set",
-    "model_answer_too_terse_for_subjective_marking",
-    "insufficient_independent_scoring_criteria",
-))
-_SAFE_PACKET_ERRORS = {
-    "Textbook quote, subject or version identity mismatch": "evidence_identity_or_quote_mismatch",
-    "Each rubric point needs explicit cited source analysis": "rubric_source_analysis_missing",
-    "At least one located transcription reference required": "style_transcription_missing",
-}
-
-
-def safe_dispatch_failure(exc):
-    """Diagnostic reason codes only; never include a model's generated prose."""
-    import re
-    from pydantic import ValidationError
-    if isinstance(exc, ValidationError):
-        errors = []
-        for item in exc.errors(include_input=False, include_context=True)[:10]:
-            reason = str((item.get("ctx") or {}).get("error", ""))
-            entry = {"type": item["type"],
-                     "field": str(item["loc"][0]) if item["loc"] else "root"}
-            if reason in _SAFE_VALIDATOR_ERRORS:
-                entry["reason"] = _SAFE_VALIDATOR_ERRORS[reason]
-            errors.append(entry)
-        return {"code": "output_schema_violation", "errors": errors}
-    msg = str(exc)
-    prefix = "generated_question_quality_gate_failed:"
-    if msg.startswith(prefix):
-        reasons = msg[len(prefix):].split(",")
-        if reasons and len(reasons) <= 10 and all(x in _SAFE_QUALITY_CODES for x in reasons):
-            return {"code": "generated_question_quality_gate_failed",
-                    "reasons": reasons}
-    if msg in _SAFE_PACKET_ERRORS:
-        return {"code": _SAFE_PACKET_ERRORS[msg]}
-    return {"code": msg if re.fullmatch(r"[a-z_]{1,100}", msg) else "invalid_result"}
+from app.dispatch_codes import safe_dispatch_failure, _SAFE_VALIDATOR_ERRORS, _SAFE_QUALITY_CODES, _SAFE_PACKET_ERRORS  # noqa: F401  (re-exported)
 
 
 def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
@@ -101,6 +48,11 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                         auto_quality.promote(conn, job["payload"]["question_id"])
                 elif job["kind"] == "compatibility":
                     model_compatibility.accept(conn, job)
+                elif job["kind"] == "repair" and "repair_of_job" in job["payload"]:
+                    # the one repair of a draft that never became a question: same checks, same review
+                    qid = auto_generation.accept_repair(conn, job)
+                    auto_quality.schedule_checks(conn, job["user_id"], qid)
+                    conn.execute("UPDATE auto_question_states SET revision_count=1 WHERE question_id=%s", (qid,))
                 elif job["kind"] == "repair":
                     qid = auto_quality.repair(
                         conn,
@@ -115,7 +67,18 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                     if job["payload"].get("origin") == past_exam_import.ORIGIN_PAST_EXAM:
                         new = past_exam_import.accept(conn, job)
                     else:
-                        new = auto_generation.accept(conn, job)
+                        try:
+                            new = auto_generation.accept(conn, job)
+                        except auto_generation.RepairNeeded as fixable:
+                            # one repair before the draft is thrown away; the receipt keeps what was wrong
+                            if auto_generation.request_repair(conn, job["user_id"], job, fixable) is None:
+                                raise
+                            conn.execute("UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),"
+                                         "'{dispatch_failure}',%s) WHERE id=%s",
+                                         (ai_jobs.Jsonb({"code": "repair_requested", "errors": [
+                                             dict(field=e.get("field"), reason=e.get("code")) for e in fixable.errors]}), job["id"]))
+                            conn.execute("UPDATE ai_jobs SET dispatched_at=clock_timestamp() WHERE id=%s", (job["id"],))
+                            continue
                     auto_quality.schedule_checks(conn, job["user_id"], new)
                 elif job["kind"] == "exam_analysis":
                     auto_exams.accept(conn, job)
@@ -126,6 +89,16 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                 else:
                     raise ValueError("unsupported_dispatch_kind")
         except (ValueError, KeyError, LookupError) as exc:
+            if isinstance(exc, auto_quality.ReviewFormatError) and job["kind"] == "quality_review":
+                # a malformed review answer says nothing about the question: ask for the review once more
+                outcome = auto_quality.review_format_failure(conn, job)
+                code = "review_reformat_requested" if outcome == "retry" else "review_format_failed"
+                conn.execute("UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),"
+                             "'{dispatch_failure}',%s) WHERE id=%s", (ai_jobs.Jsonb({"code": code}), job["id"]))
+                if outcome == "failed":
+                    conn.execute("UPDATE ai_jobs SET state='blocked',error_code='invalid_or_uncertain_result' WHERE id=%s", (job["id"],))
+                conn.execute("UPDATE ai_jobs SET dispatched_at=clock_timestamp() WHERE id=%s", (job["id"],))
+                continue
             # The reason code (never the model's prose) is kept for every job: the progress page shows it.
             detail = safe_dispatch_failure(exc)
             conn.execute("UPDATE ai_jobs SET result=jsonb_set(COALESCE(result,'{}'::jsonb),"
@@ -141,7 +114,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
                 )
             elif job["kind"] == "generation" and job["payload"].get("origin") == past_exam_import.ORIGIN_PAST_EXAM:
                 past_exam_import.mark_blocked(conn, job, safe_dispatch_failure(exc)["code"])
-            elif job["kind"] == "repair":
+            elif job["kind"] == "repair" and "question_id" in job["payload"]:
                 conn.execute(
                     "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason='invalid_repair_result' WHERE question_id=%s",
                     (job["payload"]["question_id"],),
@@ -174,7 +147,7 @@ def plan(conn, uid):
         auto_quality.schedule_checks(conn, uid, row["question_id"])
     for row in conn.execute(
         "SELECT question_id FROM auto_question_states WHERE status='blocked' AND revision_count<%s AND reason<>ALL(%s) ORDER BY question_id LIMIT 3",
-        (auto_quality.MAX_REPAIRS, list(auto_quality.UNREPAIRABLE)),
+        (auto_quality.MAX_REPAIRS, list(auto_quality.UNREPAIRABLE) + list(auto_quality.NOT_QUESTION_FAULT)),
     ).fetchall():
         try:
             q, refs, style = auto_quality.evidence(conn, row["question_id"])
