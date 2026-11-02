@@ -1,9 +1,9 @@
 """Every page on an iPhone 15 profile: WebKit (CI) and Chromium, Safari and home-screen (standalone) mode, empty and
-seeded data. Checks fit and safe areas, and saves a screenshot of each page (SHOT_DIR) for review.
+seeded data, light and dark. Checks the page shell (the document never scrolls: 16px gap, scrolling content,
+bottom bar), that nothing of the page reaches the top 16px, and saves a still and a scrolled-to-the-middle screenshot
+of each page (SHOT_DIR) for review.
 
 WebKit cannot be downloaded in every sandbox; its cases skip when the browser is missing (CI installs it).
-Safe areas are simulated with --sat-test / --sab-test (headless browsers report none): 47 px top and 34 px
-bottom in home-screen mode, 0 / 34 px in Safari.
 """
 import os
 import re
@@ -17,7 +17,6 @@ from test_part4_ui import LEARNER, seed
 
 SHOTS = Path(os.environ.get("SHOT_DIR", "/tmp/claude-0/shots"))
 STATIC = Path(__file__).resolve().parents[1] / "app" / "static"
-INSETS = {"safari": (0, 34), "standalone": (47, 34)}
 STANDALONE = """
 Object.defineProperty(navigator, 'standalone', {value: true});
 const real = window.matchMedia.bind(window);
@@ -59,7 +58,6 @@ def open_page(engine, mode, base, path="/training", logged_in=True, overview=Non
         page.route("**/v2/stats/overview", lambda route: route.fulfill(json=overview))
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    top, bottom = INSETS[mode]
     if logged_in:
         # The session cookie is Secure, which WebKit refuses over plain http; sign in over the API and
         # hand the cookie to the browser context (a real device uses https).
@@ -68,26 +66,47 @@ def open_page(engine, mode, base, path="/training", logged_in=True, overview=Non
         reply.raise_for_status()
         context.add_cookies([{"name": "ustc_quiz_session", "value": reply.cookies["ustc_quiz_session"], "url": base}])
     page.goto(base + path)
-    page.add_style_tag(content=f":root, .training-app {{ --sat-test: {top}px; --sab-test: {bottom}px; }}")
     return page, errors
 
 
+SCROLLER = ".workspace, main.page"
+
+
+def check_shell(page, still=True):
+    """The document itself never scrolls and no page content lies in the 16px under the status bar."""
+    assert page.evaluate("document.documentElement.scrollHeight <= innerHeight + 1 && document.body.scrollHeight <= innerHeight + 1"), page.url
+    assert page.evaluate("document.querySelector('meta[name=viewport]').content") == "width=device-width, initial-scale=1"
+    assert page.evaluate("getComputedStyle(document.body).overflow") == "hidden"
+    # whatever is at the very top of the screen is the page background, never a heading, card or bar
+    tops = page.evaluate("""() => [4, 12].flatMap((y) => [10, innerWidth / 2, innerWidth - 10].flatMap((x) =>
+        document.elementsFromPoint(x, y).map((e) => e.tagName)))""")
+    assert set(tops) <= {"HTML", "BODY"}, tops
+    first = page.evaluate("""() => { const h = [...document.querySelectorAll('h1, h2, .date-line, .subbar, .page-head, .focus-toolbar')]
+        .filter((n) => n.getClientRects().length && getComputedStyle(n).position !== 'fixed' && n.getBoundingClientRect().top >= 0)
+        .map((n) => n.getBoundingClientRect().top); return h.length ? Math.min(...h) : null; }""")
+    assert not still or first is None or first >= 16, first  # (scrolled content is clipped at the scroller's top edge)
+
+
 def snap(page, engine, mode, state, name):
+    """A still and a scrolled-to-the-middle screenshot, with the shell checks at both."""
     SHOTS.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=str(SHOTS / f"{engine[0]}-{mode}-{state}-{name}.png"), full_page=True)
+    check_shell(page)
+    page.screenshot(path=str(SHOTS / f"{engine[0]}-{mode}-{state}-{name}.png"))
+    moved = page.evaluate("""(sel) => { const s = [...document.querySelectorAll(sel)].find((n) => n.getClientRects().length);
+        if (!s) return 0; s.scrollTop = Math.max(0, (s.scrollHeight - s.clientHeight) / 2); return s.scrollTop; }""", SCROLLER)
+    page.wait_for_timeout(150)
+    check_shell(page, still=False)
+    page.screenshot(path=str(SHOTS / f"{engine[0]}-{mode}-{state}-{name}-scrolled.png"))
+    page.evaluate("(sel) => { const s = [...document.querySelectorAll(sel)].find((n) => n.getClientRects().length); if (s) s.scrollTop = 0; }", SCROLLER)
+    return moved
 
 
 def fits(page):
     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth"), page.url
 
 
-def clear_of_the_top_inset(page, mode):
-    """Nothing may be laid out inside the top inset (status bar / notch / dynamic island)."""
-    top = INSETS[mode][0]
-    boxes = page.evaluate("""() => [...document.querySelectorAll('h1, h2, .date-line, .subbar, .page-head, .focus-toolbar')]
-        .filter((n) => n.getClientRects().length && getComputedStyle(n).position !== 'fixed')
-        .map((n) => n.getBoundingClientRect().top + window.scrollY)""")
-    assert boxes and min(boxes) >= top, (min(boxes) if boxes else None, top)
+def clear_of_the_top_inset(page, mode=None):
+    check_shell(page)
 
 
 @pytest.mark.parametrize("scheme", ["light", "dark"])
@@ -108,15 +127,15 @@ def test_empty_state_pages(engine, live_app, mode, scheme):
     assert page.locator("#status").evaluate("(n) => getComputedStyle(n).position") == "fixed"  # a toast, not a status line in the page
     expect(page.locator("#status")).not_to_contain_text("已登录")  # switching pages and refreshing never shows it
     toast = page.locator("#status").evaluate("(n) => getComputedStyle(n).bottom")
-    assert toast.endswith("px") and float(toast[:-2]) >= 56 + INSETS[mode][1]  # lives above the bottom nav, never over a title
-    band = page.evaluate("() => { const s = getComputedStyle(document.body, '::before'); return [s.position, s.height, s.backgroundColor]; }")
+    assert toast.endswith("px") and float(toast[:-2]) >= 56 + 12  # lives above the bottom nav, never over a title
     page_colour = "rgb(244, 246, 250)" if scheme == "light" else "rgb(14, 16, 20)"
-    assert band == ["fixed", f"{INSETS[mode][0]}px", page_colour], band  # the opaque status-bar band, in the theme's page colour
+    assert page.evaluate("getComputedStyle(document.body, '::before').height") == "16px"  # the gap above the title
     assert page.evaluate("getComputedStyle(document.body).backgroundColor") == page_colour
     card = "rgb(255, 255, 255)" if scheme == "light" else "rgb(23, 26, 33)"
     assert page.locator(".stat-card").first.evaluate("(n) => getComputedStyle(n).backgroundColor") == card
     assert page.evaluate("document.querySelector('meta[name=theme-color][media*=dark]').content") == "#0E1014"
-    assert page.locator(".sidebar").bounding_box()["height"] == 56 + INSETS[mode][1]
+    nav = page.locator(".sidebar").bounding_box()
+    assert nav["height"] == 56 and abs(nav["y"] + nav["height"] - page.evaluate("innerHeight")) < 1  # the bar sits at the bottom, nothing below it
     clear_of_the_top_inset(page, mode)
     fits(page)
     snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "home")

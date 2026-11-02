@@ -12,7 +12,6 @@
   overflow-wrap: anywhere;
   -webkit-text-size-adjust: 100%;
   margin: 0;
-  padding-top: var(--sat);
   font-variant-numeric: tabular-nums;
 }
 .training-app *,
@@ -68,7 +67,7 @@
 .training-app .button-row > * { flex: 1 1 140px; }
 
 /* ---- shell: no site header, safe areas, bottom navigation (56 + bottom inset) ---- */
-.training-app .workspace { min-height: 100vh; }
+.training-app .workspace { grid-row: 2; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 .training-app .site-header { display: contents; }
 .training-app .mobile-brand,
 .training-app .desktop-title,
@@ -76,18 +75,18 @@
 .training-app .mobile-brand,
 .training-app .desktop-title { display: none; }
 .training-app .connection { display: none; }
-.training-app .connection.offline { display: flex; align-items: center; justify-content: center; gap: 8px; position: fixed; top: var(--sat); left: 0; right: 0; z-index: 40; padding: 4px 16px; background: var(--accent-soft); color: var(--accent-ink); font-size: 12px; }
+.training-app .connection.offline { display: flex; align-items: center; justify-content: center; gap: 8px; position: fixed; top: 0; left: 0; right: 0; z-index: 40; padding: 4px 16px; background: var(--accent-soft); color: var(--accent-ink); font-size: 12px; }
 .training-app .connection i { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.training-app .shell { padding: 12px 18px calc(var(--nav) + var(--sab) + 24px); max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-.training-app .sidebar { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; height: calc(var(--nav) + var(--sab)); padding-bottom: var(--sab); background: var(--card); border-top: 1px solid var(--line); }
+.training-app .shell { padding: 8px 18px 24px; max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.training-app .sidebar { grid-row: 3; z-index: 30; height: var(--nav); background: var(--card); border-top: 1px solid var(--line); }
 .training-app .sidebar .brand { display: none; }
 .training-app .primary-nav { display: grid; grid-template-columns: repeat(4, 1fr); height: var(--nav); }
 .training-app .primary-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: var(--nav); border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: 11px; font-weight: 500; padding: 4px 0; }
 .training-app .primary-nav button:active:not(:disabled) { background: transparent; }
 .training-app .primary-nav button[aria-current="page"] { color: var(--primary); font-weight: 700; }
 .training-app.focus-mode .sidebar { display: none; }
-.training-app.focus-mode .shell { padding-bottom: calc(80px + var(--sab)); }
-.training-app .status-message { position: fixed; z-index: 60; left: 16px; right: 16px; bottom: calc(var(--nav) + var(--sab) + 12px); margin: 0 auto; max-width: 480px; padding: 8px 12px; border-radius: 12px; background: var(--toast-bg); color: var(--toast-ink); font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.training-app.focus-mode .shell { padding-bottom: 80px; }
+.training-app .status-message { position: fixed; z-index: 60; left: 16px; right: 16px; bottom: calc(var(--nav) + 12px); margin: 0 auto; max-width: 480px; padding: 8px 12px; border-radius: 12px; background: var(--toast-bg); color: var(--toast-ink); font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
 .training-app .status-message.show { opacity: 1; }
 .training-app .status-message:empty { display: none; }
 
@@ -209,7 +208,7 @@
 .training-app .exam-intro { display: flex; flex-direction: column; gap: 12px; }
 .training-app .blueprint-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .training-app .blueprint-list span { padding: 4px 12px; border-radius: 999px; background: var(--tag); color: var(--tag-ink); font-size: 12px; }
-.training-app .focus-toolbar { position: sticky; top: var(--sat); z-index: 20; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 8px 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
+.training-app .focus-toolbar { position: sticky; top: 0; z-index: 20; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 8px 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
 .training-app.focus-mode .focus-toolbar { border-radius: 0 0 16px 16px; margin: 0 -18px; padding: 8px 18px; border-top: 0; top: 0; }
 .training-app .focus-topline { display: grid; grid-template-columns: 44px 1fr auto; align-items: center; gap: 8px; }
 .training-app .timer-box { display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
@@ -255,7 +254,7 @@
 .training-app .secondary-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .training-app .secondary-actions button { min-height: 44px; width: 100%; font-weight: 500; color: var(--muted); }
 .training-app .secondary-actions .mark-button[aria-pressed="true"] { color: var(--accent-ink); }
-.training-app .focus-actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 18px calc(8px + var(--sab)); background: var(--card); border-top: 1px solid var(--line); }
+.training-app .focus-actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 25; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 18px 8px; background: var(--card); border-top: 1px solid var(--line); }
 .training-app .focus-actions button { min-height: 48px; width: 100%; }
 .training-app.keyboard-open .focus-actions { position: static; }
 
@@ -373,18 +372,18 @@
 
 /* ---- wide screens: a left rail instead of the bottom bar ---- */
 @media (min-width: 768px) {
-  .training-app { padding-top: 0; }
-  .training-app .sidebar { top: 0; right: auto; bottom: 0; width: 200px; height: auto; border-top: 0; border-right: 1px solid var(--line); padding: 16px 12px; }
+  body.training-app { grid-template-columns: 200px minmax(0, 1fr); grid-template-rows: 16px minmax(0, 1fr); }
+  .training-app .sidebar { grid-row: 1 / 3; grid-column: 1; height: auto; border-top: 0; border-right: 1px solid var(--line); padding: 16px 12px; overflow-y: auto; }
+  .training-app .workspace { grid-row: 2; grid-column: 2; }
+  body.training-app::before { grid-column: 2; }
   .training-app .sidebar .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; margin-bottom: 16px; }
   .training-app .brand-mark { display: inline-flex; width: 28px; height: 28px; border-radius: 8px; background: var(--primary); color: var(--on-primary); align-items: center; justify-content: center; font-weight: 700; font-size: 14px; }
   .training-app .brand small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
   .training-app .primary-nav { display: flex; flex-direction: column; height: auto; gap: 4px; }
   .training-app .primary-nav button { flex-direction: row; justify-content: flex-start; gap: 12px; min-height: 48px; padding: 8px 12px; border-radius: 12px; font-size: 14px; }
   .training-app .primary-nav button[aria-current="page"] { background: var(--primary-soft); }
-  .training-app .workspace { margin-left: 200px; }
-  .training-app .shell { padding-bottom: 24px; }
   .training-app .focus-actions { left: 200px; }
-  .training-app.focus-mode .workspace { margin-left: 0; }
+  .training-app.focus-mode .workspace, .training-app.focus-mode .sidebar { grid-column: 1 / -1; }
   .training-app.focus-mode .focus-actions { left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -397,6 +396,5 @@
 .training-app #learning:not(:empty) { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 .training-app .check-row { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .training-app input[type="checkbox"], .training-app input[type="radio"] { width: 22px; min-height: 0; height: 22px; padding: 0; flex: none; accent-color: var(--primary); }
-body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat); background: var(--bg); z-index: 1000; pointer-events: none; }
-.training-app.focus-mode .status-message { bottom: calc(64px + var(--sab) + 12px); }
+.training-app.focus-mode .status-message { bottom: calc(64px + 12px); }
 .training-app #due-note:empty { display: none; }

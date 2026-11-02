@@ -1,5 +1,5 @@
 "use strict";
-const CACHE = "xiaohan-training-shell-v15-dark-mode";
+const CACHE = "xiaohan-training-shell-v16-fixed-shell";
 const ASSETS = [
   "/",
   "/training",

@@ -9,7 +9,6 @@ body {
   margin: 0; background: var(--bg); color: var(--text); 
   font: 14px/1.5 "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif;
 }
-.page { max-width: 640px; margin: 0 auto; padding: calc(var(--sat) + 8px) 18px calc(var(--sab) + 24px); }
 .stack { display: flex; flex-direction: column; gap: 14px; }
 .subbar { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; min-height: 44px; margin-bottom: 14px; }
 .subbar h1 { margin: 0; font-size: 15px; font-weight: 700; text-align: center; }
