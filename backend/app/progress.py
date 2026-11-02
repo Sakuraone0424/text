@@ -30,7 +30,11 @@ def buckets(conn, uid):
         "WHERE st.status IN ('candidate','checking','repairing','blocked') GROUP BY 1,2,3"
     ).fetchall()
     state_reasons = conn.execute(
-        "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,COALESCE(NULLIF(st.reason,''),'unspecified') AS code,count(*) AS n "
+        "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,"
+        "COALESCE(CASE WHEN st.reason='invalid_or_uncertain_result' THEN "
+        " (SELECT j.result->'dispatch_failure'->>'code' FROM ai_jobs j WHERE j.kind IN ('quality_review','repair') "
+        "  AND j.payload->>'question_id'=st.question_id::text AND j.result->'dispatch_failure' IS NOT NULL ORDER BY j.id DESC LIMIT 1) END,"
+        " NULLIF(st.reason,''),'unspecified') AS code,count(*) AS n "
         "FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
         "WHERE st.status='blocked' GROUP BY 1,2,3"
     ).fetchall()
@@ -45,7 +49,8 @@ def buckets(conn, uid):
         (BLOCKED_JOB_DAYS,),
     ).fetchall()
     job_reasons = conn.execute(
-        "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,COALESCE(error_code,'unspecified') AS code,count(*) AS n "
+        "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,"
+        "COALESCE(result->'dispatch_failure'->>'code',error_code,'unspecified') AS code,count(*) AS n "
         "FROM ai_jobs WHERE kind='generation' AND state='blocked' AND COALESCE(error_code,'')<>'superseded_scoring' "
         "AND created_at>clock_timestamp()-%s*interval '1 day' GROUP BY 1,2,3",
         (BLOCKED_JOB_DAYS,),
@@ -71,21 +76,94 @@ def buckets(conn, uid):
     return result
 
 
+SUBJECT_NAME = {"biochemistry": "生化", "cell_biology": "细胞"}
+TYPE_NAME = {"single_choice": "单选", "fill_blank": "填空", "term": "名词解释", "short_answer": "简答", "essay": "问答"}
+KIND_NAME = {
+    "generation": "出题", "quality_review": "审核", "repair": "修复", "grading": "判分", "compatibility": "兼容性探测",
+    "science_review": "科学审核", "answer_review": "答案审核", "knowledge_extraction": "知识提取",
+    "textbook_analysis": "教材分析", "exam_analysis": "真题分析", "explanation": "讲解", "study_plan": "学习计划",
+}
+
+
+def _bucket_name(subject, qtype):
+    return (SUBJECT_NAME.get(subject, "") + TYPE_NAME.get(qtype, "")) if qtype else ""
+
+
+def failure_detail(result):
+    """The safe reason recorded when a finished call's result could not be used (codes only)."""
+    failure = (result or {}).get("dispatch_failure") if isinstance(result, dict) else None
+    if not isinstance(failure, dict) or not failure.get("code"):
+        return None
+    parts = [failure["code"]]
+    for error in failure.get("errors") or []:
+        parts.append(":".join(x for x in (error.get("field"), error.get("reason") or error.get("type")) if x))
+    parts += failure.get("reasons") or []
+    return dict(code=failure["code"], text="；".join(dict.fromkeys(p for p in parts if p)))
+
+
 def recent_jobs(conn, limit=20):
     held = cost_control.held_back_kinds()
     rows = conn.execute(
-        "SELECT id,kind,state,error_code,payload->>'subject' AS subject,payload->>'question_type' AS question_type,"
-        "COALESCE(finished_at,started_at,created_at) AS at FROM ai_jobs "
-        "ORDER BY COALESCE(finished_at,started_at,created_at) DESC,id DESC LIMIT %s",
+        "SELECT id,kind,state,attempts,error_code,next_retry,dispatched_at,payload->>'subject' AS subject,"
+        "payload->>'question_type' AS question_type,payload->>'origin' AS origin,payload->>'item_id' AS item_id,"
+        "payload->>'question_id' AS question_id,settings_snapshot->>'effort' AS effort,settings_snapshot->>'model_id' AS model,"
+        "COALESCE(finished_at,started_at,created_at) AS at,result->'dispatch_failure' AS failure "
+        "FROM ai_jobs ORDER BY COALESCE(finished_at,started_at,created_at) DESC,id DESC LIMIT %s",
         (limit,),
     ).fetchall()
+    qids = [int(r["question_id"]) for r in rows if (r["question_id"] or "").isdigit()]
+    questions = {
+        r["id"]: r
+        for r in conn.execute(
+            "SELECT q.id,q.content->>'subject' AS subject,q.content->>'question_type' AS qtype,"
+            "s.status,s.reason,s.revision_count,o.origin,o.past_exam_item_id,o.source_ref "
+            "FROM reviewed_questions q LEFT JOIN auto_question_states s ON s.question_id=q.id "
+            "LEFT JOIN question_origins o ON o.question_id=q.id WHERE q.id=ANY(%s)",
+            (qids,),
+        ).fetchall()
+    }
     out = []
     for r in rows:
+        q = questions.get(int(r["question_id"])) if (r["question_id"] or "").isdigit() else None
+        kind = KIND_NAME.get(r["kind"], r["kind"])
+        source = None
+        if q:  # a review / repair / grading task of one specific question
+            bucket = _bucket_name(q["subject"], q["qtype"])
+            if q["origin"] == "past_exam":
+                source, label = "past_exam", f"{kind} · 真题{TYPE_NAME.get(q['qtype'], '')} #{q['id']}"
+            elif (q["source_ref"] or {}).get("legacy_draft_id"):
+                source, label = "legacy", f"{kind} · 旧候选复用 {bucket} #{q['id']}"
+            else:
+                source, label = "generated", f"{kind} · {bucket} #{q['id']}"
+            if (q["revision_count"] or 0) > 0:
+                label += "（修复后）"
+                source = (source or "generated") + "+repaired"
+        elif r["kind"] == "generation":
+            bucket = _bucket_name(r["subject"], r["question_type"])
+            if r["origin"] == "past_exam":
+                source, label = "past_exam", f"{kind} · 真题{TYPE_NAME.get(r['question_type'], '')}答案" + (f"（真题条目 #{r['item_id']}）" if r["item_id"] else "")
+            else:
+                source, label = "generated", f"{kind} · {bucket}（新题）"
+        elif r["kind"] == "compatibility":
+            label = f"{kind} · {r['model'] or ''} / {r['effort'] or ''}"
+        else:
+            label = kind + (" · " + _bucket_name(r["subject"], r["question_type"]) if r["question_type"] else "")
         reason = r["error_code"]
+        detail = failure_detail({"dispatch_failure": r["failure"]}) if r["failure"] else None
+        if detail:
+            reason = detail["code"]
         if not reason and r["state"] in ("pending", "retrying") and r["kind"] in held:
             reason = "waiting_for_off_peak"
-        out.append(dict(id=r["id"], kind=r["kind"], state=r["state"], reason=reason, at=r["at"],
-                        subject=r["subject"], question_type=r["question_type"]))
+        outcome = None
+        if r["kind"] == "quality_review" and q and r["state"] == "succeeded":
+            outcome = dict(status=q["status"], reason=q["reason"])
+        out.append(dict(
+            id=r["id"], kind=r["kind"], label=label, source=source, state=r["state"], reason=reason,
+            detail=detail["text"] if detail else None, at=r["at"], subject=r["subject"], question_type=r["question_type"],
+            question_id=q["id"] if q else None, attempts=r["attempts"],
+            next_retry=r["next_retry"] if r["state"] == "retrying" else None, outcome=outcome,
+            awaiting_dispatch=bool(r["state"] == "succeeded" and r["dispatched_at"] is None),
+        ))
     return out
 
 

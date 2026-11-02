@@ -24,6 +24,41 @@ const REASON = {
   replacement_effort_not_probed: "替代模型这一档思考强度还没探测通过（通过后自动重排）",
   replacement_unusable: "替代模型暂不可用（通过探测和价格核实后自动重排）",
   cancelled_by_owner: "已手动取消",
+  invalid_or_uncertain_result: "结果无效或不确定（旧记录，没有更具体的原因）",
+  output_schema_violation: "模型输出不符合题目格式",
+  generated_question_quality_gate_failed: "出的题没通过自动质量检查",
+  evidence_identity_or_quote_mismatch: "引用的教材原文与数据库里的原文不一致",
+  rubric_source_analysis_missing: "评分要点缺少教材依据说明",
+  style_transcription_missing: "缺少真题风格依据",
+  rubric_tag_mismatch: "评分要点的知识标签不属于本题",
+  rubric_points_mismatch: "评分要点分值合计不等于本题分值",
+  invalid_versioned_points: "本题分值不是当前规格的分值",
+  incomplete_choice_or_key: "选择题选项或答案不完整",
+  empty_choice_option: "有空的选项",
+  duplicate_choice_options: "选项有重复",
+  unexpected_options: "非选择题带了选项",
+  invalid_blank_representation: "填空的空位写法不对",
+  blank_count_or_points_mismatch: "空的个数或分值对不上",
+  missing_accepted_answers: "填空缺少可接受答案",
+  canonical_fill_answer_missing: "标准答案不在可接受答案里",
+  blank_marker_count: "填空题必须恰好一个空",
+  unexpected_accepted_answers: "非填空题带了可接受答案",
+  invalid_isbn_checksum: "教材 ISBN 校验不通过",
+  invalid_result: "无法识别的结果",
+  unknown_question_type: "题型未知",
+  unresolved_placeholder: "题干或答案里有占位符",
+  unavailable_figure_reference: "题干引用了看不到的图",
+  unhelpful_all_or_none_distractor: "选项里有「以上都对/都不对」",
+  missing_unique_answer_rationale: "缺少唯一答案的理由",
+  missing_accepted_answer_set: "缺少可接受答案集合",
+  model_answer_too_terse_for_subjective_marking: "参考答案太简短，不够判分",
+  insufficient_independent_scoring_criteria: "评分要点不足两条",
+  unresolved_quality_findings: "审核发现未解决的问题",
+  rubric_not_fully_evidenced: "有评分要点没有教材依据",
+  question_version_changed: "审核期间题目被改动",
+  evidence_version_changed: "审核期间教材依据被改动",
+  completed_actual_model_call_required: "没有真实完成的模型调用",
+  reliable_provider_usage_required: "缺少可靠的用量记录",
 };
 
 function el(tag, text, parent, cls) {
@@ -144,10 +179,22 @@ function jobs(report) {
   }
   for (const job of report.recent_jobs) {
     const li = el("li", undefined, root);
-    const title = (KIND[job.kind] || job.kind) + (job.question_type ? " · " + (SUBJECT[job.subject] || "") + (TYPE[job.question_type] || "") : "");
+    const title = job.label || (KIND[job.kind] || job.kind) + (job.question_type ? " · " + (SUBJECT[job.subject] || "") + (TYPE[job.question_type] || "") : "");
     el("span", title, li, "kind");
-    el("span", STATE[job.state] || job.state, li, "state " + job.state);
-    el("span", fmtTime(job.at) + (job.reason ? " · " + reasonText(job.reason) : ""), li, "meta");
+    const stateText = job.state === "retrying" && job.next_retry ? "重试 · " + fmtTime(job.next_retry) : job.awaiting_dispatch ? "完成 · 待入库处理" : STATE[job.state] || job.state;
+    el("span", stateText, li, "state " + job.state);
+    const bits = [fmtTime(job.at)];
+    if (job.state === "pending" || job.state === "retrying") bits.push("已尝试 " + job.attempts + " 次");
+    if (job.outcome) bits.push(job.outcome.status === "ready" ? "通过，已入库" : job.outcome.status === "blocked" ? "未通过：" + reasonText(job.outcome.reason || "unspecified") : "题目状态：" + job.outcome.status);
+    if (job.reason) bits.push(reasonText(job.reason));
+    el("span", bits.join(" · "), li, "meta");
+    if (job.detail) {
+      const readable = job.detail.split("；").map((part) => {
+        const [field, reason] = part.split(":");
+        return reason ? `${field}（${reasonText(reason)}）` : reasonText(field);
+      });
+      el("span", "具体原因：" + readable.join("；"), li, "meta detail");
+    }
     if (["pending", "retrying", "running"].includes(job.state)) {
       const button = el("button", "取消任务", li, "cancel");
       button.type = "button";
