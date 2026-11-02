@@ -368,3 +368,9 @@ def test_the_stats_rank_reasons_and_the_replay_rescues_what_the_new_rules_can(db
     layer = next(iter(out["samples"]))
     assert layer in ("normalized", "letters_only") and out["samples"][layer][0]["database_text"]
     assert db.execute("SELECT state FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()["state"] == "blocked"   # nothing was written
+
+
+def test_the_writing_prompt_says_accepted_answers_must_contain_the_answer_itself():
+    from app.exam_authoring import instructions
+
+    assert "accepted_answers MUST contain the exact text of the answer field itself" in instructions("fill_blank", 4)
