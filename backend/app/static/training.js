@@ -156,6 +156,7 @@ $("login").onsubmit = async (e) => {
     });
     $("password").value = "";
     await bootstrap(true);
+    status("已登录"); // shown once, right after signing in; clears itself after 2 s, above the bottom nav
   } catch (e) {
     status(e.message);
   }
@@ -1161,8 +1162,8 @@ async function bootstrap(loggedIn = false) {
   }
   const saved = cachedPaper(username);
   if (!saved) {
-    if (!sessionStorage.getItem("quiz-v2-paper-key"))
-      status(identityKnown ? "已登录，可准备今日试卷。" : "请先登录。");
+    // No "logged in" toast on page switches or refreshes; the login form itself says it when needed.
+    if (!identityKnown && !sessionStorage.getItem("quiz-v2-paper-key")) status("请先登录。");
     return;
   }
   if (identityKnown) {

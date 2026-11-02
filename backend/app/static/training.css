@@ -115,7 +115,7 @@
 .training-app .primary-nav button[aria-current="page"] { color: var(--primary); font-weight: 700; }
 .training-app.focus-mode .sidebar { display: none; }
 .training-app.focus-mode .shell { padding-bottom: calc(80px + var(--sab)); }
-.training-app .status-message { position: fixed; z-index: 60; left: 16px; right: 16px; top: calc(var(--sat) + 8px); margin: 0 auto; max-width: 480px; padding: 8px 12px; border-radius: 12px; background: var(--ink); color: #ffffff; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
+.training-app .status-message { position: fixed; z-index: 60; left: 16px; right: 16px; bottom: calc(var(--nav) + var(--sab) + 12px); margin: 0 auto; max-width: 480px; padding: 8px 12px; border-radius: 12px; background: var(--ink); color: #ffffff; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
 .training-app .status-message.show { opacity: 1; }
 .training-app .status-message:empty { display: none; }
 
@@ -357,11 +357,14 @@
 .training-app .result-answer { background: var(--input); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; white-space: pre-wrap; }
 
 /* ---- mistakes, practice, learning ---- */
-.training-app .due-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.training-app .due-row { display: flex; justify-content: space-between; align-items: stretch; gap: 12px; }
+.training-app .due-row > div { display: flex; flex-direction: column; justify-content: space-between; }
+.training-app .due-row > div p { margin: 0; }
+.training-app .due-side { align-items: flex-end; }
 .training-app .due-number { font-size: 30px; line-height: 1.2; font-weight: 700; color: var(--primary); }
 .training-app .due-number.zero { color: var(--disabled-ink); }
-.training-app .mini-bars { display: flex; align-items: flex-end; gap: 4px; height: 40px; }
-.training-app .mini-bars i { width: 12px; border-radius: 4px 4px 0 0; background: #93c5fd; min-height: 4px; }
+.training-app .mini-bars { display: flex; align-items: flex-end; gap: 4px; height: 36px; border-bottom: 1px solid var(--line); }
+.training-app .mini-bars i { width: 12px; border-radius: 4px 4px 0 0; background: #93c5fd; }
 .training-app .mini-bars i.today { background: var(--primary); }
 .training-app .filter-bar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--divider); }
 .training-app .filter-row { display: grid; grid-template-columns: 36px 1fr; align-items: center; gap: 8px; }
@@ -415,3 +418,9 @@
 @media (prefers-reduced-motion: reduce) {
   .training-app * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+/* Opaque band over the status-bar area: scrolling content passes under it instead of into the iOS status bar
+   (which blurs whatever is behind it). Plain page colour only; no blur, no gradient, no mask. */
+body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat); background: #f4f6fa; z-index: 1000; pointer-events: none; }
+.training-app.focus-mode .status-message { bottom: calc(64px + var(--sab) + 12px); }
+.training-app #due-note:empty { display: none; }

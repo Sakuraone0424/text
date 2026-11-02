@@ -141,7 +141,7 @@ def overview_fixture(**extra):
         "objective_rate": 0.72, "subjective_rate": 0.55,
         "weak_chapters": [{"subject": "biochemistry", "chapter": "合成统计章节", "rate": 0.4, "answers": 5},
                           {"subject": "cell_biology", "chapter": "合成膜章节", "rate": 0.6, "answers": 4}],
-        "reviews": {"due_now": 3, "next_7_days": [], "mastered": 0}, "tomorrow": {"ready": 42, "needed": 60, "missing": 18, "complete": False, "eta_at": None, "per_hour": 0}, "has_data": True,
+        "reviews": {"due_now": 3, "next_7_days": [], "mastered": 0}, "tomorrow": {"ready": 42, "needed": 60, "missing": 18, "complete": False, "eta_at": None, "eta_state": "estimating", "eta_hours": None, "per_hour": 0}, "has_data": True,
     }
     return {**base, **extra}
 

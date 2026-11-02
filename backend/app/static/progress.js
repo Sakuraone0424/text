@@ -90,10 +90,13 @@ function paper(report) {
     note.textContent = "每个科目 × 题型的已入库题数都达到整卷所需。";
   } else if (p.eta_hours !== null) {
     main.textContent = "还差 " + p.missing_questions + " 题";
-    note.textContent = "预计" + duration(p.eta_hours) + "。按最近 " + p.approved_last_hours + " 小时入库 " + p.approved_in_window + " 题估算，实际受低峰时段和审核通过率影响。";
+    note.textContent = "预计" + duration(p.eta_hours) + "。按最近 " + p.approved_last_hours + " 小时入库 " + p.approved_in_window + " 题（约每个低峰小时 " + p.per_off_peak_hour + " 题）和接下来的低峰时长估算。";
+  } else if (p.eta_state === "slow") {
+    main.textContent = "还差 " + p.missing_questions + " 题";
+    note.textContent = "按最近的低峰入库速度，预计需要 2 天以上。";
   } else {
     main.textContent = "还差 " + p.missing_questions + " 题";
-    note.textContent = "最近 " + p.approved_last_hours + " 小时没有新题入库，暂时无法估算时间。";
+    note.textContent = "正在估算：最近 " + p.approved_last_hours + " 小时的低峰入库记录还不够。";
   }
 }
 

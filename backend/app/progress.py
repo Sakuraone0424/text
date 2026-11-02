@@ -247,18 +247,58 @@ def approved_recently(conn):
     ).fetchone()["n"]
 
 
+MIN_APPROVALS_FOR_ETA = 3      # fewer recent approvals than this is a guess, not an estimate
+MIN_OFF_PEAK_HOURS_FOR_ETA = 3.0
+ETA_HORIZON_HOURS = 48         # beyond this the page says "more than 2 days" instead of a date
+
+
+def _off_peak_hours(start, end, step_minutes=15):
+    """Hours of off-peak time in [start, end) (DeepSeek peak windows are excluded)."""
+    from datetime import timedelta
+
+    step = timedelta(minutes=step_minutes)
+    moment, hours = start, 0.0
+    while moment < end:
+        if not cost_control.is_peak(moment):
+            hours += step_minutes / 60
+        moment += step
+    return hours
+
+
+def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horizon_hours=ETA_HORIZON_HOURS):
+    """When will `missing` more questions be in the bank?
+
+    The rate is approvals per OFF-PEAK hour over the last window (nothing is written in peak hours), and the
+    forecast walks forward through the coming off-peak hours only. Returns (state, eta_at, eta_hours,
+    per_off_peak_hour): state is "complete", "estimated", "estimating" (too little data) or "slow".
+    """
+    from datetime import timedelta
+
+    if missing <= 0:
+        return "complete", None, None, None
+    window_hours_off = _off_peak_hours(now - timedelta(hours=window_hours), now)
+    if approved < MIN_APPROVALS_FOR_ETA or window_hours_off < MIN_OFF_PEAK_HOURS_FOR_ETA:
+        return "estimating", None, None, None
+    rate = approved / window_hours_off
+    needed_off_peak = missing / rate
+    moment, done, step = now, 0.0, timedelta(minutes=15)
+    while done < needed_off_peak:
+        if (moment - now).total_seconds() / 3600 > horizon_hours:
+            return "slow", None, None, round(rate, 3)
+        if not cost_control.is_peak(moment):
+            done += 0.25
+        moment += step
+    return "estimated", moment, round((moment - now).total_seconds() / 3600, 1), round(rate, 3)
+
+
 def next_paper(conn, rows, now):
-    """How long until the bank holds one complete paper, from the recent rate of approvals."""
+    """How long until the bank holds one complete paper (counting each cell only up to one paper's need)."""
     missing = sum(max(0, b["required"] - b["stocked"]) for b in rows)
     admitted = approved_recently(conn)
-    rate = admitted / RATE_WINDOW_HOURS
-    out = dict(missing_questions=missing, approved_last_hours=RATE_WINDOW_HOURS, approved_in_window=admitted,
-               per_hour=round(rate, 3), complete=missing == 0, eta_hours=None, eta_at=None)
-    if missing and rate > 0:
-        hours = missing / rate
-        out["eta_hours"] = round(hours, 1)
-        out["eta_at"] = now + __import__("datetime").timedelta(hours=hours)
-    return out
+    state, eta_at, eta_hours, per_off_peak = estimate_ready(now, missing, admitted)
+    return dict(missing_questions=missing, approved_last_hours=RATE_WINDOW_HOURS, approved_in_window=admitted,
+                per_hour=round(admitted / RATE_WINDOW_HOURS, 3), per_off_peak_hour=per_off_peak,
+                complete=missing == 0, eta_state=state, eta_hours=eta_hours, eta_at=eta_at)
 
 
 def daily_spend(conn, uid):

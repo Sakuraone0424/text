@@ -142,7 +142,7 @@ def tomorrow_ready(conn, uid):
     needed = sum(b["required"] for b in buckets)
     paper = progress.next_paper(conn, buckets, conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"])
     return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed,
-                eta_at=paper["eta_at"], per_hour=paper["per_hour"])
+                eta_at=paper["eta_at"], eta_hours=paper["eta_hours"], eta_state=paper["eta_state"], per_hour=paper["per_hour"])
 
 
 def overview(conn, uid):

@@ -100,3 +100,7 @@ body {
 .chart-svg [tabindex] { cursor: pointer; }
 .card:not(.key) .cells.four { grid-template-columns: repeat(4, 1fr); }
 .cells.four > div { padding: 0 6px; }
+
+/* Opaque band over the status-bar area: scrolling content passes under it instead of into the iOS status bar
+   (which blurs whatever is behind it). Plain page colour only; no blur, no gradient, no mask. */
+body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat); background: #f4f6fa; z-index: 1000; pointer-events: none; }
