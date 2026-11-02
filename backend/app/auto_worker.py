@@ -4,6 +4,7 @@ import httpx
 import os
 import sys
 from app.db import get_db
+from app import cost_control
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
 from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
 from app.harness_gateway import execute
@@ -228,24 +229,59 @@ def calls_per_run(env=None):
     return min(max(value, 1), MAX_CALLS_PER_RUN)
 
 
-def main():
+def queue_snapshot(conn):
+    """Read-only picture of the queue: counts, and the job a claim would look at first."""
+    states = {
+        r["state"]: r["n"]
+        for r in conn.execute("SELECT state,count(*) AS n FROM ai_jobs GROUP BY state").fetchall()
+    }
+    held = cost_control.held_back_kinds()
+    head = conn.execute(
+        "SELECT id,kind,state,attempts,error_code,"
+        "array_to_string(ARRAY(SELECT k FROM unnest(ARRAY['limited_trial','review_campaign','qa_automation']) k "
+        "WHERE settings_snapshot ? k),',') AS scope "
+        "FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp() AND NOT kind=ANY(%s) "
+        "ORDER BY CASE kind WHEN 'compatibility' THEN 0 WHEN 'grading' THEN 1 ELSE 2 END,id LIMIT 1",
+        (held,),
+    ).fetchone()
+    return states, held, head
+
+
+def _fmt(value):
+    return "-" if value in (None, "") else str(value).replace(" ", "_")
+
+
+def run(report):
+    """One worker run. Fills `report` (ids, counts and codes only; no secrets, no textbook text)."""
+    raw = os.environ.get("AI_AUTOMATION_ENABLED")
+    report["enabled"] = "yes" if raw == "1" else "NO(value=" + repr(raw) + ")"
+    report["autoplan"] = "1" if os.environ.get("AI_QUEUE_AUTOPLAN") == "1" else "0"
+    report["bank_target"] = cost_control.bank_target() or "-"
     os.environ["QUIZ_SERVICE_ROLE"] = (
         "worker"  # Short jobs never own the API backup volume.
     )
-    if os.environ.get("AI_AUTOMATION_ENABLED") != "1":
+    if raw != "1":
         return
     from app.deployment_target import verify_isolated_target
 
     verify_isolated_target()
+    report["guard"] = "ok"
     if not os.environ.get("QUIZ_DB_SCHEMA", "").startswith("source_staging_"):
         raise PermissionError("Explicit isolated source schema required")
     model_router.authorized()
+    report["authorized"] = "ok"
     tick()
     integrations_tick()  # Prepare at the scheduled tick before any long model task.
     private = os.environ.get("DEEPSEEK_PRIVATE_DATA_AUTHORIZED") == "1"
     with get_db() as conn:
+        report["since"] = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
         dispatch_completed(conn)
         users = conn.execute("SELECT * FROM ai_settings").fetchall()
+        report["users"] = len(users)
+        if users:
+            u = users[0]
+            report.update(stopped=u["stopped"], max_concurrency=u["max_concurrency"],
+                          model=u["model_id"], effort=u["effort"], auto_upgrade=u["auto_upgrade"])
         # Public-page refresh is not a paid inference, never uploads private material.
         if (
             users
@@ -258,8 +294,10 @@ def main():
 
                 with conn.transaction():
                     refresh(conn)
-            except (ValueError, httpx.HTTPError):
-                pass  # Missing/expired/conflicting prices block new calls at claim().
+                report["price_refresh"] = "ok"
+            except (ValueError, httpx.HTTPError) as exc:
+                report["price_refresh"] = "failed:" + type(exc).__name__
+                # Missing/expired/conflicting prices block new calls at claim().
         if (
             any(u["auto_discover"] for u in users)
             and model_router.catalog(conn)["stale"]
@@ -286,21 +324,63 @@ def main():
         conn.execute(
             "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' AND j.error_code IN ('budget_exceeded','automation_stopped')"
         )
+        states, held, head = queue_snapshot(conn)
+        report["queue"] = ",".join(f"{k}={v}" for k, v in sorted(states.items())) or "empty"
+        report["peak_held"] = ",".join(held) or "-"
+        report["head"] = (
+            f"{head['id']}:{head['kind']}:{head['state']}:scope={_fmt(head['scope'])}:err={_fmt(head['error_code'])}"
+            if head else "-"
+        )
+    report["calls"] = 0
+    claimed = []
     for _ in range(calls_per_run()):
         if not ai_jobs.run_once(get_db, execute):
             break  # nothing claimable: queue empty, budget spent or retries pending
+        report["calls"] += 1
+        claimed.append(ai_jobs.LAST_CLAIM.get("job_id"))
         with get_db() as conn:
             # Hand each finished result on at once so its review jobs can be
             # claimed by the next call of this same run.
             dispatch_completed(conn)
+    report["claimed"] = ",".join(str(c) for c in claimed) or "-"
+    # Why the run stopped early (set by ai_jobs.claim; ids, kinds and codes only).
+    if report["calls"] < calls_per_run():
+        last = ai_jobs.LAST_CLAIM
+        report["stopped_because"] = _fmt(last.get("outcome"))
+        for key in ("job_id", "kind", "running", "limit", "held_back"):
+            if key in last:
+                report["why_" + key] = _fmt(last[key])
     with get_db() as conn:
         dispatch_completed(conn)
+        spent = conn.execute(
+            "SELECT COALESCE(sum(amount_cny),0) AS n FROM ai_cny_events WHERE kind='usage_estimate' AND created_at>=%s",
+            (report["since"],),
+        ).fetchone()["n"]
+        report["cost_cny"] = f"{spent:.4f}"
+        if users:
+            reserved, other = cost_control.month_split(conn, users[0]["user_id"])
+            cap, reserve = cost_control.caps()
+            report["month_counted_cny"] = f"{reserved + other:.2f}"
+            report["cap_cny"] = f"{cap}/{reserve}"
     integrations_tick()
 
 
-if __name__ == "__main__":
+def main():
+    report = {}
+    code = 0
     try:
-        main()
+        run(report)
     except Exception as exc:
-        print("AI automation failed (" + type(exc).__name__ + ")", file=sys.stderr)
-        sys.exit(1)
+        # Application-owned messages (fixed strings / codes) are safe; others: type only.
+        safe = isinstance(exc, (PermissionError, ValueError)) and getattr(exc, "errno", None) is None  # ours, not the OS's
+        report["error"] = type(exc).__name__ + (":" + str(exc)[:120].replace(" ", "_") if safe else "")
+        code = 1
+    report.pop("since", None)
+    print("worker-run " + " ".join(f"{k}={_fmt(v)}" for k, v in report.items()), flush=True)
+    if code:
+        print("AI automation failed (" + report["error"].split(":")[0] + ")", file=sys.stderr, flush=True)
+        sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()

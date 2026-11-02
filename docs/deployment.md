@@ -57,6 +57,38 @@ worker 真正开始调用模型，需要同时满足：
 
 `deploy/railway-automation/worker.railway.json` 只作为上述设置的参考，不会被任何服务读取。正式站（`xiao-ustc-quiz`）运行 `main`，不受此变更影响；第 10 步切换时需在其服务级设置里同样写明。
 
+## worker 状态日志与「不领任务」排查
+
+每次运行 `python -m app.auto_worker` 结束时输出**一行** `worker-run …`（只含 ID、数量、代码，不含密钥和教材内容）：
+
+| 字段 | 含义 |
+|---|---|
+| `enabled` | `yes`，或 `NO(value='…')`（`AI_AUTOMATION_ENABLED` 不是恰好 `1`，会显示实际值，如多了空格或引号） |
+| `autoplan`、`bank_target` | `AI_QUEUE_AUTOPLAN` 是否为 1；`AI_BANK_TARGET_PER_BUCKET` |
+| `stopped`、`max_concurrency`、`model`、`effort`、`auto_upgrade`、`users` | 数据库里 `ai_settings` 的当前值 |
+| `price_refresh` | 本次是否抓取了官方价格（`ok` / `failed:错误类型`；12 小时内已核实则无此项） |
+| `queue` | 各状态任务数，如 `pending=1,blocked=420` |
+| `head` | 本次**会最先检查**的任务：`id:种类:状态:scope=…:err=…`。`scope` 非空表示它是旧的受限试验/审核活动/QA 授权任务 |
+| `peak_held` | 因处于高峰而暂缓的任务种类 |
+| `calls`、`claimed` | 本次实际调用次数、领到的任务 ID |
+| `stopped_because`、`why_*` | 没有把调用次数用满时，最后一次领取失败的原因与相关 ID |
+| `cost_cny` | 本次新增的人民币用量 |
+| `month_counted_cny`、`cap_cny` | 本月计入上限的金额；上限/判分预留 |
+| `error` | 异常类型（应用自己的固定报错信息会一并给出） |
+
+`stopped_because` 取值：`no_claimable_job`（没有可领任务，含 `why_held_back`）、`max_concurrency_reached`、`trial_call_in_flight` / `trial_waiting_for_validation`（队首是旧的受限试验任务，**不会被标记为阻塞，也不会让位给后面的任务**）、`blocked:<原因>`（`automation_stopped`、`budget_exceeded`、`verified_cny_price_required`、`model_delisted_or_catalog_changed`、`legacy_currency_job_requires_requeue` 等）。
+
+**会让 worker「静默退出、不领任务」的全部条件**（`auto_worker.main` → `ai_jobs.claim`），按对「任务一直 pending」的可能性排序：
+
+1. **队首被旧任务卡住**：`claim` 每次只取排序最前的一个可领任务（先 `compatibility`，再 `grading`，其余按 ID）。若它是旧的受限试验/QA 授权任务，且同组有任务在跑或在等校验，`claim` 直接返回空而**不标记阻塞**，后面的任务永远轮不到。症状：任务一直 `pending`，日志无任何输出。`head` 的 `scope=` 非空即可确认。
+2. **并发上限**：库里有 `state='running'` 且租约未过期的任务数 ≥ `max_concurrency`（默认 1），静默返回。
+3. **`AI_AUTOMATION_ENABLED` 不是恰好 `1`**：整个 `main` 在第一行直接返回。
+4. 低峰规则：只会暂缓出题/审核/修复，**不会**暂缓兼容性探测和判分。
+5. 会把任务标记为阻塞（不是一直 pending）的：停止开关、预算/预留、价格未核实、模型目录变化、非人民币旧任务、月上限。
+6. 会报错退出码 1 的：身份守卫、schema 不以 `source_staging_` 开头、密钥/授权缺失。
+
+**旧预留是否计入月上限 90 元**：不计入。月上限（`cost_control.month_split`）和每日/每月预算（`cny_billing.totals`）都只统计**当月（北京时间）创建**的预留，10 月的 GPT 时期预留不在窗口内（有测试）。「累计预留」「未知待对账」是全期汇总，只对「首次试验累计预算」（`trial_active`）生效——该项必须保持**取消勾选**，否则全期累计 ¥37.25 会挡住任务。若当月（11 月 1 日 00:00 起）确有旧任务的预留，状态日志的 `month_counted_cny` 会显示；预留表不可修改，届时的排除办法是只统计新流水线任务，需另行批准。
+
 ## 数据库迁移
 
 `backend/Dockerfile` 的 CMD 只启动 uvicorn，迁移由 Railway 配置执行：
