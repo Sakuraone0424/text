@@ -66,7 +66,18 @@ def enqueue(conn, user_id, key, kind, payload):
     return inserted if inserted else enqueue(conn, user_id, key, kind, payload)
 
 
+# Why the most recent claim() did or did not hand out a job. Read by the worker's
+# one-line status log; contains ids, kinds and application-owned codes only.
+LAST_CLAIM = {}
+
+
+def _note(outcome, **detail):
+    LAST_CLAIM.clear()
+    LAST_CLAIM.update(outcome=outcome, **detail)
+
+
 def claim(conn, scope_id=None, scope_kind="limited_trial"):
+    _note("not_started")
     if scope_kind not in ("limited_trial", "review_campaign", "qa_automation"):
         raise ValueError("unknown_execution_scope")
     # Expired leases are never concurrently finalized: every attempt has a new fence.
@@ -92,6 +103,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(),),
     ).fetchone()
     if not job:
+        _note("no_claimable_job", held_back=",".join(cost_control.held_back_kinds()))
         return None
     uid = job["user_id"]
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (810000 + uid,))
@@ -114,6 +126,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         "SELECT count(*) AS n FROM ai_jobs WHERE user_id=%s AND state='running'", (uid,)
     ).fetchone()["n"]
     if running >= live["max_concurrency"]:
+        _note("max_concurrency_reached", job_id=job["id"], kind=job["kind"], running=running, limit=live["max_concurrency"])
         return None
     try:
         # Freeze model/effort, not a stale tariff. Each attempt snapshots the current
@@ -145,6 +158,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         from app.qa_automation import claim_reason as automation_reason
         trial_reason = automation_reason(conn, job)
     if trial_reason in ("trial_call_in_flight", "trial_waiting_for_validation"):
+        _note(trial_reason, job_id=job["id"], kind=job["kind"])
         return None
     reason = reason or trial_reason
     if reason:
@@ -152,6 +166,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
             "UPDATE ai_jobs SET state='blocked',error_code=%s WHERE id=%s",
             (reason, job["id"]),
         )
+        _note("blocked:" + str(reason), job_id=job["id"], kind=job["kind"])
         return None
     claimed = conn.execute(
         "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_until=clock_timestamp()+%s*interval '1 second',started_at=clock_timestamp() WHERE id=%s RETURNING *",
@@ -161,6 +176,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         "INSERT INTO ai_cny_reservations(job_id,attempt,amount_cny,price_snapshot) VALUES(%s,%s,%s,%s)",
         (job["id"], claimed["attempts"], amount, Jsonb(price)),
     )
+    _note("claimed", job_id=job["id"], kind=job["kind"])
     return claimed
 
 
