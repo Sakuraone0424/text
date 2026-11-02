@@ -12,6 +12,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" />
+    <link rel="stylesheet" href="/static/subpage.css" />
     <link rel="stylesheet" href="/static/progress.css" />
   </head>
   <body>
@@ -21,6 +22,7 @@
         <h1>出题进度</h1>
         <span></span>
       </header>
+      <div id="login-slot"></div>
       <p id="notice" role="status" hidden></p>
       <div id="content" class="stack" hidden>
         <section class="card key" aria-labelledby="h-batch">
@@ -76,6 +78,7 @@
         <p id="updated" class="note center">正在读取…</p>
       </div>
     </main>
+    <script src="/static/session.js" defer></script>
     <script src="/static/charts.js" defer></script>
     <script src="/static/progress.js" defer></script>
   </body>

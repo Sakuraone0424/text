@@ -19,12 +19,11 @@ def test_the_model_page_has_a_price_button_and_shows_the_task_limits_without_err
     page.locator("#login button").click()
     expect(page.locator("#controls")).to_be_visible()
     expect(page.locator("#price-refresh")).to_be_visible()
-    summary = page.locator("details:has(#token-limit) > summary")
-    expect(summary).to_contain_text("任务限制：输出长度、重试次数、同时运行数")
-    expect(page.locator("#token-limit")).to_be_visible()  # open by default
+    expect(page.locator("h2", has_text="运行设置")).to_be_visible()
+    expect(page.locator("#token-limit")).to_be_visible()  # the run settings are shown, only the explanations are folded
     expect(page.locator("#retry-limit")).to_be_visible()
     expect(page.locator("#max-concurrency")).to_be_visible()
-    expect(page.locator("label:has(#upgrade)")).to_contain_text("需质量对比通过后才会切换")
+    expect(page.locator("label:has(#upgrade)")).to_contain_text("质量对比通过后才会切换")
     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
     assert not errors, errors  # the old handler on a missing element is gone
 

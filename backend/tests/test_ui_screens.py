@@ -166,11 +166,28 @@ def test_seeded_pages(engine, live_app, mode):
     page.wait_for_timeout(600)
     fits(page)
     snap(page, engine, mode, "data", "history")
+    # the other sub-views under "我的" follow the same rules: insights and the archive status
+    for action, name in (("#stats-back", None), ('[data-action="insights"]', "insights"), ("#archive", "archive")):
+        if name is None:
+            page.locator(action).click()
+            page.locator('nav.primary-nav [data-view="profile"]').click()
+            page.wait_for_timeout(400)
+            continue
+        page.locator(action).first.click()
+        page.wait_for_timeout(700)
+        fits(page)
+        snap(page, engine, mode, "data", name)
+        page.locator('nav.primary-nav [data-view="profile"]').click()
+        page.wait_for_timeout(400)
     progress, perrors = open_page(engine, mode, base, "/progress")
     expect(progress.locator("#content")).to_be_visible()
     fits(progress)
     snap(progress, engine, mode, "data", "progress")
-    assert not (errors or perrors), (errors, perrors)
+    model, merrors = open_page(engine, mode, base, "/static/model.html")
+    expect(model.locator("#controls")).to_be_visible()
+    fits(model)
+    snap(model, engine, mode, "data", "model")
+    assert not (errors or perrors or merrors), (errors, perrors, merrors)
 
 
 def test_no_blur_layers_anywhere_in_the_styles():
