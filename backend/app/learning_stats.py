@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-EXAM_DATE = date(2026, 12, 21)
+EXAM_DATE = date(2026, 12, 19)
 SUBJECTS = ("biochemistry", "cell_biology")
 TYPES = ("single_choice", "fill_blank", "term", "short_answer", "essay")
 OBJECTIVE = ("single_choice", "fill_blank")

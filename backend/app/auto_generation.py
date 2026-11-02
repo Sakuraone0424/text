@@ -579,7 +579,15 @@ def _enqueue_gap(conn, uid, subject, kind):
     return None
 
 
-def plan_gap(conn, uid):
+def claimable_count(conn):
+    """Jobs a worker could claim right now (peak-hour holds aside): due pending/retrying work, not scoped trial jobs."""
+    return conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp() "
+        "AND NOT (settings_snapshot ?| ARRAY['limited_trial','review_campaign','qa_automation'])"
+    ).fetchone()["n"]
+
+
+def plan_gap(conn, uid, max_active=2):
     """Queue one question-writing request for the largest uncovered bucket.
 
     Independent of AI_FULL_CORPUS_ENABLED: nothing here reads the corpus
@@ -590,7 +598,7 @@ def plan_gap(conn, uid):
         "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' "
         "AND COALESCE(payload->>'origin','')<>'past_exam' AND state IN ('pending','running','retrying')"
     ).fetchone()["n"]
-    if active >= 2:
+    if active >= max_active:
         return None
     past_exam_import.index_item_chapters(conn)
     for subject, kind, _ in bucket_gaps(conn, uid):
@@ -598,6 +606,26 @@ def plan_gap(conn, uid):
         if job:
             return job
     return None
+
+
+def fill_queue(conn, uid, target):
+    """Queue writing requests until `target` jobs are claimable, never beyond what the bank is short of.
+
+    `bucket_gaps` already deducts everything on its way (questions in review or repair, unfinished writing
+    requests, past-exam items awaiting an answer), so each extra request is one the two-day reserve really
+    needs. Nothing is reserved here: money is reserved only when a job is claimed, against the budget,
+    the per-task limit, the monthly cap and the off-peak rules. When the monthly writing/review budget is
+    already used up, only the single request of the old rule is queued.
+    """
+    first = plan_gap(conn, uid)
+    queued = 1 if first else 0
+    if first is None or cost_control.spend_report(conn, uid)["writing_review_exhausted"]:
+        return queued
+    while claimable_count(conn) < target:
+        if plan_gap(conn, uid, max_active=target) is None:
+            break
+        queued += 1
+    return queued
 
 
 def repair_source_identity_from_locked_units(raw_question, units):

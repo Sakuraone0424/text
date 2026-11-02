@@ -137,7 +137,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
         )
 
 
-def plan(conn, uid):
+def plan(conn, uid, target=None):
     auto_quality.retire_stale(conn)
     auto_quality.retire_old_scoring(conn)
     auto_quality.discard_unfixable(conn)
@@ -176,8 +176,11 @@ def plan(conn, uid):
     # Past-exam questions need no corpus-wide sweep: each request carries only
     # the few textbook paragraphs relevant to that one question.
     legacy_reuse.plan(conn, uid)
-    past_exam_import.plan(conn, uid)
-    auto_generation.plan_gap(conn, uid)
+    past_exam_import.plan(conn, uid, batch=max(past_exam_import.MAX_CONCURRENT_JOBS, target or 0))
+    if target:
+        auto_generation.fill_queue(conn, uid, target)
+    else:
+        auto_generation.plan_gap(conn, uid)
 
 
 # Sizing: about 160 calls a day (60 questions at ~75% review pass rate = ~80 written
@@ -236,6 +239,9 @@ class CallPool:
         self.get_db, self.executor = get_db_, executor
         self.workers, self.limit, self.seconds, self.clock = max(1, workers), limit, seconds, clock
         self.lock = threading.Lock()
+        self.cond = threading.Condition(self.lock)
+        self.active = 0           # workers between starting to claim and handing their result on
+        self.handed_on = 0        # results handed on so far (each may have created new jobs)
         self.started = 0           # calls begun (a claim attempt counts until it turns out to be empty)
         self.calls = 0             # calls actually made
         self.in_flight = 0
@@ -256,29 +262,48 @@ class CallPool:
 
     def _worker(self):
         while True:
-            with self.lock:
+            with self.cond:
                 if self.stop or self.started >= self.limit:
                     return
                 if not self._room_for_another_call():
                     self.stopped_because = self.stopped_because or "run_time_budget"
                     self.stop = True
+                    self.cond.notify_all()
                     return
                 self.started += 1
+                self.active += 1
+                seen = self.handed_on
             began = self.clock()
             try:
                 did = ai_jobs.run_once(self.get_db, self._execute)
             except Exception as exc:  # database trouble: stop the whole run and report it
-                with self.lock:
+                with self.cond:
                     self.errors.append(exc)
                     self.stop = True
+                    self.active -= 1
+                    self.cond.notify_all()
                 return
-            with self.lock:
-                if not did:
+            if not did:
+                with self.cond:
                     self.started -= 1
+                    self.active -= 1
                     self.last_claim = dict(ai_jobs.LAST_CLAIM)
-                    self.stopped_because = self.stopped_because or ai_jobs.LAST_CLAIM.get("outcome")
-                    self.stop = True
-                    return
+                    self.stopped_because = ai_jobs.LAST_CLAIM.get("outcome")
+                    self.cond.notify_all()
+                    # Nothing to claim right now. While other calls are still running their results may
+                    # create new jobs (a review of what was just written), so wait for them; only when
+                    # nobody is working any more is the queue really empty.
+                    while self.active > 0 and not self.stop and self.clock() < self.deadline:
+                        self.cond.wait(timeout=1.0)
+                    if self.active > 0 or self.stop:
+                        return
+                    retry = self.started < self.limit and self.handed_on > seen and self._room_for_another_call()
+                    if not retry:
+                        self.stop = True
+                        self.cond.notify_all()
+                        return
+                continue
+            with self.cond:
                 self.calls += 1
                 self.longest = max(self.longest, self.clock() - began)
                 self.claimed.append(ai_jobs.LAST_CLAIM.get("job_id"))
@@ -287,10 +312,16 @@ class CallPool:
                     # Hand each finished result on at once so its review jobs can be claimed by a later call.
                     dispatch_completed(conn)
             except Exception as exc:
-                with self.lock:
+                with self.cond:
                     self.errors.append(exc)
                     self.stop = True
+                    self.active -= 1
+                    self.cond.notify_all()
                 return
+            with self.cond:
+                self.active -= 1
+                self.handed_on += 1  # a result was handed on: an idle worker may find a new job
+                self.cond.notify_all()
 
     def _execute(self, job):
         """The model call itself; counts how many are running at the same moment."""
@@ -347,6 +378,7 @@ def run(report):
     report["enabled"] = "yes" if raw == "1" else "NO(value=" + repr(raw) + ")"
     report["autoplan"] = "1" if os.environ.get("AI_QUEUE_AUTOPLAN") == "1" else "0"
     report["bank_target"] = cost_control.bank_target() or "-"
+    report["planned"] = 0
     os.environ["QUIZ_SERVICE_ROLE"] = (
         "worker"  # Short jobs never own the API backup volume.
     )
@@ -406,7 +438,11 @@ def run(report):
             ):
                 try:
                     with conn.transaction():
-                        plan(conn, user["user_id"])
+                        first_new = conn.execute("SELECT COALESCE(max(id),0) AS m FROM ai_jobs").fetchone()["m"]
+                        # queue enough work that every call this run can make has a job to claim
+                        plan(conn, user["user_id"], target=2 * calls_per_run())
+                        report["planned"] = report.get("planned", 0) + conn.execute(
+                            "SELECT count(*) AS n FROM ai_jobs WHERE id>%s", (first_new,)).fetchone()["n"]
                         if os.environ.get("AI_FULL_CORPUS_ENABLED") == "1":
                             auto_knowledge.plan_small_batch(conn, user["user_id"])
                             auto_generation.plan(conn, user["user_id"])

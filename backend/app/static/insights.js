@@ -122,7 +122,7 @@
     }
     const o = overview.value;
     $("days-left").textContent = o.days_left > 0 ? String(o.days_left) : "0";
-    $("exam-label").textContent = o.days_left > 0 ? "距 12 月 21 日初试" : "12 月 21 日初试已到";
+    $("exam-label").textContent = o.days_left > 0 ? "距 12 月 19 日初试" : "12 月 19 日初试已到";
     $("streak-days").textContent = String(o.streak.current);
     $("streak-days").classList.toggle("zero", o.streak.current === 0);
     const today = o.today_paper;

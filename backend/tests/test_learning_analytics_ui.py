@@ -135,7 +135,7 @@ def test_pending_grade_custom_confirmation_and_truthful_chart(live_app, browser)
 
 def overview_fixture(**extra):
     base = {
-        "today": "2026-11-02", "exam_date": "2026-12-21", "days_left": 49, "streak": {"current": 4, "longest": 9},
+        "today": "2026-11-02", "exam_date": "2026-12-19", "days_left": 47, "streak": {"current": 4, "longest": 9},
         "today_paper": {"state": "none"},
         "last7": {"papers": 5, "avg_rate": 0.7067, "avg_points": 212.0, "max_points": 300, "delta_points": 6.0},
         "objective_rate": 0.72, "subjective_rate": 0.55,
@@ -153,7 +153,7 @@ def test_dashboard_numbers_come_straight_from_the_statistics_endpoint(live_app, 
     page.route("**/v2/stats/overview", lambda route: route.fulfill(json=overview_fixture()))
     page.goto(str(client.base_url).rstrip("/"))
     page.locator("#password").fill("test-live-login"); page.locator("#login button").click()
-    expect(page.locator("#days-left")).to_have_text("49")
+    expect(page.locator("#days-left")).to_have_text("47")
     expect(page.locator("#streak-days")).to_have_text("4")
     expect(page.locator("#stat-avg")).to_have_text("212")
     expect(page.locator("#stat-avg-note")).to_have_text("较上周 +6")

@@ -339,16 +339,16 @@ def test_a_reported_question_is_not_reused(db, old_paper, blueprint):
     assert [(s["subject"], s["question_type"], s["missing"]) for s in short.value.shortages if s["missing"]] == [(victim["subject"], victim["question_type"], 1)]
 
 
-# ---- dates up to the project end (2026-12-21) --------------------------------------------
+# ---- dates up to the project end (2026-12-19) --------------------------------------------
 
-PROJECT_END = date(2026, 12, 21)
+PROJECT_END = date(2026, 12, 19)
 
 
 def test_every_half_hour_until_the_project_end_has_one_verified_answer_in_both_modules():
     calendar = cny_billing.calendar_2026()
     assert calendar["verified"] and calendar["year"] == 2026
     at = beijing("2026-11-01 00:00")
-    end = beijing("2026-12-22 00:00")
+    end = beijing("2026-12-20 00:00")
     peaks = 0
     while at < end:
         assert cny_billing.period(at, calendar) in ("peak", "off_peak"), at  # never "unknown" before the end

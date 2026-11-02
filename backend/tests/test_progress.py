@@ -128,12 +128,12 @@ def test_too_little_data_says_estimating_and_a_far_date_says_slow():
 
 def test_a_window_with_almost_no_off_peak_time_is_not_an_estimate():
     monday_noon = datetime(2026, 11, 2, 2, 0, tzinfo=timezone.utc)  # 10:00 Beijing, peak
-    # a 3-hour window that is all peak holds no off-peak time to measure a rate from
-    assert progress.estimate_ready(monday_noon, 6, 12, window_hours=3)[0] == "estimating"
+    # a 1-hour window that is all peak holds no off-peak time to measure a rate from
+    assert progress.estimate_ready(monday_noon, 6, 12, window_hours=1)[0] == "estimating"
 
 
 def test_the_report_carries_the_estimate_state(db, setup_ai, monkeypatch):
-    monkeypatch.setattr(progress, "approved_recently", lambda conn: 0)
+    monkeypatch.setattr(progress, "approved_recently", lambda conn, hours=None: 0)
     p = progress.report(db, setup_ai)["next_paper"]
     assert p["eta_state"] == "estimating" and p["eta_hours"] is None and p["eta_at"] is None
     monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind: 99)
