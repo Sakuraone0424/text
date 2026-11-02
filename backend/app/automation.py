@@ -6,31 +6,31 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 from app.training_sessions import server_now
 from app.question_quality import Blueprint
-from app import training_spec_v2
+from app import training_spec_v4 as current_spec
 from app.quiz_v2 import create_paper, BankShortage, PreparationPaused
 
 
 def selected_daily_blueprint(env):
-    """New daily papers always use the 60q/150pt v2 specification.
+    """New daily papers always use the 60q/300pt v4 specification.
 
-    An unset variable means v2. Any other value (including the retired 28q
-    ID) fails closed rather than preparing an old exam. Historical 28q papers
-    keep their own stored blueprint and are never re-planned here.
+    An unset variable means v4. Any other value (including the retired 28q
+    and v2 IDs) fails closed rather than preparing an old exam. Stored 28q and
+    v2 papers keep their own blueprint and are never re-planned here.
     """
-    spec = env.get("QUIZ_DAILY_SPECIFICATION", "") or training_spec_v2.SPECIFICATION
-    if spec == training_spec_v2.SPECIFICATION:
-        return Blueprint.model_validate(training_spec_v2.default_blueprint())
+    spec = env.get("QUIZ_DAILY_SPECIFICATION", "") or current_spec.SPECIFICATION
+    if spec == current_spec.SPECIFICATION:
+        return Blueprint.model_validate(current_spec.default_blueprint())
     raise ValueError("unknown_daily_training_specification")
 
 
 def verified_daily_paper_response(paper, blueprint):
     """A preexisting historical 28q paper must never appear as a 60q success."""
-    if blueprint.specification != training_spec_v2.SPECIFICATION:
+    if blueprint.specification != current_spec.SPECIFICATION:
         return paper
     if (paper.get("mode") != "reviewed_60"
-        or paper.get("blueprint", {}).get("specification") != training_spec_v2.SPECIFICATION
-        or paper.get("count") != training_spec_v2.TOTAL_QUESTIONS
-        or paper.get("max_points") != training_spec_v2.TOTAL_POINTS):
+        or paper.get("blueprint", {}).get("specification") != current_spec.SPECIFICATION
+        or paper.get("count") != current_spec.TOTAL_QUESTIONS
+        or paper.get("max_points") != current_spec.TOTAL_POINTS):
         raise ValueError("daily_60q_paper_not_proven")
     return paper
 

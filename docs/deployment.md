@@ -103,7 +103,7 @@ worker 真正开始调用模型，需要同时满足：
 | 变量 | 说明 |
 |---|---|
 | `DATABASE_URL` | PostgreSQL 连接串 |
-| `QUIZ_DAILY_SPECIFICATION` | 新卷规格，`xiaohan-60q-150pt-v2` |
+| `QUIZ_DAILY_SPECIFICATION` | 新卷规格，`xiaohan-60q-300pt-v4`（旧值 `xiaohan-60q-150pt-v2` 仍能启动，但 `/db/health` 会带 `specification_env_outdated: true`，且不会备新卷） |
 | `DEEPSEEK_API_KEY` | DeepSeek 密钥 |
 | `DEEPSEEK_API_AUTHORIZED` | `1` 才允许调用 DeepSeek |
 | `DEEPSEEK_PRIVATE_DATA_AUTHORIZED` | `1` 才允许发送每题相关的教材段落 |
@@ -114,7 +114,7 @@ worker 真正开始调用模型，需要同时满足：
 
 ## 首批试跑：临时题库目标量
 
-`AI_BANK_TARGET_PER_BUCKET`（**临时**，试跑完成后删除）：设为正整数 N，则每个「科目 × 题型」补到 N 题（现有 + 流水线中 + 在途请求）；真题入库和旧资料复用也会在该格已够数时停止排队。设为 `5` 即 8 格 × 5 = 40 题。不设置、为空、0、负数或非数字，一律按正常规则补到两天储备（`STARTUP_RESERVE_DAYS = 2`）。月上限 90 元、判分预留 15 元不受影响。
+`AI_BANK_TARGET_PER_BUCKET`（**临时**，试跑完成后删除）：设为正整数 N，则每个「科目 × 题型」补到 N 题（现有 + 流水线中 + 在途请求）；真题入库和旧资料复用也会在该格已够数时停止排队。设为 `5` 即 10 格（2 科 × 5 题型）× 5 = 50 题。不设置、为空、0、负数或非数字，一律按正常规则补到两天储备（`STARTUP_RESERVE_DAYS = 2`）。月上限 90 元、判分预留 15 元不受影响。
 
 ## 日期逻辑（项目至 2026-12-21）
 
@@ -146,7 +146,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 | 新增 | `QUIZ_PUBLIC_ORIGIN` | `https://<training-api-qa 的公网域名>`（https，无路径、无结尾斜杠） |
 | 新增 | `AI_MONTHLY_CAP_CNY` | `90` |
 | 新增 | `AI_GRADING_RESERVE_CNY` | `15` |
-| 改 | `QUIZ_DAILY_SPECIFICATION` | `xiaohan-60q-150pt-v2`（否则 `/db/health` 返回 503） |
+| 改 | `QUIZ_DAILY_SPECIFICATION` | `xiaohan-60q-300pt-v4`（旧值 `xiaohan-60q-150pt-v2` 能启动但不备新卷；其他值 `/db/health` 返回 503） |
 | 改 | `QUIZ_AUTO_GRADE_ON_SUBMIT` | `1` |
 | 改 | `AI_AUTOMATION_ENABLED` | `1`（网站的判分排队也检查它，保持 1） |
 | 改 | `DEEPSEEK_API_AUTHORIZED` / `DEEPSEEK_PRIVATE_DATA_AUTHORIZED` | `1` / `1` |
@@ -208,7 +208,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 2. 创建 worker 服务（b），配置变量、**不部署**，把 worker 服务 ID 发给我；我改守卫、过 CI、合并，之后你再部署。
 3. 先部署 `training-api-qa`：preDeploy 阶段无；启动命令里的 `python migrate.py` 先跑迁移，再启动 uvicorn。验收：
    - `GET /health` → `{"status":"healthy"}`；
-   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 30，`formal_training` = `{"specification":"xiaohan-60q-150pt-v2","questions":60,"points":150,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
+   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 31，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
    - 登录后 `GET /v2/model/spend` 返回今日/本月、上限 90、预留 15。
 4. 再部署 worker：日志出现正常结束（cron 任务每 5 分钟起一次、`restartPolicyType: NEVER`）；若报 `Railway target identity mismatch: SERVICE`，说明第 1 点的代码改动还没合并。
 5. 做 c) 的设置与探测，再把 `AI_QUEUE_AUTOPLAN` 改 `1`，然后通知我做第 8.5 步。
@@ -317,7 +317,7 @@ QA 库 schema source_staging_ocr_20261030
 
 服务：保留 `quiz-backend` + `Postgres`；新增 AI worker 服务（`deploy/railway-automation/Dockerfile` + `worker.railway.json`）。
 
-`quiz-backend` 与 worker 共同：`DATABASE_URL`（私网地址）、`QUIZ_DEPLOYMENT_PROFILE=xiao-ustc-prod`、`QUIZ_ISOLATED_TARGET_APPROVED=1`、`QUIZ_DB_SCHEMA=<新 schema>`、`RAILWAY_*` 对应的 `QUIZ_APPROVED_RAILWAY_{PROJECT,ENVIRONMENT,SERVICE}_ID`、`QUIZ_APPROVED_DB_{HOST,PORT,NAME,USER,SYSTEM_ID}`、`QUIZ_PROTECTED_DB_SYSTEM_IDS`（不含正式站自己的集群标识）、`QUIZ_DAILY_SPECIFICATION=xiaohan-60q-150pt-v2`。
+`quiz-backend` 与 worker 共同：`DATABASE_URL`（私网地址）、`QUIZ_DEPLOYMENT_PROFILE=xiao-ustc-prod`、`QUIZ_ISOLATED_TARGET_APPROVED=1`、`QUIZ_DB_SCHEMA=<新 schema>`、`RAILWAY_*` 对应的 `QUIZ_APPROVED_RAILWAY_{PROJECT,ENVIRONMENT,SERVICE}_ID`、`QUIZ_APPROVED_DB_{HOST,PORT,NAME,USER,SYSTEM_ID}`、`QUIZ_PROTECTED_DB_SYSTEM_IDS`（不含正式站自己的集群标识）、`QUIZ_DAILY_SPECIFICATION=xiaohan-60q-300pt-v4`。
 `quiz-backend` 另需：`QUIZ_AUTO_GRADE_ON_SUBMIT=1`、`DEEPSEEK_API_KEY`、`DEEPSEEK_API_AUTHORIZED=1`、`DEEPSEEK_PRIVATE_DATA_AUTHORIZED=1`；拍照作答保持关闭；`APP_PASSWORD`、`SESSION_SECRET` 不变。
 worker 另需：`AI_AUTOMATION_ENABLED=1`、`AI_QUEUE_AUTOPLAN=1`、`AI_CALLS_PER_RUN`（默认 2）、DeepSeek 三项、可选的思考档位变量；**不设** `AI_FULL_CORPUS_ENABLED`；教材/真题原文文件随 worker 镜像（沿用 QA 做法）。
 

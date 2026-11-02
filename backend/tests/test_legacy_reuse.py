@@ -210,14 +210,14 @@ def test_only_text_checked_unflagged_known_type_entries_are_usable():
         record("blank", "   "),
         record("nosubject", "冈崎片段", subject="物理"),
     ]}
-    assert [r["id"] for r in lr.usable_records(index)] == ["ok", "pdf"]
+    assert [r["id"] for r in lr.usable_records(index)] == ["ok", "pdf", "essay"]  # 论述/问答 sections are essays in the current specification
 
 
 def test_real_index_usable_counts():
     index = json.loads(lr.INDEX_FILE.read_text(encoding="utf-8"))
     usable = list(lr.usable_records(index))
-    assert len(index["records"]) == 1908 and len(usable) == 1278
-    assert {r["kind"] for r in usable} == {"term", "fill_blank", "short_answer", "single_choice"}
+    assert len(index["records"]) == 1908 and len(usable) == 1406
+    assert {r["kind"] for r in usable} == {"term", "fill_blank", "short_answer", "single_choice", "essay"}
     assert all(r["stem"].strip() for r in usable)
 
 

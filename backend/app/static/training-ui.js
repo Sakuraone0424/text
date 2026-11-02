@@ -253,8 +253,8 @@
     });
   }
   function trend(root, history) {
-    // Plot on a 150-point scale of each paper's own (possibly reduced) total.
-    const scaled = (row) => (row.score / (row.max_points || 150)) * 150;
+    // Papers have different totals (150 / 300): plot each as a percentage of its own total.
+    const scaled = (row) => (row.score / (row.max_points || 150)) * 100;
     const rows = history
       .filter((row) => Number.isFinite(row.score))
       .slice(0, 10)
@@ -290,10 +290,10 @@
     svg.append(title);
     const points = rows.map((r, i) => [
       32 + (i * 304) / (rows.length - 1),
-      148 - (scaled(r) / 150) * 116,
+      148 - (scaled(r) / 100) * 116,
     ]);
-    [0, 75, 150].forEach((value) => {
-      const y = 148 - (value / 150) * 116,
+    [0, 50, 100].forEach((value) => {
+      const y = 148 - (value / 100) * 116,
         line = document.createElementNS(ns, "line");
       Object.entries({
         x1: 32,
@@ -306,7 +306,7 @@
       const text = document.createElementNS(ns, "text");
       text.setAttribute("x", "0");
       text.setAttribute("y", String(y + 4));
-      text.textContent = String(value);
+      text.textContent = value + "%";
       svg.append(text);
     });
     const polyline = document.createElementNS(ns, "polyline");
@@ -334,7 +334,7 @@
     make("p", description, root, "chart-description");
     make(
       "p",
-      "只统计已全部判分的试卷；反馈有问题的题不计入，成绩按150分折算。",
+      "只统计已全部判分的试卷；反馈有问题的题不计入，成绩按各卷满分折算为百分比（150 分卷与 300 分卷分别折算）。",
       root,
       "card-footnote",
     );

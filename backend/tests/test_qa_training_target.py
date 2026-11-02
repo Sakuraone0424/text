@@ -10,7 +10,7 @@ def qa(monkeypatch):
     monkeypatch.setenv("QUIZ_ISOLATED_TARGET_APPROVED", "1")
     monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "qa")
     monkeypatch.setenv("QUIZ_DB_SCHEMA", QA_SOURCE_SCHEMA)
-    monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", "xiaohan-60q-150pt-v2")
+    monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", "xiaohan-60q-300pt-v4")
     for kind, value in QA_TARGET.items():
         monkeypatch.setenv(f"RAILWAY_{kind}_ID", value)
         monkeypatch.setenv(f"QUIZ_APPROVED_RAILWAY_{kind}_ID", value)

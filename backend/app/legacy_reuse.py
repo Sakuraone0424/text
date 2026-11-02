@@ -40,7 +40,7 @@ INDEX_FILE = DATA_DIR / "USTC_all_year_master_candidate_index_v1.json"
 # Printed / scanned / photographed study aids are not text-checked material.
 USABLE_SOURCE_KINDS = frozenset({"二手历年真题汇编DOCX", "辅导资料PDF文字版"})
 SUBJECTS = {"生化": "biochemistry", "细胞": "cell_biology"}
-SECTION_TYPES = (("名词解释", "term"), ("填空", "fill_blank"), ("简答", "short_answer"), ("选择", "single_choice"))
+SECTION_TYPES = (("名词解释", "term"), ("填空", "fill_blank"), ("论述", "essay"), ("问答", "essay"), ("简答", "short_answer"), ("选择", "single_choice"))
 BOOK_KEYS = (
     ("高分笔记", "biochemistry_notes"),
     ("上册", "biochemistry_upper"),

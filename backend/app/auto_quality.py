@@ -720,6 +720,67 @@ def discard_unfixable(conn):
     return ids
 
 
+def retire_old_scoring(conn):
+    """Take questions written under an earlier point scale out of use (never edited in place).
+
+    The current specification scores single choice 4, fill-in 4, term 6, short answer 12 and
+    essay 18. A question with any other max_points cannot be put on a paper, and its rubric no
+    longer adds up to the right total, so it is retired together with unfinished work on it;
+    its past-exam item (if any) goes back to the import queue to be answered again at the new
+    value. Returns how many questions were retired.
+    """
+    from app.training_spec_v4 import POINTS
+
+    old = [
+        r["question_id"]
+        for r in conn.execute(
+            "SELECT s.question_id,q.content->>'question_type' AS kind,q.content->>'max_points' AS points "
+            "FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
+            "WHERE s.status IN ('candidate','checking','repairing','ready','blocked')"
+        ).fetchall()
+        if str(POINTS.get(r["kind"])) != r["points"]
+    ]
+    if old:
+        conn.execute(
+            "UPDATE auto_question_states SET status='retired',reason='superseded_scoring',updated_at=clock_timestamp() "
+            "WHERE question_id=ANY(%s)",
+            (old,),
+        )
+        conn.execute(
+            "UPDATE reviewed_questions SET status='withdrawn' WHERE id=ANY(%s) AND status='published'", (old,)
+        )
+        conn.execute(
+            "UPDATE ai_jobs SET state='blocked',error_code='superseded_scoring' WHERE state IN ('pending','retrying') "
+            "AND kind IN ('quality_review','repair','science_review','answer_review') "
+            "AND (payload->>'question_id')::bigint=ANY(%s)",
+            (old,),
+        )
+        conn.execute(
+            "UPDATE past_exam_items SET status='imported',job_id=NULL,question_id=NULL,updated_at=clock_timestamp() "
+            "WHERE question_id=ANY(%s) AND status='packet_created'",
+            (old,),
+        )
+    # Writing requests that still carry an old point value would only produce more of them.
+    stale = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT id,payload->>'question_type' AS kind,payload->>'max_points' AS points FROM ai_jobs "
+            "WHERE kind='generation' AND state IN ('pending','retrying')"
+        ).fetchall()
+        if str(POINTS.get(r["kind"])) != r["points"]
+    ]
+    if stale:
+        conn.execute(
+            "UPDATE past_exam_items SET status='imported',job_id=NULL,updated_at=clock_timestamp() "
+            "WHERE job_id=ANY(%s) AND status='queued'",
+            (stale,),
+        )
+        conn.execute(
+            "UPDATE ai_jobs SET state='blocked',error_code='superseded_scoring' WHERE id=ANY(%s)", (stale,)
+        )
+    return len(old)
+
+
 def retire_stale(conn):
     for row in conn.execute(
         "SELECT question_id FROM auto_question_states WHERE status IN ('ready','checking')"

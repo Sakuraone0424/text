@@ -15,6 +15,9 @@ QA_TARGET = {
     "SERVICE": "b2cbe2fd-cc60-49ec-b52f-68f5fd35aa07",
 }
 QA_SOURCE_SCHEMA = "source_staging_ocr_20261030"
+# Current specification, and the previous one accepted only so a deployment keeps starting
+# while the variable is being switched (new papers are created from the current one only).
+QA_SPECIFICATIONS = ("xiaohan-60q-300pt-v4", "xiaohan-60q-150pt-v2")
 # The QA website and the automation worker are two services of one environment.
 # Exactly these two are admitted; any other service ID is refused.
 QA_WORKER_SERVICE = "9295cd65-7355-4804-aa06-f10a5327846c"
@@ -54,7 +57,7 @@ def verify_isolated_target():
     selected = QA_TARGET if qa else TARGET
     if qa and os.environ.get("RAILWAY_ENVIRONMENT_NAME") != "qa":
         raise PermissionError("QA deployment requires exact qa environment")
-    if qa and os.environ.get("QUIZ_DAILY_SPECIFICATION") != "xiaohan-60q-150pt-v2":
+    if qa and os.environ.get("QUIZ_DAILY_SPECIFICATION") not in QA_SPECIFICATIONS:
         raise PermissionError("QA training requires 60-question specification")
     for kind, pinned in selected.items():
         actual = os.environ.get(f"RAILWAY_{kind}_ID", "")

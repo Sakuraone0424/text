@@ -107,22 +107,28 @@ def db_health():
             if not required.issubset(applied):
                 raise HTTPException(503, "V2 schema migrations are incomplete")
         from app.automation import selected_daily_blueprint
-        from app import training_spec_v2
+        from app import training_spec_v4 as current, training_spec_v2 as retired_spec
 
+        outdated = os.environ.get("QUIZ_DAILY_SPECIFICATION") == retired_spec.SPECIFICATION
         try:
             spec = selected_daily_blueprint(os.environ).specification
         except ValueError:
-            raise HTTPException(503, "Unknown QUIZ_DAILY_SPECIFICATION")
+            if not outdated:
+                raise HTTPException(503, "Unknown QUIZ_DAILY_SPECIFICATION")
+            # The previous ID is still set: keep the deployment healthy while the variable is
+            # switched, but say so; no new paper is prepared under it.
+            spec = current.SPECIFICATION
         return {
             "status": "healthy",
             "database": "connected",
             "schema": "dynamic-v1",
             "migration_count": len(applied),
+            **({"specification_env_outdated": True} if outdated else {}),
             "formal_training": {
                 "specification": spec,
-                "questions": training_spec_v2.TOTAL_QUESTIONS,
-                "points": training_spec_v2.TOTAL_POINTS,
-                "duration_seconds": training_spec_v2.DURATION_SECONDS,
+                "questions": current.TOTAL_QUESTIONS,
+                "points": current.TOTAL_POINTS,
+                "duration_seconds": current.DURATION_SECONDS,
             },
         }
     except HTTPException:

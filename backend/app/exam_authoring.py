@@ -47,9 +47,12 @@ TYPE_GUIDANCE = {
         "be achievable from the supplied textbook excerpts alone."
     ),
     "essay": (
-        "Only for historical v1 compatibility: require a bounded, multi-part mechanism "
-        "or integrative comparison, explicit grading criteria and exact textual evidence. "
-        "The new 60-question specification DOES NOT permit essays."
+        "A 问答/论述 question, larger than a short answer: ask for a bounded multi-part "
+        "mechanism, an integrative comparison or a process with its regulation, with the "
+        "parts stated explicitly in the question. The model answer is structured by those "
+        "parts and every part is answerable from the supplied textbook excerpts alone. "
+        "Give EXACTLY four to six independent rubric items, one per required part or step, "
+        "each with its own points; no item may only reward length or restating the question."
     ),
 }
 
@@ -89,14 +92,14 @@ _SCHEMA_CONTRACT = (
     "do not guess ISBN or printed pages. Set isbn to null when not supplied. "
     "For single_choice use options with EXACTLY A,B,C,D unique nonempty values, "
     "answer exactly one of A/B/C/D, accepted_answers=[], blanks=[], and rubric "
-    "points summing to 2. For fill_blank use options={}, stem containing exactly "
+    "points summing to max_points. For fill_blank use options={}, stem containing exactly "
     "one literal ____ placeholder, canonical answer included verbatim in a "
-    "nonempty accepted_answers list, blanks=[], and rubric points summing to 2. "
+    "nonempty accepted_answers list, blanks=[], and rubric points summing to max_points. "
     "For term use options={}, accepted_answers=[], blanks=[], a complete answer "
     "of meaningful length, and at least two independently gradable rubric items "
-    "with points summing to 4. For short_answer use the same empty options, "
+    "with points summing to max_points. For short_answer and essay use the same empty options, "
     "accepted_answers and blanks, and at least two independent rubric items "
-    "with points summing to 9. Every points value must be a JSON integer, not "
+    "with points summing to max_points (an essay has four to six). Every points value must be a JSON integer, not "
     "a string or decimal. Do not write comments, markdown, or wrapper keys. "
     "If evidence does not support the question, mark uncertainty by declining "
     "rather than fabricate missing claims; a declined response is rejected. "

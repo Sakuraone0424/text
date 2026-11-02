@@ -28,8 +28,8 @@ TYPES = {
     "简答": "short_answer",
     "论述题": "essay",
     "论述": "essay",
-    "问答题": "question_answer",
-    "问答": "question_answer",
+    "问答题": "essay",
+    "问答": "essay",
     "判断改错题": "true_false",
     "判断题": "true_false",
     "是非题": "true_false",
@@ -39,6 +39,13 @@ TYPES = {
     "综合题": "comprehensive",
 }
 FORMAL_TYPES = {"single_choice", "fill_blank", "term", "short_answer", "essay"}
+# Candidates stored before 问答 was classified as an essay carry "question_answer".
+STORED_TYPE_ALIASES = {"essay": ("essay", "question_answer")}
+
+
+def stored_types(kind):
+    """Every stored exam_transcript_candidates.question_type that counts as `kind`."""
+    return list(STORED_TYPE_ALIASES.get(kind, (kind,)))
 
 
 def year_heading(text, item):

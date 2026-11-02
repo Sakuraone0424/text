@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from app import auto_quality, auto_worker, past_exam_import as pei, sources
 from app.common import ensure_user
-from app.training_spec_v2 import POINTS
+from app.training_spec_v4 import POINTS
 from test_ai_automation import setup_ai  # noqa: F401  (fixture)
 from test_ocr_only import material
 
@@ -180,9 +180,11 @@ def model_result(job, *, supported=True, bad_quote=False, bad_points=False):
     elif kind == "fill_blank":
         split, answer, accepted = [points], "冈崎片段", ["冈崎片段"]
     elif kind == "term":
-        split, answer, accepted = [2, 2], "冈崎片段是滞后链上不连续合成的短DNA片段，由RNA引物引发并最终被连接。", []
+        split, answer, accepted = [3, 3], "冈崎片段是滞后链上不连续合成的短DNA片段，由RNA引物引发并最终被连接。", []
+    elif kind == "essay":
+        split, answer, accepted = [4, 4, 4, 3, 3], "滞后链以冈崎片段方式合成：引物引发、聚合酶延伸、引物切除、连接酶封闭缺口并连接成链，并受多种酶协同调控。", []
     else:
-        split, answer, accepted = [3, 3, 3], "滞后链以冈崎片段方式合成：引物引发、聚合酶延伸、引物切除、连接酶封闭缺口并连接成链。", []
+        split, answer, accepted = [4, 4, 4], "滞后链以冈崎片段方式合成：引物引发、聚合酶延伸、引物切除、连接酶封闭缺口并连接成链。", []
     if bad_points:
         split = [split[0] + 1] + split[1:]
     rubric = [
@@ -268,8 +270,8 @@ def test_end_to_end_with_fake_model_term_and_short_answer(db, corpus, setup_ai):
     run_to_ready(db, setup_ai)
     got = items(db)
     for kind, number, points, stem in [
-        ("term", "1", 4, "冈崎片段"),
-        ("short_answer", "2", 9, "简述DNA复制中滞后链的合成过程。"),
+        ("term", "1", 6, "冈崎片段"),
+        ("short_answer", "2", 12, "简述DNA复制中滞后链的合成过程。"),
     ]:
         item = got[(kind, number)]
         assert item["status"] == "packet_created", item["blocked_reason"]
@@ -314,7 +316,7 @@ def test_choice_and_blank_items_also_import_with_exact_points(db, corpus, setup_
     for key, answer in [(("single_choice", "5"), "A"), (("fill_blank", "3"), "冈崎片段")]:
         q = db.execute("SELECT content FROM reviewed_questions WHERE id=%s",
                        (got[key]["question_id"],)).fetchone()["content"]
-        assert q["max_points"] == 2 and q["answer"] == answer
+        assert q["max_points"] == 4 and q["answer"] == answer
         assert q["stem"] == got[key]["stem"]
 
 
@@ -376,7 +378,8 @@ def test_concept_keys_collide_only_on_a_shared_key():
 def test_a_paper_never_contains_two_questions_on_the_same_knowledge_point(db, question_factory, passing_audit, monkeypatch):
     from app import quiz_v2, source_policy
     from app.question_quality import Blueprint, Question
-    from app.training_spec_v2 import COUNTS, POINTS as V2_POINTS, SPECIFICATION, default_blueprint
+    from spec_helpers import rubric
+    from app.training_spec_v4 import COUNTS, POINTS as V2_POINTS, SPECIFICATION, default_blueprint
 
     ids = {}
     extra = {"biochemistry": ("single_choice", 1)}
@@ -385,7 +388,7 @@ def test_a_paper_never_contains_two_questions_on_the_same_knowledge_point(db, qu
             for n in range(count + (1 if (subject, kind) == ("biochemistry", "single_choice") else 0)):
                 raw = question_factory(subject, kind).model_dump()
                 raw["max_points"] = V2_POINTS[kind]
-                raw["rubric"] = [{"description": "Synthetic fixture criterion", "points": V2_POINTS[kind]}]
+                raw["rubric"] = rubric(kind, V2_POINTS[kind])
                 qid = quiz_v2.create_question(db, Question.model_validate(raw))["id"]
                 assert quiz_v2.review_question(db, qid, passing_audit)["passed"]
                 quiz_v2.publish_question(db, qid)
@@ -393,7 +396,7 @@ def test_a_paper_never_contains_two_questions_on_the_same_knowledge_point(db, qu
                 ids.setdefault((subject, kind), []).append(qid)
     del extra
     pool = ids[("biochemistry", "single_choice")]
-    assert len(pool) == 19
+    assert len(pool) == 11
     first, second = pool[0], pool[1]
     for qid in (first, second):  # same cited paragraph, differently worded questions
         pei.mark_origin(db, qid, "generated", concept_keys=["unit:424242"])

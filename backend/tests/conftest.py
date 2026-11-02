@@ -201,3 +201,20 @@ def photo_answers_for_legacy_tests(monkeypatch):
     Tests of the default behaviour delete this variable themselves.
     """
     monkeypatch.setenv("QUIZ_PHOTO_ANSWERS_ENABLED", "1")
+
+
+@pytest.fixture(autouse=True)
+def wall_clock_is_off_peak(monkeypatch):
+    """Tests must not depend on the time of day they run at.
+
+    Question writing waits for DeepSeek's weekday peak hours; with no explicit time (the wall
+    clock) the tests see off-peak. Calls that pass a time, and tests that patch is_peak, are
+    unaffected.
+    """
+    from app import cost_control
+
+    real = cost_control.is_peak
+    monkeypatch.setattr(
+        cost_control, "is_peak",
+        lambda at=None, calendar=None: False if at is None else real(at, calendar),
+    )

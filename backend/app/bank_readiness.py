@@ -5,7 +5,7 @@ questions can be counted. These totals are an UPPER BOUND: final selection
 additionally filters previously seen stems, duplicate/cross-answer cues, FSRS
 policy and within-paper coverage. Never promise a whole paper from these counts.
 """
-from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
+from app.training_spec_v4 import SUBJECTS, COUNTS, POINTS
 from app.source_policy import pinned_science_evidence
 
 
@@ -28,7 +28,7 @@ def report(conn, user_id):
             rejected["wrong_subject_or_type"] = rejected.get("wrong_subject_or_type", 0) + 1
             continue
         if content.get("max_points") != POINTS[kind]:
-            rejected["not_v2_scoring"] = rejected.get("not_v2_scoring", 0) + 1
+            rejected["not_current_scoring"] = rejected.get("not_current_scoring", 0) + 1
             continue
         if not pinned_science_evidence(content):
             rejected["scientific_evidence_outside_locked_ocr_four"] = (
@@ -74,7 +74,7 @@ def report(conn, user_id):
     from app.exam_style_readiness import report as past_exam_style_report
     past_exam_style = past_exam_style_report(conn)
     return {
-        "specification": "xiaohan-60q-150pt-v2",
+        "specification": "xiaohan-60q-300pt-v4",
         "genuine_past_exam_style": {
             "ready_for_same_type_style": past_exam_style["ready_for_same_type_style"],
             "missing_same_type_style": past_exam_style["missing_same_type_style"],

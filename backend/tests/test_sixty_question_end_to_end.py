@@ -11,7 +11,8 @@ import pytest
 from app.common import ensure_user
 from app import quiz_v2, training_sessions, auto_quality, source_policy
 from app.question_quality import Question, Blueprint
-from app.training_spec_v2 import COUNTS, POINTS, SPECIFICATION, default_blueprint
+from spec_helpers import rubric
+from app.training_spec_v4 import COUNTS, POINTS, SPECIFICATION, default_blueprint
 
 
 def test_sixty_question_prepare_start_submit_readback(db, question_factory, passing_audit, monkeypatch):
@@ -22,7 +23,7 @@ def test_sixty_question_prepare_start_submit_readback(db, question_factory, pass
                 old = question_factory(subject, kind)
                 raw = old.model_dump()
                 raw["max_points"] = POINTS[kind]
-                raw["rubric"] = [{"description": "Synthetic fixture criterion", "points": POINTS[kind]}]
+                raw["rubric"] = rubric(kind, POINTS[kind])
                 updated = Question.model_validate(raw)
                 qid = quiz_v2.create_question(db, updated)["id"]
                 assert quiz_v2.review_question(db, qid, passing_audit)["passed"]
@@ -50,30 +51,33 @@ def test_sixty_question_prepare_start_submit_readback(db, question_factory, pass
     prepared = quiz_v2.create_paper(db, uid, spec, day=date(2026, 12, 1))
     pid = prepared["paper_id"]
     assert prepared["count"] == 60
-    assert prepared["max_points"] == 150
+    assert prepared["max_points"] == 300
     assert prepared["mode"] == "reviewed_60"
     assert prepared["questions"] == []
     running = training_sessions.start(db, uid, pid)
     assert running["status"] == "in_progress"
     revealed = quiz_v2.load_paper(db, uid, pid)
     assert len(revealed["questions"]) == 60
-    assert sum(q["max_points"] for q in revealed["questions"]) == 150
+    assert sum(q["max_points"] for q in revealed["questions"]) == 300
     assert all("answer" not in q for q in revealed["questions"])
     assert all("rubric" not in q for q in revealed["questions"])
     choice = next(q for q in revealed["questions"] if q["question_type"] == "single_choice")
     name = next(q for q in revealed["questions"] if q["question_type"] == "term")
     blank = next(q for q in revealed["questions"] if q["question_type"] == "fill_blank")
     short = next(q for q in revealed["questions"] if q["question_type"] == "short_answer")
+    essay = next(q for q in revealed["questions"] if q["question_type"] == "essay")
+    assert essay["max_points"] == 18 and short["max_points"] == 12 and name["max_points"] == 6
     answers = {
         choice["id"]: {"text": "A"},
         blank["id"]: {"text": "fixture solution"},
         name["id"]: {"text": "Synthetic definition answer"},
         short["id"]: {"text": "Synthetic explanation of the underlying process"},
+        essay["id"]: {"text": "Synthetic multi-part essay answer covering mechanism, regulation and comparison"},
     }
     outcome = quiz_v2.submit(db, uid, pid, answers, expected_version=0)
-    assert outcome["pending"] == 2
+    assert outcome["pending"] == 3
     assert outcome["score"] is None
-    assert outcome["max_points"] == 150
+    assert outcome["max_points"] == 300
     assert len(outcome["answers"]) == 60
     assert len(db.execute(
         "SELECT * FROM paper_items_v2 WHERE paper_id=%s", (pid,)
@@ -83,5 +87,5 @@ def test_sixty_question_prepare_start_submit_readback(db, question_factory, pass
     ).fetchall()) == 60
     repeated = quiz_v2.submit(db, uid, pid, {}, expected_version=0)
     assert repeated["attempt_id"] == outcome["attempt_id"]
-    assert repeated["pending"] == 2
+    assert repeated["pending"] == 3
     assert repeated["score"] is None

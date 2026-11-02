@@ -164,6 +164,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
 
 def plan(conn, uid):
     auto_quality.retire_stale(conn)
+    auto_quality.retire_old_scoring(conn)
     auto_quality.discard_unfixable(conn)
     for row in conn.execute(
         "SELECT p.question_id FROM candidate_review_packets p LEFT JOIN auto_question_states s ON s.question_id=p.question_id WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) AND (s.question_id IS NULL OR s.status='candidate') ORDER BY p.question_id LIMIT 10"

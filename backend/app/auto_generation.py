@@ -7,14 +7,14 @@ from collections import defaultdict
 
 from pydantic import Field, StrictInt
 
-from app.training_spec_v2 import SUBJECTS, COUNTS, POINTS
+from app.training_spec_v4 import SUBJECTS, COUNTS, POINTS
 from app.source_policy import (
     current_source_sql, FILES, pinned_source_bytes, pinned_science_evidence
 )
 from app.candidate_review import snapshot_unit, create_packet
 from app.question_quality import Question, AXES, StrictModel
 from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
-from app.transcript_analysis import STYLE_SOURCE_BLOCKERS
+from app.transcript_analysis import STYLE_SOURCE_BLOCKERS, stored_types
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
 from app import cost_control, past_exam_import
@@ -127,14 +127,29 @@ def select_exam_style(conn, subject, kind, concept=None):
         "JOIN source_documents d ON d.id=t.document_id "
         "JOIN source_units su ON su.id=t.unit_id "
         "WHERE " + current_source_sql("d", kind="exam_transcription") +
-        " AND d.subject=%s AND t.question_type=%s "
+        " AND d.subject=%s AND t.question_type=ANY(%s) "
         "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
         "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent','docx_table_requires_review','complex_table','ocr_uncertain','transcription_gap_reported']) "
         "AND NOT (t.concerns ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent',"
         "'docx_table_requires_review','complex_table','ocr_uncertain','transcription_gap_reported','question_boundary_unconfirmed','question_type_unknown','year_unassigned']) "
         "ORDER BY t.year DESC,t.id LIMIT 200",
-        (subject, kind),
+        (subject, stored_types(kind)),
     ).fetchall()
+    if not rows and kind == "essay":
+        # No 论述/问答 anchor parsed yet: the closest genuine style is a short-answer question.
+        rows = conn.execute(
+            "SELECT t.unit_id AS id,t.document_id,su.ordinal AS start_ordinal,t.year,t.transcription FROM exam_transcript_candidates t "
+            "JOIN source_documents d ON d.id=t.document_id "
+            "JOIN source_units su ON su.id=t.unit_id "
+            "WHERE " + current_source_sql("d", kind="exam_transcription") +
+            " AND d.subject=%s AND t.question_type='short_answer' "
+            "AND t.question_number IS NOT NULL AND t.year IS NOT NULL "
+            "AND NOT (su.quality_flags ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent','docx_table_requires_review','complex_table','ocr_uncertain','transcription_gap_reported']) "
+            "AND NOT (t.concerns ?| ARRAY['corrupt_ocr','untranscribed_image','image_dependent',"
+            "'docx_table_requires_review','complex_table','ocr_uncertain','transcription_gap_reported','question_boundary_unconfirmed','question_type_unknown','year_unassigned']) "
+            "ORDER BY t.year DESC,t.id LIMIT 200",
+            (subject,),
+        ).fetchall()
     if not rows:
         return None
     relation = (concept or {}).get("relation") or {}
@@ -433,7 +448,7 @@ def bucket_gaps(conn, uid):
     past = _count_by_bucket(
         conn,
         "SELECT subject AS s,question_type AS t,count(*) AS n FROM past_exam_items "
-        "WHERE status IN ('imported','queued') AND question_type IN ('term','short_answer') GROUP BY 1,2",
+        "WHERE status IN ('imported','queued') AND question_type IN ('term','short_answer','essay') GROUP BY 1,2",
     )
     gaps = []
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
@@ -549,7 +564,7 @@ def _enqueue_gap(conn, uid, subject, kind):
             or not pinned_source_bytes(primary["file_id"], primary["source_sha256"])
         ):
             continue
-        key = f"gap:{subject}:{kind}:{unit_id}:{primary['unit_sha256'][:16]}"
+        key = f"gap:v4:{subject}:{kind}:{unit_id}:{primary['unit_sha256'][:16]}"
         if conn.execute("SELECT 1 FROM ai_jobs WHERE job_key=%s", (key,)).fetchone():
             continue
         payload = assemble_payload(

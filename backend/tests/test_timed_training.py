@@ -13,23 +13,23 @@ from test_api_v2 import LEARNER, REVIEWER
 
 
 def test_single_current_product_contract_and_retired_legacy_routes(client):
-    from app.training_spec_v2 import COUNTS as new_counts, POINTS as new_points, SPECIFICATION
+    from app.training_spec_v4 import COUNTS as new_counts, POINTS as new_points, SPECIFICATION
 
     response = client.get("/v2/training-specification")
     assert response.status_code == 200
     value = response.json()
-    assert (value["questions"], value["points"], value["duration_seconds"]) == (60, 150, 3600)
-    assert (value["questions_per_subject"], value["points_per_subject"]) == (30, 75)
+    assert (value["questions"], value["points"], value["duration_seconds"]) == (60, 300, 3600)
+    assert (value["questions_per_subject"], value["points_per_subject"]) == (30, 150)
     assert value["specification"] == SPECIFICATION
     assert value["quotas"] == {s: new_counts for s in ("biochemistry", "cell_biology")}
     assert value["points_by_type"] == new_points
-    assert "essay" not in value["quotas"]["biochemistry"]
+    assert value["quotas"]["biochemistry"]["essay"] == 1
     for route in ("/", "/training"):
         page = client.get(route).text
-        assert "唯一新版训练规格：60题" in page and "各30题75分" in page
-        assert "每科18道单选" in page and "7道填空" in page
-        assert "4道名词解释" in page and "1道简答" in page
-        assert "3道简答" not in page and "1道论述" not in page
+        assert "唯一新版训练规格：60题" in page and "各30题150分" in page
+        assert "每科10道单选" in page and "14道填空" in page
+        assert "4道名词解释" in page and "1道简答" in page and "1道问答" in page
+        assert "3道简答" not in page and "1道论述" not in page and "共150分" not in page
     assert client.get("/quiz/today", headers=LEARNER).status_code == 410
     assert client.post("/quiz/submit", headers=LEARNER).status_code == 410
 
@@ -47,7 +47,7 @@ def test_daily_sixty_and_mode_switch_requests_are_rejected(client):
 
 def test_chatgpt_adapter_uses_only_formal_blueprint():
     from app.chatgpt_adapter import TrainingAdapter
-    from app.training_spec_v2 import default_blueprint
+    from app.training_spec_v4 import default_blueprint
 
     class Transport:
         def request(self, method, path, *, json):
