@@ -7,6 +7,7 @@ no-model replay of recent failures through the current rules (nothing is written
 
 import json
 import sys
+from decimal import Decimal
 from collections import Counter, defaultdict
 
 # How each reason is handled by the current rules (shown next to its count).
@@ -118,6 +119,31 @@ def review_failures(conn, hours=24, samples=2):
         categories=[dict(category=c, count=e["count"], by_type=dict(e["by_bucket"]), samples=e["samples"])
                     for c, e in sorted(categories.items(), key=lambda kv: -kv[1]["count"])],
     )
+
+
+def review_by_contract(conn, hours=72):
+    """Review pass rate and average cost per review call, by review contract (9 = the cited spans, 10 = whole paragraphs,
+    program-derived mapping, single choice at high thinking), question type and thinking level: the before/after view."""
+    rows = conn.execute(
+        "SELECT CASE WHEN j.payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%' THEN '10' "
+        "            WHEN j.payload->>'instructions' LIKE 'Single independent review%%' THEN '9' ELSE 'older' END AS contract, "
+        "q.content->>'subject' AS subject, q.content->>'question_type' AS qtype, j.settings_snapshot->>'effort' AS effort, "
+        "ev.passed, COALESCE((SELECT sum(c.amount_cny) FROM ai_cny_events c WHERE c.job_id=j.id AND c.kind='usage_estimate'),0) AS cost "
+        "FROM auto_quality_events ev JOIN ai_jobs j ON j.id=ev.job_id JOIN reviewed_questions q ON q.id=ev.question_id "
+        "WHERE ev.phase='review' AND ev.created_at>" + _since(hours),
+        (hours,),
+    ).fetchall()
+    table = defaultdict(lambda: dict(reviewed=0, passed=0, cost=Decimal(0)))
+    for r in rows:
+        t = table[(r["contract"], r["qtype"], r["effort"])]
+        t["reviewed"] += 1
+        t["passed"] += 1 if r["passed"] else 0
+        t["cost"] += Decimal(r["cost"])
+    return [
+        dict(contract=k[0], question_type=k[1], thinking=k[2], reviewed=v["reviewed"], passed=v["passed"],
+             pass_rate=round(v["passed"] / v["reviewed"], 3), avg_cost_cny=str((v["cost"] / v["reviewed"]).quantize(Decimal("0.0001"))))
+        for k, v in sorted(table.items(), key=lambda kv: (kv[0][1] or "", kv[0][0]))
+    ]
 
 
 def funnel(conn, hours=24):
@@ -268,7 +294,7 @@ def full_stats(conn, hours=24):
     """blocked_stats plus the per type funnel, review failure kinds with samples, the single choice steps and the paragraph filter."""
     base = blocked_stats(conn, hours)
     f = funnel(conn, hours)
-    return dict(base, funnel=f["table"], review_failure_kinds=f["review_failure_kinds"], single_choice=single_choice_steps(conn, hours), paragraph_filter=filter_report(conn))
+    return dict(base, review_by_contract=review_by_contract(conn, max(hours, 72)), funnel=f["table"], review_failure_kinds=f["review_failure_kinds"], single_choice=single_choice_steps(conn, hours), paragraph_filter=filter_report(conn))
 
 
 def replay(conn, hours=24, limit=300, samples_per_layer=3):

@@ -20,7 +20,10 @@ TYPE_GUIDANCE = {
         "letters>: {unit_id, excerpt, why_wrong}}}. For EVERY wrong alternative quote, "
         "verbatim, the continuous textbook excerpt from a supplied unit that shows it is "
         "wrong (for a half-true statement, the exact point where it fails) and explain in "
-        "why_wrong. If a distractor cannot be refuted from the supplied units, replace it. "
+        "why_wrong. EVERY wrong alternative MUST have grounds for refuting it that can be "
+        "found in the supplied paragraphs: before you answer, check each of the three wrong "
+        "alternatives against the supplied units and keep only those whose refutation you can "
+        "quote verbatim. If a distractor cannot be refuted from the supplied units, replace it. "
         "Make certain that no second alternative can also be correct."
     ),
     "fill_blank": (
