@@ -33,6 +33,16 @@
     return data;
   }
   /* Draw from what was seen before at once (if every read has a kept copy), then draw again from the fresh reads. */
+  /* A failed read says what happened in plain words and offers a retry button (never a blank page or a bare code). */
+  function retryCard(root, message, retry) {
+    root.replaceChildren();
+    const card = el("div", undefined, root, "error-card");
+    card.setAttribute("role", "alert");
+    el("p", message, card);
+    const button = el("button", "重试", card, "secondary");
+    button.type = "button";
+    button.onclick = retry;
+  }
   async function swrLoad(loader, paths) {
     if (paths.every((path) => Data.peek(path))) {
       cachedOnly = true;
@@ -133,9 +143,20 @@
       banner.hidden = false;
     } else banner.hidden = true;
     if (overview.status !== "fulfilled") {
-      $("stat-avg-note").textContent = "统计暂时读取失败，未将未知数据当作0。";
+      $("stat-avg-note").textContent = "统计暂时读取失败，未将未知数据当作 0。";
+      let retry = $("home-retry");
+      if (!retry) {
+        retry = el("button", "重试", $("stat-avg-note").parentElement, "secondary");
+        retry.id = "home-retry";
+        retry.type = "button";
+        retry.onclick = () => {
+          retry.remove();
+          loadHome();
+        };
+      }
       return;
     }
+    $("home-retry")?.remove();
     const o = overview.value;
     $("days-left").textContent = o.days_left > 0 ? String(o.days_left) : "0";
     $("exam-label").textContent = o.days_left > 0 ? "距 12 月 19 日初试" : "12 月 19 日初试已到";
@@ -207,8 +228,7 @@
     try {
       data = await read("/v2/stats/profile");
     } catch (error) {
-      root.replaceChildren();
-      el("p", error.message + "。未将未知数据当作0。", root, "notice");
+      if (error.name !== "AuthRequired") retryCard(root, error.message + "。未将未知数据当作 0。", loadProfile);
       return;
     }
     root.replaceChildren();
@@ -410,9 +430,20 @@
     try {
       data = await read("/v2/mistakes?" + query);
     } catch (error) {
+      if (error.name === "AuthRequired") return;
       $("mistake-count").textContent = error.message;
+      if (!$("mistake-retry")) {
+        const retry = el("button", "重试", $("mistake-count").parentElement, "secondary");
+        retry.id = "mistake-retry";
+        retry.type = "button";
+        retry.onclick = () => {
+          retry.remove();
+          loadMistakes();
+        };
+      }
       return;
     }
+    $("mistake-retry")?.remove();
     if (!facetsLoaded) {
       facetsLoaded = true;
       facets = data.facets;

@@ -248,6 +248,8 @@ $("save").onclick = async () => {
     const mismatch = ["max_concurrency", "token_limit", "retry_limit", "daily_cny", "monthly_cny", "task_cny"].filter((k) => String(Number(s[k])) !== String(Number(body[k])));
     if (mismatch.length) throw new Error("保存后读到的值和提交的不一致：" + mismatch.join("、"));
     data.settings = s;
+    saved = form(); // what is on screen is what the server now has: nothing is unsaved any more
+    refreshDirty();
     await load();
     say("已保存");
   } catch (e) {

@@ -75,6 +75,22 @@ async def json_charset(request, call_next):
 
 
 @app.middleware("http")
+async def timing(request, call_next):
+    """Time every request: a Server-Timing header for the browser and per-route percentiles for /v2/perf."""
+    import time
+    from app import perf
+
+    began = time.perf_counter()
+    response = await call_next(request)
+    ms = int((time.perf_counter() - began) * 1000)
+    route = getattr(request.scope.get("route"), "path", None) or request.url.path
+    if not route.startswith("/static"):
+        perf.record(route, request.method, ms, response.status_code)
+    response.headers["Server-Timing"] = f"app;dur={ms}"
+    return response
+
+
+@app.middleware("http")
 async def model_privacy(request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/v2/model"):
