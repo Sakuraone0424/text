@@ -532,17 +532,8 @@
     const viewport = () => {
       const covered = window.innerHeight - window.visualViewport.height > 150;
       document.body.classList.toggle("keyboard-open", covered);
-      // while the keyboard is up the page is exactly the visible part, so nothing hides behind it
-      document.documentElement.style.setProperty("--app-h", covered ? window.visualViewport.height + "px" : "");
-      if (!covered) window.scrollTo(0, 0);
     };
     window.visualViewport.addEventListener("resize", viewport);
-    // a field that gets focus is scrolled into the visible area of the content
-    document.addEventListener("focusin", (event) => {
-      const field = event.target;
-      if (field.matches?.("input, textarea, select"))
-        setTimeout(() => field.scrollIntoView({ block: "center", behavior: "smooth" }), 300);
-    });
   }
   byId("logout").onclick = async () => {
     if (

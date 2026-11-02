@@ -6,6 +6,7 @@ const ASSETS = [
   "/static/training.js",
   "/static/app.css",
   "/static/tokens.css",
+  "/static/shell.js",
   "/static/training.css",
   "/static/charts.js",
   "/static/insights.js",

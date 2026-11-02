@@ -39,7 +39,7 @@ def test_the_bottom_bar_is_the_last_thing_on_screen_and_the_document_never_scrol
     nav = page.locator(".sidebar").bounding_box()
     height = page.evaluate("innerHeight")
     assert abs(nav["y"] + nav["height"] - height) < 1           # nothing below it, nothing behind it
-    page.mouse.wheel(0, 800)
+    page.evaluate("window.scrollBy(0, 800)")   # (mobile WebKit has no mouse wheel)
     page.wait_for_timeout(200)
     assert page.evaluate("window.scrollY") == 0                  # the wheel moves the content area only
 
