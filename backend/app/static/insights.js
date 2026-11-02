@@ -67,6 +67,35 @@
       }
     };
   }
+  const EMPTY_ICON = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg>';
+  const emptyLine = (root, text) => {
+    root.replaceChildren();
+    const line = el("div", undefined, root, "empty-line");
+    line.innerHTML = EMPTY_ICON;
+    el("span", text, line);
+  };
+  const clock = (iso) => {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
+    const today = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric" }).format(new Date());
+    const same = today === `${parts.month}/${parts.day}`;
+    return (same ? "" : `${parts.month} 月 ${parts.day} 日 `) + `${parts.hour}:${parts.minute}`;
+  };
+  /* While the bank is short and no paper is prepared the start button is grey and says why. */
+  let lock = null;
+  function applyLock() {
+    const button = $("prepare");
+    if (!lock || window.__hasPaper?.()) {
+      button.dataset.locked = "0";
+      return;
+    }
+    button.dataset.locked = "1";
+    button.disabled = !lock.complete;
+    button.setAttribute("aria-disabled", String(!lock.complete));
+    button.firstChild.textContent = lock.complete ? "开始" : `题库还差 ${lock.missing} 道，暂不能开始`;
+    $("paper-state").textContent = lock.complete ? "已就绪" : "题库准备中";
+    $("paper-state").classList.toggle("green-pill", lock.complete);
+    $("prepare-note").hidden = !lock.complete;
+  }
   async function loadHome() {
     a2hsHint();
     const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", {
@@ -87,36 +116,54 @@
     $("days-left").textContent = o.days_left > 0 ? String(o.days_left) : "0";
     $("exam-label").textContent = o.days_left > 0 ? "距 12 月 21 日初试" : "12 月 21 日初试已到";
     $("streak-days").textContent = String(o.streak.current);
+    $("streak-days").classList.toggle("zero", o.streak.current === 0);
     const today = o.today_paper;
     const result = $("today-result");
     result.hidden = !(today.state === "submitted");
     if (today.state === "submitted")
       result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分` : "今日已交卷，等待判分完成";
+    // bank readiness: tag, progress line and the start button
+    const bank = o.tomorrow;
+    const showBank = today.state === "none";
+    $("bank-block").hidden = !showBank;
+    $("bank-ready").textContent = String(bank.ready);
+    $("bank-needed").textContent = String(bank.needed);
+    $("bank-bar").style.width = Math.min(100, bank.needed ? (bank.ready / bank.needed) * 100 : 0) + "%";
+    $("bank-eta").textContent = bank.complete ? "题库已够一张卷子" : bank.eta_at ? `预计 ${clock(bank.eta_at)} 前可开始` : "暂时无法估算";
+    lock = today.state === "none" ? bank : null;
+    applyLock();
+    const none = (id, value, noteId, empty, shown) => {
+      $(id).textContent = value === null || value === undefined ? "—" : shown;
+      $(id).classList.toggle("none", value === null || value === undefined);
+      $(noteId).textContent = value === null || value === undefined ? empty : "";
+    };
     const last7 = o.last7;
-    $("stat-avg").textContent = last7.avg_points === null ? "—" : String(Math.round(last7.avg_points));
+    none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", String(Math.round(last7.avg_points)));
     const note = $("stat-avg-note");
     note.className = "";
-    if (last7.avg_points === null) note.textContent = "完成第一套卷子后显示";
-    else if (last7.delta_points === null) note.textContent = `满分 ${last7.max_points} · 共 ${last7.papers} 套`;
-    else {
-      note.textContent = `较上周 ${sign(last7.delta_points)} 分`;
-      note.className = last7.delta_points >= 0 ? "up" : "down";
+    if (last7.avg_points !== null) {
+      if (last7.delta_points === null) note.textContent = `满分 ${last7.max_points}`;
+      else {
+        note.textContent = `较上周 ${sign(last7.delta_points)}`;
+        note.className = last7.delta_points >= 0 ? "up" : "down";
+      }
     }
-    $("stat-objective").textContent = pct(o.objective_rate);
-    $("stat-objective-note").textContent = o.objective_rate === null ? "完成第一套卷子后显示" : "单选 + 填空，近 7 次";
-    $("stat-subjective").textContent = pct(o.subjective_rate);
-    $("stat-subjective-note").textContent = o.subjective_rate === null ? "判分完成后显示" : "名词解释 + 简答 + 问答";
+    none("stat-objective", o.objective_rate, "stat-objective-note", "做完首套后显示", pct(o.objective_rate));
+    if (o.objective_rate !== null) $("stat-objective-note").textContent = "单选 + 填空";
+    none("stat-subjective", o.subjective_rate, "stat-subjective-note", "判分后显示", pct(o.subjective_rate));
+    if (o.subjective_rate !== null) $("stat-subjective-note").textContent = "AI 判分";
     weak($("weak-chapters"), o.weak_chapters);
     $("weak-practice").hidden = !o.weak_chapters.length;
-    $("metric-due").textContent = String(o.reviews.due_now);
-    $("tomorrow-ready").textContent = `${o.tomorrow.ready}/${o.tomorrow.needed}`;
+    const due = o.reviews.due_now;
+    $("metric-due").textContent = String(due);
+    $("quick-review-line").textContent = due ? `今日到期 ${due} 道` : "今日没有到期";
+    $("quick-progress-line").replaceChildren(document.createTextNode("已入库 "));
+    el("b", `${bank.ready}/${bank.needed}`, $("quick-progress-line"), bank.complete ? "" : "attention").id = "tomorrow-ready";
   }
   function weak(root, chapters) {
     root.replaceChildren();
     if (!chapters.length) {
-      const box = el("div", undefined, root, "empty-state");
-      el("strong", "完成第一套卷子后显示", box);
-      el("p", "每章至少有 3 道已判分题，才会列入薄弱章节。", box);
+      emptyLine(root, "做完首套后，按章节正确率列出最需要补的 3 章");
       return;
     }
     chapters.forEach((c) => {
@@ -142,28 +189,30 @@
     }
     root.replaceChildren();
     const card = () => el("section", undefined, root, "card data-card");
-    // a) overview numbers
-    const a = card();
-    el("h2", "概览", a);
-    const grid = el("div", undefined, a, "num-grid");
+    // a) four overview cells, divided by thin vertical lines
+    const a = el("section", undefined, root, "card");
+    a.setAttribute("aria-label", "概览");
+    const cells = el("div", undefined, a, "overview-cells");
     [
-      [String(data.summary.papers), "累计完成卷数"],
-      [String(data.summary.answered), "累计做题数"],
-      [data.summary.total_seconds ? hours(data.summary.total_seconds) : "—", "累计用时"],
-      [`${data.summary.streak_current} / ${data.summary.streak_longest}`, "当前 / 最长连续天数"],
-    ].forEach(([value, label]) => {
-      const cell = el("div", undefined, grid);
-      el("strong", value, cell);
+      [String(data.summary.papers), "完成卷数", false],
+      [String(data.summary.answered), "做题数", false],
+      [data.summary.total_seconds ? hoursShort(data.summary.total_seconds) : "—", "累计用时", false],
+      [String(data.summary.streak_current), "连续天数", data.summary.streak_current > 0],
+    ].forEach(([value, label, warm]) => {
+      const cell = el("div", undefined, cells);
+      el("strong", value, cell, "num" + (warm ? " warm" : ""));
       el("span", label, cell);
     });
-    // b) trend
+    // b) trend: title left, score / rate capsule right
     const b = card();
-    const toggle = el("div", undefined, b, "segmented");
+    const bHead = el("div", undefined, b, "head-line");
+    el("h2", "成绩趋势", bHead);
+    const toggle = el("div", undefined, bHead, "segmented");
     toggle.setAttribute("role", "group");
     toggle.setAttribute("aria-label", "趋势显示方式");
     const chart = el("div", undefined, b);
     const draw = () => trend(chart, data.trend);
-    [["rate", "得分率"], ["points", "分数"]].forEach(([mode, label]) => {
+    [["points", "分数"], ["rate", "得分率"]].forEach(([mode, label]) => {
       const button = el("button", label, toggle);
       button.type = "button";
       button.setAttribute("aria-pressed", String(trendMode === mode));
@@ -177,29 +226,34 @@
     // c) type rates
     const c = card();
     typeRates(el("div", undefined, c), data.type_rates);
-    // d) chapters
-    const d = card();
-    chapters(d, data.chapters);
-    // e) calendar
+    // d) calendar
     const e = card();
+    el("h2", "刷题日历", e);
     const days = data.calendar.filter((x) => x.answered > 0).length;
     const total = data.calendar.reduce((s, x) => s + x.answered, 0);
     C.heatmap(el("div", undefined, e), {
-      title: "刷题日历", unit: "最近 8 周",
-      cells: data.calendar.map((x) => ({ day: x.day, value: x.answered / 60, note: `做题 ${x.answered} 道${x.rate === null ? "" : "，得分率 " + pct(x.rate)}` })),
+      title: "刷题日历", hideTitle: true,
+      cells: data.calendar.map((x) => ({ day: x.day, today: x.day === data.today, value: x.answered / 60, note: `做题 ${x.answered} 道${x.rate === null ? "" : "，得分率 " + pct(x.rate)}` })),
       conclusion: total ? `最近 8 周有 ${days} 天做了题，共 ${total} 道。` : "",
-      empty: "完成第一套卷子后显示", emptyHint: "每天一格，颜色越深当天做题越多。",
+      empty: "做完首套后显示每天的做题量",
     });
-    // f) timing
+    // e) chapters: subject switch on the right
+    const d = card();
+    chapters(d, data.chapters);
+    // f) timing per type
     const f = card();
     timing(f, data.timing);
     // g) reviews
     const g = card();
     reviews(g, data.reviews);
   }
+  const hoursShort = (seconds) => {
+    const h = seconds / 3600;
+    return h >= 1 ? (Math.round(h * 10) / 10) + "h" : Math.round(seconds / 60) + "m";
+  };
   function trend(root, rows) {
     if (!rows.length) {
-      C.line(root, { title: "成绩趋势", empty: "完成第一套卷子后显示", emptyHint: "每套判分完成的卷子会在这里留下一个点。" });
+      C.line(root, { title: "成绩趋势", hideTitle: true, empty: "做完首套后显示成绩趋势" });
       return;
     }
     const latest = rows[rows.length - 1];
@@ -227,7 +281,7 @@
     }).filter(Boolean);
     const sameSpec = trendMode === "points" && use.length !== rows.length ? `分数模式只显示与最近一套同规格（满分 ${latest.max}）的 ${use.length} 套；` : "";
     C.line(root, {
-      title: "成绩趋势", unit: trendMode === "points" ? "分" : "得分率", series,
+      title: "成绩趋势", hideTitle: true, unit: trendMode === "points" ? "分" : "得分率", series,
       yMin: 0, yMax: trendMode === "points" ? latest.max : 1,
       format: trendMode === "points" ? C.num : (v) => Math.round(v * 100) + "%",
       conclusion: sameSpec + (parts.length ? parts.join("；") + "。" : "再完成一套就能看到变化。"),
@@ -246,46 +300,59 @@
     });
   }
   function chapters(card, rows) {
-    el("h2", "章节掌握情况", card);
-    el("p", "按正确率从低到高；点开一章，只练这一章。", card, "muted small");
+    const head = el("div", undefined, card, "head-line");
+    el("h2", "章节掌握情况", head);
+    const subjects = Object.keys(SUBJECT).filter((k) => rows.some((r) => r.subject === k));
+    const box = el("div", undefined, card, "chapter-list");
     if (!rows.length) {
-      const box = el("div", undefined, card, "chart-empty");
-      el("strong", "完成第一套卷子后显示", box);
-      el("p", "每章按已判分的题和短练习计算正确率。", box);
+      emptyLine(box, "做完首套后，按章节显示正确率");
       return;
     }
-    Object.keys(SUBJECT).forEach((subject) => {
-      const list = rows.filter((r) => r.subject === subject);
-      if (!list.length) return;
-      el("h3", SUBJECT[subject], card);
-      const box = el("div", undefined, card, "chapter-list");
-      list.forEach((r) => {
+    let current = subjects[0];
+    const draw = () => {
+      box.replaceChildren();
+      rows.filter((r) => r.subject === current).forEach((r) => {
         const row = el("button", undefined, box, "chapter-row");
         row.type = "button";
-        row.setAttribute("aria-label", `${SUBJECT[subject]} ${r.chapter}，正确率 ${pct(r.rate)}，${r.answers} 题。点按只练这一章`);
+        row.setAttribute("aria-label", `${SUBJECT[current]} ${r.chapter}，正确率 ${pct(r.rate)}，${r.answers} 题。点按只练这一章`);
         C.progress(el("div", undefined, row), {
-          label: r.chapter, text: `${pct(r.rate)} · ${r.answers} 题`, value: r.rate, max: 1,
-          color: r.rate < 0.5 ? C.COLORS.cell_biology : COLOR[subject],
+          label: r.chapter, text: pct(r.rate), value: r.rate, max: 1,
+          color: r.rate < 0.5 ? C.COLORS.cell_biology : C.COLORS.biochemistry,
         });
-        row.onclick = () => chapterPractice(subject, r.chapter);
+        row.onclick = () => chapterPractice(current, r.chapter);
       });
+    };
+    const toggle = el("div", undefined, head, "segmented");
+    toggle.setAttribute("role", "group");
+    toggle.setAttribute("aria-label", "科目");
+    subjects.forEach((subject) => {
+      const button = el("button", SHORT[subject], toggle);
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(subject === current));
+      button.onclick = () => {
+        current = subject;
+        toggle.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === button)));
+        draw();
+      };
     });
+    draw();
+    el("p", "点任意章节，只练这一章", card, "card-footnote");
   }
   function timing(card, t) {
-    el("h2", "用时分析", card);
-    const papers = t.papers.map((p) => ({ label: dateLabel(p.date), value: Math.round(p.seconds / 60), color: p.seconds > 3600 ? C.COLORS.cell_biology : C.COLORS.biochemistry, note: p.seconds > 3600 ? "超过 60 分钟" : undefined }));
-    const last = papers[papers.length - 1];
+    el("h2", "各题型平均每题用时", card);
+    const items = t.by_type.map((x) => ({
+      label: { single_choice: "单选", fill_blank: "填空", term: "名解", short_answer: "简答", essay: "问答" }[x.question_type],
+      value: x.avg_seconds, color: x.avg_seconds > x.suggested_seconds ? C.COLORS.cell_biology : C.COLORS.biochemistry,
+      note: `建议 ${x.suggested_seconds} 秒${x.avg_seconds > x.suggested_seconds ? "，超出" : ""}`,
+    }));
+    const over = t.by_type.filter((x) => x.avg_seconds > x.suggested_seconds).sort((a, b) => b.avg_seconds / b.suggested_seconds - a.avg_seconds / a.suggested_seconds)[0];
+    const mmss = (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, "0")}`;
     C.columns(el("div", undefined, card), {
-      title: "每套卷子实际用时", unit: "分钟", items: papers, refLines: [{ value: 60, label: "60 分钟" }], max: 70,
-      conclusion: last ? `最近一套用时 ${last.value} 分钟。` : "",
-      empty: "完成第一套卷子后显示", emptyHint: "统计从开始作答到交卷的实际时间。",
-    });
-    const items = t.by_type.map((x) => ({ label: TYPE[x.question_type], value: x.avg_seconds, valueText: `${Math.round(x.avg_seconds / 6) / 10} 分钟 · ${x.questions} 题`, color: C.COLORS.biochemistry, max: Math.max(...t.by_type.map((y) => y.avg_seconds)) }));
-    const slow = [...t.by_type].sort((a, b) => b.avg_seconds - a.avg_seconds)[0];
-    C.hbars(el("div", undefined, card), {
-      title: "各题型平均每题用时", unit: "每题", items, format: (v) => Math.round(v) + " 秒",
-      conclusion: slow ? `${TYPE[slow.question_type]}平均每题 ${Math.round(slow.avg_seconds / 6) / 10} 分钟，用时最长。` : "",
-      empty: "完成带用时记录的卷子后显示", emptyHint: "答题时会记录每题停留的时间，交卷后汇总到这里。",
+      title: "各题型平均每题用时", hideTitle: true, unit: "每题", items, format: (v) => mmss(v),
+      conclusion: !t.by_type.length ? "" : over
+        ? `${TYPE[over.question_type]}平均每题 ${mmss(over.avg_seconds)}，超出按分值分配的建议用时（${mmss(over.suggested_seconds)}），可以适当压缩。`
+        : "各题型都在按分值分配的建议用时内。",
+      empty: "做完首套后显示每题用时", 
     });
   }
   function reviews(card, r) {
@@ -324,22 +391,19 @@
     if (!facets) {
       facets = data.facets;
       drawFilters();
-      overviewCharts(data.facets);
     }
     $("mistake-count").textContent = `共 ${data.total} 道`;
     const list = $("mistake-list");
     if (!append) list.replaceChildren();
     data.items.forEach((item) => {
       const li = el("li", undefined, list);
-      el("span", item.stem || "（题干不可用）", li);
-      const meta = el("div", undefined, li, "mistake-meta");
-      el("span", SHORT[item.subject], meta);
-      el("span", TYPE[item.question_type], meta);
-      if (item.chapter) el("span", item.chapter, meta);
-      el("span", `−${item.max_points - item.points} 分`, meta, "lost");
-      el("span", dateLabel(item.date), meta);
+      const top = el("div", undefined, li, "mistake-top");
+      el("span", [SHORT[item.subject], TYPE[item.question_type], item.chapter].filter(Boolean).join(" · "), top);
+      el("span", `错 ${item.wrong_times} 次`, top, "times" + (item.wrong_times >= 2 ? " hot" : ""));
+      el("span", item.stem || "（题干不可用）", li, "mistake-stem");
     });
     $("mistake-empty").hidden = data.total > 0;
+    $("mistake-empty").querySelector("span").textContent = facets && (facets.subject.length || 0) ? "没有符合条件的错题" : "还没有错题，判分后失分的题会出现在这里";
     filter.offset += data.items.length;
     $("mistake-more").hidden = filter.offset >= data.total;
     $("chapter-practice").hidden = !(filter.subject && filter.chapter);
@@ -375,27 +439,34 @@
     });
     select.value = filter.chapter;
   }
-  function overviewCharts(f) {
-    const max = Math.max(1, ...f.question_type.map((x) => x.count));
-    const total = f.question_type.reduce((s, x) => s + x.count, 0);
-    const top = [...f.question_type].sort((a, b) => b.count - a.count)[0];
-    C.hbars($("mistake-type-chart"), {
-      title: "各题型错题数", unit: "道",
-      items: f.question_type.map((x) => ({ label: TYPE[x.value], value: x.count, max, color: C.COLORS.biochemistry })),
-      format: (v) => v + " 道",
-      conclusion: top ? `共 ${total} 道错题，${TYPE[top.value]}最多（${top.count} 道）。` : "",
-      empty: "还没有错题", emptyHint: "完成并判分一套卷子后，失分的题会出现在这里。",
+  /* The key card: how many reviews are due today, and the next 7 days as tiny bars. */
+  async function loadDue() {
+    let o;
+    try {
+      o = await read("/v2/stats/overview");
+    } catch {
+      return;
+    }
+    const n = o.reviews.due_now;
+    $("due-number").textContent = String(n);
+    $("due-number").classList.toggle("zero", n === 0);
+    const memory = $("memory");
+    memory.disabled = n === 0;
+    memory.setAttribute("aria-disabled", String(n === 0));
+    memory.textContent = n ? `开始复习 ${n} 道` : "今日没有到期复习";
+    const box = $("due-mini");
+    box.replaceChildren();
+    const days = o.reviews.next_7_days;
+    const top = Math.max(1, ...days.map((d) => d.count));
+    days.forEach((d, i) => {
+      const bar = el("i", undefined, box, i === 0 ? "today" : "");
+      bar.style.height = Math.max(4, Math.round((d.count / top) * 40)) + "px";
+      bar.title = `${i === 0 ? "今天" : dateLabel(d.day)}：${d.count} 道`;
     });
-    read("/v2/stats/profile").then((p) => {
-      const next = p.reviews.next_7_days, sum = next.reduce((s, x) => s + x.count, 0);
-      C.columns($("due-chart"), {
-        title: "未来 7 天到期分布", unit: "道",
-        items: next.map((x, i) => ({ label: i === 0 ? "今天" : dateLabel(x.day), value: x.count, color: i === 0 ? C.COLORS.cell_biology : C.COLORS.biochemistry })),
-        conclusion: sum ? `未来 7 天共 ${sum} 道到期，今天 ${next[0].count} 道。` : "",
-        empty: "还没有复习卡片", emptyHint: "答错的题会自动进入复习安排。",
-      });
-    }).catch(() => {});
+    box.setAttribute("aria-label", "未来 7 天每天到期：" + days.map((d, i) => `${i === 0 ? "今天" : dateLabel(d.day)} ${d.count} 道`).join("，"));
+    $("due-note").textContent = days.reduce((s2, d) => s2 + d.count, 0) ? "右侧为未来 7 天每天到期数" : "答错的题会自动进入复习安排";
   }
+  const overviewCharts = () => {};
   $("filter-chapter").onchange = (event) => {
     const option = event.target.selectedOptions[0];
     filter.chapter = event.target.value;
@@ -506,47 +577,73 @@
   $("weak-practice").onclick = () => startPractice({ mode: "weak", size: 10 });
 
   /* ---------------- result extras ---------------- */
-  async function resultExtras(data, root) {
+  async function resultExtras(data, { key, types }) {
     const counted = data.answers.filter((a) => !a.excluded && a.points !== null);
-    const sums = (list) => list.reduce((s, a) => [s[0] + a.points, s[1] + a.max_points], [0, 0]);
-    const split = el("div", undefined, root, "score-split");
+    const sums = (list) => list.reduce((s2, a) => [s2[0] + a.points, s2[1] + a.max_points], [0, 0]);
+    // key card: the total (never a guess while grading is running), the comparison, one card per subject
+    const line = el("div", undefined, key, "total-line");
+    const total = el("div", undefined, line);
+    el("span", "总分", total, "stat-label");
+    const big = el("p", undefined, total, "total-score");
+    big.append(data.score === null ? String(data.graded_points) : String(data.score));
+    el("small", data.score === null ? `/ ${data.max_points}（判分中）` : `/ ${data.max_points}`, big);
+    const compare = el("div", undefined, line, "compare");
+    const split = el("div", undefined, key, "score-split");
     Object.keys(SUBJECT).forEach((subject) => {
-      const s = data.subject_scores?.[subject];
+      const s2 = data.subject_scores?.[subject];
       const box = el("div", undefined, split, subject === "biochemistry" ? "bio" : "cell");
       el("span", SUBJECT[subject], box);
-      el("strong", s ? String(s.score === null ? s.graded_points : s.score) : "—", box);
-      el("span", s ? (s.score === null ? `已得分 · 判分中（满分 ${s.max_points}）` : `满分 ${s.max_points} 分`) : "", box, "sub");
+      const value = el("strong", s2 ? String(s2.score === null ? s2.graded_points : s2.score) : "—", box);
+      if (s2) el("small", ` / ${s2.max_points}`, value);
+      const bar = el("div", undefined, box, "thin-bar");
+      const fill = el("i", undefined, bar);
+      fill.style.width = s2 && s2.max_points ? Math.min(100, ((s2.score === null ? s2.graded_points : s2.score) / s2.max_points) * 100) + "%" : "0%";
+      fill.style.background = COLOR[subject];
     });
+    const status = el("p", undefined, key, "overtime-note ok");
+    // types card: grouped two-colour bars, subject legend, one conclusion
     const rows = TYPES.filter((t) => counted.some((a) => a.question_type === t)).map((t) => {
-      const [p, m] = sums(counted.filter((a) => a.question_type === t));
-      return { label: TYPE[t], value: m ? p / m : null, valueText: `${p}/${m} · ${pct(m ? p / m : null)}`, max: 1, color: C.COLORS.biochemistry };
+      const sub = Object.keys(SUBJECT).map((subject) => {
+        const [p, m] = sums(counted.filter((a) => a.question_type === t && a.subject === subject));
+        return { name: SHORT[subject], color: COLOR[subject], value: m ? p / m : null };
+      });
+      return { label: TYPE[t], sub, value: null, valueText: sub.map((x) => `${x.name} ${pct(x.value)}`).join(" · "), max: 1 };
     });
-    const typeBox = el("div", undefined, root);
-    const worst = [...rows].filter((r) => r.value !== null).sort((a, b) => a.value - b.value)[0];
+    const lowest = rows.flatMap((r) => r.sub.filter((x) => x.value !== null).map((x) => ({ label: r.label, ...x }))).sort((a, b) => a.value - b.value)[0];
+    const typeBox = el("div", undefined, types);
     C.hbars(typeBox, {
-      title: "题型得分率", unit: "本卷", items: rows, format: pct,
-      conclusion: worst ? `本卷${worst.label}得分率最低（${pct(worst.value)}）。` : "",
-      empty: "判分完成后显示", emptyHint: "已判分的题按题型汇总。",
+      title: "各题型得分率", unit: "本卷", items: rows, format: pct,
+      conclusion: lowest ? `${lowest.label}得分率最低：${lowest.name} ${pct(lowest.value)}。` : "",
+      empty: "判分完成后显示各题型得分率",
     });
-    const compare = el("p", undefined, root, "compare");
-    const timingBox = el("p", undefined, root, "overtime-note");
+    if (rows.length) {
+      const legend = el("div", undefined, typeBox, "chart-legend");
+      Object.keys(SUBJECT).forEach((subject) => {
+        const item = el("span", undefined, legend);
+        el("i", undefined, item).style.background = COLOR[subject];
+        item.append(SUBJECT[subject]);
+      });
+    }
     try {
       const [profile, timing] = await Promise.all([read("/v2/stats/profile"), read(`/v2/papers/${data.paper_id}/timing`)]);
       const own = profile.trend.find((r) => r.paper_id === data.paper_id);
       const before = profile.trend.filter((r) => r.paper_id !== data.paper_id && (!own || r.date <= own.date)).slice(-7);
       if (own && before.length) {
-        const avg = before.reduce((s, r) => s + r.rate, 0) / before.length;
+        const avg = before.reduce((s2, r) => s2 + r.rate, 0) / before.length;
         const diff = (own.rate - avg) * 100;
-        compare.textContent = "";
-        el("span", `与此前 ${before.length} 套平均（${pct(avg)}）相比：`, compare);
-        el("span", `${sign(diff)} 个百分点`, compare, "delta " + (diff >= 0 ? "up" : "down"));
-      } else if (own) compare.textContent = "这是第一套已判分的卷子，之后会和近 7 套平均对比。";
-      else compare.textContent = "判分完成后，会和近 7 套平均对比。";
+        compare.append(`比近 ${before.length} 次平均`);
+        el("span", `${sign(diff)}`, compare, "delta " + (diff >= 0 ? "up" : "down"));
+      } else compare.textContent = own ? "第一套已判分的卷子" : "判分完成后对比近 7 次";
       const over = timing.types.filter((t) => t.over);
-      timingBox.textContent = !timing.recorded ? "这一套没有记录到每题用时。" : over.length ? "用时偏长：" + over.map((t) => `${TYPE[t.question_type]}（${Math.round(t.seconds / 60)} 分钟，按分值约 ${Math.round(t.budget_seconds / 60)} 分钟）`).join("；") + "。" : "各题型用时都在按分值分配的时间内。";
-      timingBox.className = "overtime-note" + (over.length ? "" : " ok");
+      const spent = profile.timing.papers.find((p) => p.paper_id === data.paper_id);
+      const parts = [];
+      if (spent) parts.push(`用时 ${Math.floor(spent.seconds / 60)} 分 ${spent.seconds % 60} 秒`);
+      parts.push(data.pending ? `${data.pending} 题待判分` : "全部已判分");
+      if (over.length) parts.push("用时偏长：" + over.map((t) => `${TYPE[t.question_type]}（${Math.round(t.seconds / 60)} 分钟，按分值约 ${Math.round(t.budget_seconds / 60)} 分钟）`).join("；"));
+      status.textContent = parts.join(" · ");
+      if (over.length) status.className = "overtime-note";
     } catch {
-      compare.textContent = "";
+      status.textContent = data.pending ? `${data.pending} 题待判分` : "全部已判分";
     }
   }
 
@@ -569,8 +666,9 @@
     if (view === "mistakes") {
       facets = null;
       loadMistakes();
+      loadDue();
     }
   }
 
-  window.Insights = { loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
+  window.Insights = { applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
 })();

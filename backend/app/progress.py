@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app import cost_control
+from app import cny_billing, cost_control
 from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count
 from app.training_spec_v4 import COUNTS, SUBJECTS
 
@@ -288,7 +288,7 @@ def report(conn, uid):
             "writing_review_limit_cny", "remaining_writing_review_cny", "remaining_grading_cny",
             "writing_review_exhausted", "ai_quota_exhausted", "message", "admitted_questions",
             "cost_per_admitted_question_cny",
-        )} | dict(daily=daily_spend(conn, uid)),
+        )} | dict(daily=daily_spend(conn, uid), remaining_daily_cny=cny_billing.summary(conn, uid)["remaining_daily_cny"]),
         period=cost_control.peak_outlook(now),
         worker=worker_status(conn, now),
         next_paper=next_paper(conn, rows, now),

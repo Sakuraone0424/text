@@ -206,6 +206,7 @@
         : "请先准备试卷，再确认开始计时。";
     document.querySelector("[data-prepare-proxy]").hidden = !!latest.paper;
     byId("result").hidden = timing?.status !== "submitted";
+    byId("result-bar").hidden = timing?.status !== "submitted";
     byId("questions").hidden = !active();
     byId("questions").inert = !active() || !!latest.expired;
     byId("submit").disabled = !!latest.expired || !!latest.serverPending;
@@ -249,7 +250,9 @@
       ),
     );
     if (view === "exam") showView("exam");
+    window.Insights?.applyLock?.(); // a short bank keeps the start button grey until a paper exists
   }
+  window.__hasPaper = () => !!latest.paper;
   function rendered(next) {
     state(next);
   }
@@ -285,159 +288,70 @@
     document.body.classList.remove("focus-mode");
     byId("focus-actions").hidden = true;
     byId("exam-intro").hidden = true;
-    const summary = make("div", undefined, undefined, "result-analytics"),
-      grade = make("section", undefined, summary, "card grade-card");
-    const graded = data.answers.filter((a) => a.points !== null || a.excluded).length;
-    const ns = "http://www.w3.org/2000/svg",
-      ring = document.createElementNS(ns, "svg");
-    ring.setAttribute("viewBox", "0 0 100 100");
-    ring.classList.add("grade-ring");
-    ring.setAttribute("role", "img");
-    ring.setAttribute(
-      "aria-label",
-      `已判分${graded}/${data.answers.length}题，待判分${data.pending}题`,
-    );
-    const total = document.createElementNS(ns, "circle"),
-      done = document.createElementNS(ns, "circle");
-    [total, done].forEach((circle) => {
-      Object.entries({
-        cx: 50,
-        cy: 50,
-        r: 40,
-        fill: "none",
-        "stroke-width": 6,
-      }).forEach(([k, v]) => circle.setAttribute(k, v));
-      ring.append(circle);
-    });
-    total.setAttribute("stroke", "#edf1f5");
-    done.setAttribute("stroke", "#2563eb");
-    done.setAttribute("stroke-dasharray", `${(graded / data.answers.length) * 251.3} 251.3`);
-    done.setAttribute("transform", "rotate(-90 50 50)");
-    const text = document.createElementNS(ns, "text");
-    text.setAttribute("x", "50");
-    text.setAttribute("y", "49");
-    text.setAttribute("text-anchor", "middle");
-    text.textContent = `${graded}/${data.answers.length}`;
-    ring.append(text);
-    const caption = document.createElementNS(ns, "text");
-    caption.setAttribute("x", "50");
-    caption.setAttribute("y", "64");
-    caption.setAttribute("text-anchor", "middle");
-    caption.classList.add("small-text");
-    caption.textContent = "已判分题目";
-    ring.append(caption);
-    grade.append(ring);
-    const info = make("div", undefined, grade);
-    make("span", data.pending ? "判分中" : "判分完成", info, "pill blue-pill");
-    make(
-      "div",
-      data.score === null
-        ? `${data.pending}题待判分`
-        : `${data.score} / ${data.max_points}分`,
-      info,
-      "grade-title",
-    );
-    make(
-      "p",
-      data.score === null
-        ? `已评分得分 ${data.graded_points}；完整总分尚未确定。`
-        : "本卷所有题目均已判分。",
-      info,
-      "grade-caption",
-    );
-    const extras = make("section", undefined, summary, "card data-card");
-    make("h2", "成绩分析", extras);
-    void window.Insights?.resultExtras(data, extras);
-    const coverage = make("section", undefined, summary, "card");
-    make("h2", "知识章节分布", coverage);
-    const chapters = new Map();
-    data.answers.forEach((answer) => {
-      new Set(answer.evidence.map((e) => e.chapter).filter(Boolean)).forEach(
-        (chapter) => chapters.set(chapter, (chapters.get(chapter) || 0) + 1),
-      );
-    });
-    Array.from(chapters)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .forEach(([chapter, count]) => {
-        const row = make("div", undefined, coverage, "subject-row"),
-          heading = make("div", undefined, row, "subject-label");
-        make("span", chapter, heading);
-        make("span", `${count}题涉及`, heading);
-        const track = make("div", undefined, row, "data-track"),
-          fill = make("div", undefined, track, "data-fill");
-        fill.style.width = `${(count / data.answers.length) * 100}%`;
+    byId("result-bar").hidden = false;
+    const day = latest.paper?.date ? new Date(latest.paper.date + "T00:00:00") : null;
+    byId("result-title").textContent = day ? `${day.getMonth() + 1} 月 ${day.getDate()} 日训练卷` : "训练卷成绩";
+    const summary = make("div", undefined, undefined, "result-analytics");
+    const key = make("section", undefined, summary, "card key-card result-key");
+    const types = make("section", undefined, summary, "card data-card");
+    const pending = data.pending;
+    if (pending) {
+      // Grading is still running: say how far it is (never a made-up total).
+      const graded = data.answers.filter((a) => a.points !== null || a.excluded).length;
+      const progress = make("section", undefined, summary, "card grade-card");
+      progress.setAttribute("role", "group");
+      progress.setAttribute("aria-label", `已判分${graded}/${data.answers.length}题，待判分${pending}题`);
+      const info = make("div", undefined, progress);
+      make("span", "判分中", info, "pill blue-pill");
+      make("div", `${pending}题待判分`, info, "grade-title");
+      make("p", `已判分 ${graded}/${data.answers.length} 题，已得 ${data.graded_points} 分；完整总分尚未确定。`, info, "grade-caption");
+    }
+    void window.Insights?.resultExtras(data, { key, types });
+    // the per-question details, in one card with an "only the lost ones" switch
+    const detail = make("section", undefined, undefined, "card detail-card");
+    const head = make("div", undefined, detail, "card-heading");
+    make("h2", "逐题详情", head);
+    const toggle = make("div", undefined, head, "detail-toggle");
+    toggle.setAttribute("role", "group");
+    toggle.setAttribute("aria-label", "逐题详情筛选");
+    const holder = make("div", undefined, detail, "detail-list");
+    const modes = [["all", "全部"], ["lost", "只看失分题"]];
+    const apply = (mode) => {
+      toggle.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === mode)));
+      holder.querySelectorAll(":scope > article").forEach((article) => {
+        const answer = data.answers[Number(article.dataset.index)];
+        article.hidden = mode === "lost" && !(answer && !answer.excluded && (answer.points === null || answer.points < answer.max_points));
       });
-    make(
-      "p",
-      "按每题引用的章节去重计数；一题可覆盖多个章节。这是本卷覆盖分布，不是掌握率。",
-      coverage,
-      "card-footnote",
-    );
-    const reflection = make("section", undefined, summary, "card");
-    make("h2", "错题与复盘", reflection);
-    const isAnswered = (answer) => {
-      try {
-        return answered(JSON.parse(answer.answer));
-      } catch {
-        return !!answer.answer?.trim();
-      }
     };
-    const wrong = data.answers.filter(
-      (a) => a.points !== null && a.points < a.max_points && isAnswered(a),
-    );
-    const blank = data.answers.filter((a) => !isAnswered(a)).length;
-    make("div", `${wrong.length}道已作答失分题`, reflection, "grade-title");
-    make(
-      "p",
-      `另有${blank}道未答题、${data.pending}道待判分题，未混入已作答错题。`,
-      reflection,
-      "grade-caption",
-    );
-    make(
-      "p",
-      "暂无可汇总的错因分类；请在具体题目中记录真实复盘原因，不从分数推测错因。",
-      reflection,
-      "card-footnote",
-    );
-    const review = make(
-      "button",
-      "查看实际FSRS复习安排 →",
-      reflection,
-      "text-button",
-    );
-    review.onclick = () => byId("memory").click();
+    modes.forEach(([mode, label]) => {
+      const button = make("button", label, toggle);
+      button.type = "button";
+      button.dataset.mode = mode;
+      button.onclick = () => apply(mode);
+    });
     byId("result").prepend(summary);
     byId("result")
       .querySelectorAll(":scope > article")
       .forEach((article, index) => {
         const answer = data.answers[index];
-        if (!answer) return;
-        const details = make("details"),
-          title = make(
-            "summary",
-            undefined,
-            details,
-            "result-question-summary",
+        article.dataset.index = String(index);
+        if (answer) {
+          const details = make("details"),
+            title = make("summary", undefined, details, "result-question-summary");
+          make("span", `第${index + 1}题 · ${labels[answer.subject]} · ${typeNames[answer.question_type] || ""}`, title);
+          make(
+            "span",
+            answer.excluded ? "已反馈 · 不计分" : answer.points === null ? "待判分" : `${answer.points}/${answer.max_points}分`,
+            title,
           );
-        make(
-          "span",
-          `第${index + 1}题 · ${labels[answer.subject]} · 查看作答与解析`,
-          title,
-        );
-        make(
-          "span",
-          answer.excluded
-            ? "已反馈 · 不计分"
-            : answer.points === null
-              ? "待判分"
-              : `${answer.points}/${answer.max_points}分`,
-          title,
-        );
-        const body = make("div", undefined, details);
-        while (article.firstChild) body.append(article.firstChild);
-        article.append(details);
+          const body = make("div", undefined, details);
+          while (article.firstChild) body.append(article.firstChild);
+          article.append(details);
+        }
+        holder.append(article);
       });
+    summary.after(detail);
+    apply("all");
     lastLoad = 0;
     if (account) signedIn(account);
   }
@@ -546,6 +460,17 @@
       ),
     ),
   );
+  // Messages appear as a short toast at the top, not as a permanent status line on the page.
+  const statusEl = byId("status");
+  let statusTimer = 0;
+  new MutationObserver(() => {
+    if (!statusEl.textContent.trim()) return statusEl.classList.remove("show");
+    statusEl.classList.add("show");
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => statusEl.classList.remove("show"), 5000);
+  }).observe(statusEl, { childList: true, characterData: true, subtree: true });
+  byId("result-back").onclick = () => showView("home");
+  byId("stats-back").onclick = () => showView("profile");
   byId("leave-focus").onclick = () => {
     showView("home");
     byId("status").textContent = "已返回概览，考试计时仍在继续。";

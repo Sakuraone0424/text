@@ -134,10 +134,15 @@ def due_reviews(conn, uid, today):
 
 
 def tomorrow_ready(conn, uid):
+    """Is there a whole paper's worth of approved questions in the bank, and when will there be?"""
     from app import progress
 
     buckets = progress.buckets(conn, uid)
-    return dict(ready=sum(min(b["stocked"], b["required"]) for b in buckets), needed=sum(b["required"] for b in buckets))
+    ready = sum(min(b["stocked"], b["required"]) for b in buckets)
+    needed = sum(b["required"] for b in buckets)
+    paper = progress.next_paper(conn, buckets, conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"])
+    return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed,
+                eta_at=paper["eta_at"], per_hour=paper["per_hour"])
 
 
 def overview(conn, uid):
@@ -253,7 +258,11 @@ def timing(conn, uid, rows):
         if r["seconds"]:
             per[r["qtype"]][0] += r["seconds"]
             per[r["qtype"]][1] += 1
-    by_type = [dict(question_type=t, avg_seconds=round(per[t][0] / per[t][1]), questions=per[t][1]) for t in TYPES if per[t][1]]
+    from app.training_spec_v4 import POINTS, TOTAL_POINTS
+
+    # The hour is split by points: a question's suggested time is 3600 s x its points / the paper's total points.
+    by_type = [dict(question_type=t, avg_seconds=round(per[t][0] / per[t][1]), questions=per[t][1],
+                    suggested_seconds=round(3600 * POINTS[t] / TOTAL_POINTS)) for t in TYPES if per[t][1]]
     # Types where the learner spends clearly more than their share of the hour (share of points x 3600 s).
     return dict(papers=durations, by_type=by_type, recorded_questions=sum(v[1] for v in per.values()))
 
@@ -289,7 +298,22 @@ def overtime_types(conn, uid, paper_id):
 
 def mistakes(conn, uid, subject=None, question_type=None, chapter=None, limit=50, offset=0):
     """Wrong or partly wrong graded answers (reported ones excluded), newest first, with filter counts."""
-    rows = [r for r in graded_rows(conn, uid) if r["points"] is not None and r["points"] < r["max_points"]]
+    wrong = [r for r in graded_rows(conn, uid) if r["points"] is not None and r["points"] < r["max_points"]]
+    # one entry per question, with how many times it was missed (papers and practice together)
+    by_question = {}
+    for r in wrong:
+        entry = by_question.setdefault(r["question_id"], dict(r, wrong_times=0))
+        entry["wrong_times"] += 1
+        if (r["submitted_at"], r["paper_id"]) >= (entry["submitted_at"], entry["paper_id"]):
+            entry.update({k: r[k] for k in ("submitted_at", "paper_id", "paper_date", "points", "max_points")})
+    for r in practice_rows(conn, uid):
+        if r["points"] < r["max_points"] and r["question_id"] in by_question:
+            by_question[r["question_id"]]["wrong_times"] += 1
+        elif r["points"] < r["max_points"]:
+            by_question[r["question_id"]] = dict(
+                paper_id=None, paper_date=r["answered_at"].astimezone(SHANGHAI).date(), submitted_at=r["answered_at"], subject=r["subject"],
+                qtype=r["qtype"], chapter=r["chapter"], points=r["points"], max_points=r["max_points"], question_id=r["question_id"], wrong_times=1)
+    rows = list(by_question.values())
     facets = dict(subject=defaultdict(int), question_type=defaultdict(int), chapter=defaultdict(int))
     for r in rows:
         facets["subject"][r["subject"]] += 1
@@ -307,7 +331,7 @@ def mistakes(conn, uid, subject=None, question_type=None, chapter=None, limit=50
         total=len(chosen),
         items=[dict(question_id=r["question_id"], paper_id=r["paper_id"], date=r["paper_date"].isoformat(), subject=r["subject"],
                     question_type=r["qtype"], chapter=r["chapter"], points=r["points"], max_points=r["max_points"],
-                    stem=(stems.get(r["question_id"], {}).get("stem") or "")[:200]) for r in page],
+                    wrong_times=r["wrong_times"], stem=(stems.get(r["question_id"], {}).get("stem") or "")[:200]) for r in page],
         facets=dict(
             subject=[dict(value=k, count=v) for k, v in sorted(facets["subject"].items())],
             question_type=[dict(value=k, count=v) for k, v in sorted(facets["question_type"].items(), key=lambda kv: TYPES.index(kv[0]) if kv[0] in TYPES else 9)],

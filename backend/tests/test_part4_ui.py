@@ -72,14 +72,14 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     expect(page.locator("#weak-practice")).to_be_visible()
     expect(page.locator("#spec-summary")).to_contain_text("300 分")
     expect(page.locator("nav.primary-nav button")).to_have_text(["首页", "练习", "错题", "我的"])
-    assert page.locator(".sidebar").bounding_box()["height"] >= 64
+    assert page.locator(".sidebar").bounding_box()["height"] >= 56  # 56 + the bottom safe area
     assert page.locator("#prepare").bounding_box()["height"] >= 48
     no_overflow(page)
     shot(page, "part4-home.png")
     # ---- my learning data
     page.locator('nav.primary-nav [data-view="profile"]').click()
-    expect(page.locator("#profile-data .data-card")).to_have_count(7)
-    expect(page.locator("#profile-data")).to_contain_text("累计完成卷数")
+    expect(page.locator("#profile-data > section")).to_have_count(7)
+    expect(page.locator("#profile-data")).to_contain_text("完成卷数")
     expect(page.locator("#profile-data .chart-svg")).not_to_have_count(0)
     expect(page.locator("#profile-data .heat-cell")).to_have_count(56)
     expect(page.locator("#profile-data")).not_to_contain_text("即将推出")
@@ -103,7 +103,7 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     expect(page.locator("#mistake-count")).not_to_have_text(total)
     page.locator("#filter-type button", has_text="全部").click()
     page.locator("#filter-subject button", has_text="细胞").click()
-    expect(page.locator("#mistake-list li .mistake-meta span").first).to_be_visible()
+    expect(page.locator("#mistake-list li .mistake-top .times").first).to_be_visible()
     page.wait_for_function("() => { const l = [...document.querySelectorAll('#mistake-list li')]; return l.length > 0 && l.every((i) => i.textContent.includes('细胞')); }")
     assert not errors, errors
     no_overflow(page)

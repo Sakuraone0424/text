@@ -95,7 +95,7 @@ def test_reported_questions_are_excluded_everywhere(db, uid):
     made = paper(db, uid, t, [item(chapter="X章", got=0), item(chapter="X章", got=4)], when=at(t))
     db.execute("INSERT INTO question_reports(user_id,paper_id,question_id,reason) VALUES (%s,%s,%s,'x')",
                (uid, made["paper_id"], made["question_ids"][0])) if False else None
-    cols = [r["column_name"] for r in db.execute("SELECT column_name FROM information_schema.columns WHERE table_name='question_reports'").fetchall()]
+    cols = [r["column_name"] for r in db.execute("SELECT column_name FROM information_schema.columns WHERE table_name='question_reports' AND table_schema=current_schema()").fetchall()]
     values = {"user_id": uid, "paper_id": made["paper_id"], "question_id": made["question_ids"][0]}
     for c in cols:
         values.setdefault(c, "x" if c in ("reason", "note", "kind", "category") else None)

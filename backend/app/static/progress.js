@@ -83,48 +83,61 @@ function duration(hours) {
 
 function paper(report) {
   const p = report.next_paper;
+  const main = $("paper-main"), note = $("paper-note");
+  main.className = "";
   if (p.complete) {
-    $("paper-main").textContent = "题库已经够一张完整卷子";
-    $("paper-note").textContent = "每个科目 × 题型的已入库题数都达到整卷所需。";
+    main.textContent = "已经够了";
+    note.textContent = "每个科目 × 题型的已入库题数都达到整卷所需。";
   } else if (p.eta_hours !== null) {
-    $("paper-main").textContent = "还差 " + p.missing_questions + " 题，预计 " + duration(p.eta_hours);
-    $("paper-note").textContent =
-      "按最近 " + p.approved_last_hours + " 小时入库 " + p.approved_in_window + " 题（约每小时 " + p.per_hour + " 题）估算，实际受低峰时段和审核通过率影响。";
+    main.textContent = "还差 " + p.missing_questions + " 题";
+    note.textContent = "预计" + duration(p.eta_hours) + "。按最近 " + p.approved_last_hours + " 小时入库 " + p.approved_in_window + " 题估算，实际受低峰时段和审核通过率影响。";
   } else {
-    $("paper-main").textContent = "还差 " + p.missing_questions + " 题，暂时无法估算时间";
-    $("paper-note").textContent = "最近 " + p.approved_last_hours + " 小时没有新题入库，没有足够记录可估算。";
+    main.textContent = "还差 " + p.missing_questions + " 题";
+    note.textContent = "最近 " + p.approved_last_hours + " 小时没有新题入库，暂时无法估算时间。";
   }
 }
 
 function status(report) {
   const period = report.period;
-  $("period").textContent = period.is_peak
-    ? "高峰 · 出题暂缓，" + fmtTime(period.next_off_peak_at) + " 起低峰"
-    : "低峰 · 可出题，下个高峰 " + fmtTime(period.next_peak_at);
+  $("period").textContent = period.is_peak ? "高峰·暂缓" : "低峰·出题中";
+  $("period").title = period.is_peak ? fmtTime(period.next_off_peak_at) + " 起低峰" : "下个高峰 " + fmtTime(period.next_peak_at);
   const w = report.worker;
   const note = $("worker-note");
-  note.className = "muted";
+  note.className = "note";
+  const cell = $("worker");
+  cell.className = "";
   if (!w.last_run_at) {
-    $("worker").textContent = "还没有运行记录";
+    cell.textContent = "没有记录";
+    cell.classList.add("warn");
     note.textContent = "出题程序（定时任务）还没有留下运行记录：请检查它是否已部署并启用。";
     note.classList.add("warn");
     return;
   }
+  cell.textContent = w.minutes_ago < 1 ? "刚刚运行" : w.minutes_ago + " 分钟前";
   const outcome = w.outcome === "ok" ? "正常" : w.outcome === "disabled" ? "未启用" : "出错（" + w.outcome.replace("error:", "") + "）";
-  $("worker").textContent = fmtTime(w.last_run_at) + " · " + outcome;
-  const parts = ["调用 " + w.calls + " 次", "费用 " + yuan(w.cost_cny)];
+  const parts = ["上次 " + fmtTime(w.last_run_at) + " · " + outcome, "调用 " + w.calls + " 次", "费用 " + yuan(w.cost_cny)];
   if (w.stopped_because) parts.push("停止原因：" + reasonText(w.stopped_because));
-  note.textContent = parts.join(" · ") + (w.stale ? "。已超过 " + w.minutes_ago + " 分钟没有运行（正常每 5 分钟一次）。" : "。");
-  if (w.stale || w.outcome !== "ok") note.classList.add("warn");
+  note.textContent = parts.join(" · ") + (w.stale ? "。已超过 15 分钟没有运行（正常每 5 分钟一次）。" : "。");
+  if (w.stale || w.outcome !== "ok") {
+    note.classList.add("warn");
+    cell.classList.add("warn");
+  }
 }
 
 function batch(report) {
   const t = report.totals;
-  const label = report.target_kind === "first_batch" ? "首批目标" : "两天储备";
-  C().progress($("batch-progress"), { label: `${label}已入库`, text: `${t.stocked} / ${t.target}`, value: t.stocked, max: t.target, color: t.stocked >= t.target ? "#15803D" : "#2563EB" });
-  $("admitted-today").textContent = t.admitted_today + " 道";
+  const first = report.target_kind === "first_batch";
+  $("h-batch").textContent = (first ? "首批目标" : "两天储备") + "已入库";
+  $("batch-number").textContent = t.stocked;
+  $("batch-target").textContent = " / " + t.target;
+  $("batch-number").parentElement.classList.toggle("done", t.stocked >= t.target);
+  C().progress($("batch-progress"), { label: "已入库", text: `${t.stocked} / ${t.target}`, value: t.stocked, max: t.target, color: t.stocked >= t.target ? "#15803D" : "#2563EB" });
+  const today = $("admitted-today");
+  today.hidden = false;
+  today.textContent = "今日入库 " + t.admitted_today + " 道";
   const r = report.review_today;
-  $("review-rate").textContent = r.rate === null ? "今天还没有审核" : `${Math.round(r.rate * 100)}%（${r.passed}/${r.reviewed}）`;
+  $("review-rate").textContent = r.rate === null ? "—" : `${Math.round(r.rate * 100)}%`;
+  $("review-rate").title = r.rate === null ? "今天还没有审核" : `${r.passed}/${r.reviewed}`;
 }
 const C = () => window.Charts;
 
@@ -138,27 +151,45 @@ function reasonList(root, reasons) {
   });
 }
 
+let subject = "biochemistry";
+let lastReport = null;
+document.querySelectorAll("[data-subject]").forEach((button) => {
+  button.onclick = () => {
+    subject = button.dataset.subject;
+    if (lastReport) bank(lastReport);
+  };
+});
+
 function bank(report) {
+  lastReport = report;
+  document.querySelectorAll("[data-subject]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.subject === subject)));
   const root = $("bank");
   root.replaceChildren();
   const label = report.target_kind === "first_batch" ? "首批目标" : "两天储备";
-  for (const subject of Object.keys(SUBJECT)) {
-    el("p", SUBJECT[subject], root, "subject");
-    for (const b of report.buckets.filter((x) => x.subject === subject)) {
-      const row = el("div", undefined, root, "row");
+  for (const key of Object.keys(SUBJECT)) {
+    const group = el("div", undefined, root, "group");
+    group.hidden = key !== subject;
+    el("p", SUBJECT[key], group, "subject");
+    group.querySelector(".subject").hidden = true; // the segmented switch already names the subject
+    for (const b of report.buckets.filter((x) => x.subject === key)) {
+      const reached = b.stocked >= b.target;
+      const row = el("div", undefined, group, "row");
       const head = el("div", undefined, row, "head");
       el("span", TYPE[b.question_type], head, "name");
-      el("span", `${b.stocked} / ${b.target} ${label}`, head, "count");
-      const bar = el("div", undefined, row, "bar" + (b.stocked >= b.target ? " full" : ""));
+      const count = el("span", undefined, head, "count");
+      count.append(el("b", String(b.stocked)), ` / ${b.target} ${label}`);
+      if (reached) el("span", "已达" + label, count, "reached");
+      const bar = el("div", undefined, row, "bar" + (reached ? " full" : ""));
       bar.setAttribute("role", "img");
-      bar.setAttribute("aria-label", SUBJECT[subject] + TYPE[b.question_type] + "已入库 " + b.stocked + "，" + label + " " + b.target);
+      bar.setAttribute("aria-label", SUBJECT[key] + TYPE[b.question_type] + "已入库 " + b.stocked + "，" + label + " " + b.target);
       el("i", undefined, bar).style.width = Math.min(100, b.target ? (b.stocked / b.target) * 100 : 0) + "%";
-      const chips = el("div", undefined, row, "chips");
-      el("span", "今日入库 " + b.admitted_today, chips, "chip" + (b.admitted_today ? " good" : ""));
-      el("span", "排队中 " + b.queued, chips, "chip");
-      el("span", "出题中 " + b.generating, chips, "chip");
-      el("span", "审核中 " + b.reviewing, chips, "chip review");
-      el("span", "被挡住 " + b.blocked, chips, "chip" + (b.blocked ? " blocked" : ""));
+      const notes = el("p", undefined, row, "notes");
+      const bits = [`今日入库 ${b.admitted_today} 道`];
+      if (b.generating) bits.push(`出题中 ${b.generating}`);
+      if (b.reviewing) bits.push(`审核中 ${b.reviewing}`);
+      if (b.queued) bits.push(`排队 ${b.queued}`);
+      notes.append(bits.join(" · "));
+      if (b.blocked) el("span", ` · 被挡住 ${b.blocked}`, notes, "attn");
       if (Object.keys(b.blocked_reasons).length) reasonList(row, b.blocked_reasons);
     }
   }
@@ -179,11 +210,12 @@ function bank(report) {
 function spend(report) {
   const s = report.spend;
   $("spend-today").textContent = yuan(s.today_cny);
-  $("spend-month").textContent = yuan(s.month_cny) + "（计入上限 " + yuan(s.month_counted_cny) + " / " + yuan(s.month_cap_cny) + "）";
+  $("spend-month").textContent = yuan(s.month_counted_cny) + " / " + yuan(s.month_cap_cny);
+  $("spend-month").title = "本月已花 " + yuan(s.month_cny) + "，计入上限 " + yuan(s.month_counted_cny);
   const per = s.cost_per_admitted_question_cny.month;
-  $("spend-per").textContent = per
-    ? yuan(per) + "（本月入库 " + s.admitted_questions.month + " 题）"
-    : "本月还没有入库题目";
+  $("spend-per").textContent = per ? yuan(per) : "—";
+  $("spend-per").title = per ? "本月入库 " + s.admitted_questions.month + " 题" : "本月还没有入库题目";
+  $("spend-daily-left").textContent = s.remaining_daily_cny === null || s.remaining_daily_cny === undefined ? "未设上限" : yuan(s.remaining_daily_cny);
   $("spend-left").textContent = yuan(s.remaining_writing_review_cny);
   $("spend-grading").textContent = yuan(s.remaining_grading_cny);
   $("spend-note").textContent = s.message || "";
@@ -196,33 +228,46 @@ function spend(report) {
   });
   const cap = Number(s.month_cap_cny), stop = Number(s.writing_review_limit_cny);
   Charts.columns($("spend-chart"), {
-    title: "本月累计花费", unit: "元", items, max: Math.max(cap, running), format: (v) => "¥" + Math.round(v),
+    title: "本月累计花费", hideTitle: true, unit: "元", items, max: Math.max(cap, running), format: (v) => "¥" + Math.round(v),
     refLines: [{ value: stop, label: "出题停止线 ¥" + Math.round(stop), color: Charts.COLORS.cell_biology }, { value: cap, label: "上限 ¥" + Math.round(cap), color: "#B91C1C" }],
     conclusion: items.length ? `本月累计 ${yuan(running)}，距出题停止线还有 ${yuan(Math.max(0, stop - Number(s.month_counted_cny)))}。` : "",
     empty: "本月还没有花费", emptyHint: "出题、审核、判分产生费用后，每天一根柱子。",
   });
 }
 
+function jobTag(job) {
+  if (job.state === "running") return ["进行中", "running"];
+  if (job.state === "pending" || job.state === "retrying") return ["排队·第" + (job.attempts + 1) + "次", "pending"];
+  if (job.outcome && job.outcome.status === "ready") return ["通过，已入库", "succeeded"];
+  if (job.outcome && job.outcome.status === "blocked") return ["未通过", "blocked"];
+  if (job.awaiting_dispatch) return ["完成·待入库", "pending"];
+  if (job.state === "succeeded") return ["完成", "succeeded"];
+  if (job.state === "cancelled") return ["已取消", "pending"];
+  return [STATE[job.state] || job.state, job.state];
+}
+
 function jobs(report) {
   const root = $("jobs");
   root.replaceChildren();
   if (!report.recent_jobs.length) {
-    el("li", "还没有任务记录。", root);
+    el("li", "还没有任务记录", root, "empty");
     return;
   }
   for (const job of report.recent_jobs) {
     const li = el("li", undefined, root);
     const title = job.label || (KIND[job.kind] || job.kind) + (job.question_type ? " · " + (SUBJECT[job.subject] || "") + (TYPE[job.question_type] || "") : "");
     el("span", title, li, "kind");
-    const stateText = job.state === "retrying" && job.next_retry ? "重试 · " + fmtTime(job.next_retry) : job.awaiting_dispatch ? "完成 · 待入库处理" : STATE[job.state] || job.state;
-    el("span", stateText, li, "state " + job.state);
+    const [tagText, tagClass] = jobTag(job);
+    el("span", tagText, li, "state " + tagClass);
     const bits = [fmtTime(job.at)];
-    if (job.state === "pending" || job.state === "retrying") bits.push("已尝试 " + job.attempts + " 次");
-    if (job.outcome) bits.push(job.outcome.status === "ready" ? "通过，已入库" : job.outcome.status === "blocked" ? "未通过：" + reasonText(job.outcome.reason || "unspecified") : "题目状态：" + job.outcome.status);
+    if (job.state === "retrying" && job.next_retry) bits.push("下次重试 " + fmtTime(job.next_retry));
+    if (job.outcome && job.outcome.status === "blocked") bits.push(reasonText(job.outcome.reason || "unspecified"));
+    else if (job.outcome && job.outcome.status !== "ready") bits.push("题目状态：" + job.outcome.status);
     if (job.reason) bits.push(reasonText(job.reason));
     el("span", bits.join(" · "), li, "meta");
-    // Reason codes live only in the expandable details; the row itself says it in Chinese.
-    if (job.detail || job.reason || job.outcome?.reason) {
+    // Reason codes and the cancel button live only in the opened details; the row says it in Chinese.
+    const cancellable = ["pending", "retrying", "running"].includes(job.state);
+    if (job.detail || job.reason || job.outcome?.reason || cancellable) {
       const more = el("details", undefined, li, "meta detail");
       el("summary", "详情", more);
       if (job.detail) {
@@ -239,12 +284,12 @@ function jobs(report) {
         el("code", code, line);
       });
       el("p", `任务 ${job.id} · 已尝试 ${job.attempts} 次`, more, "reason-line");
-    }
-    if (["pending", "retrying", "running"].includes(job.state)) {
-      const button = el("button", "取消任务", li, "cancel");
-      button.type = "button";
-      button.setAttribute("aria-label", "取消任务 " + job.id);
-      button.onclick = () => cancelJob(job, button);
+      if (cancellable) {
+        const button = el("button", "取消任务", more, "cancel");
+        button.type = "button";
+        button.setAttribute("aria-label", "取消任务 " + job.id);
+        button.onclick = () => cancelJob(job, button);
+      }
     }
   }
 }

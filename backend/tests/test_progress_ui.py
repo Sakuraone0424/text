@@ -22,9 +22,14 @@ def test_the_page_asks_for_login_then_shows_ten_buckets_without_horizontal_scrol
     page.goto(base + "/progress")
     expect(page.locator("#content")).to_be_visible()
     expect(page.locator("#bank .row")).to_have_count(10)
-    expect(page.locator("#bank .subject")).to_have_text(["生物化学", "细胞生物学"])
+    expect(page.locator("#bank .row:visible")).to_have_count(5)  # one subject at a time
+    page.locator("[data-subject=cell_biology]").click()
+    expect(page.locator("#bank .row:visible")).to_have_count(5)
+    expect(page.locator("#bank .group:visible .name").first).to_have_text("单选")
     expect(page.locator("#paper-main")).to_contain_text("还差 60 题")
-    expect(page.locator("#worker")).to_contain_text("还没有运行记录")
+    expect(page.locator("#worker")).to_have_text("没有记录")
+    expect(page.locator("#worker-note")).to_contain_text("还没有留下运行记录")
+    expect(page.locator(".subbar h1")).to_have_text("出题进度")
     expect(page.locator("#period")).not_to_be_empty()
     expect(page.locator("#spend-month")).to_contain_text("¥")
     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
@@ -65,12 +70,12 @@ def test_history_is_folded_reasons_are_chinese_and_codes_hide_in_details(live_ap
     expect(page.locator("#legacy-list li")).to_have_count(2)
     expect(page.locator("#legacy-list code").first).to_have_text("OSError")
     # the current cell counts only the current-specification task, and its codes sit inside "查看原因"
-    term = page.locator("#bank .row", has_text="名词解释").first
+    term = page.locator("#bank .row", has_text="名词解释").first  # biochemistry is the default switch
     expect(term).to_contain_text("被挡住 1")
-    assert "output_schema_violation" not in term.locator(".chips").inner_text()
+    assert "output_schema_violation" not in term.locator(".notes").inner_text()
     expect(term.locator("details.reasons-detail")).to_have_count(1)
     expect(page.locator("#batch-progress")).to_contain_text("已入库")
-    expect(page.locator("#review-rate")).to_have_text("今天还没有审核")
+    expect(page.locator("#review-rate")).to_have_text("—")
     expect(page.locator("#bank .row .count").first).to_contain_text("两天储备")
     # a task row: Chinese inline, the code only inside 详情
     row = page.locator("#jobs li", has_text="出题 · 生化名词解释").first
