@@ -80,6 +80,14 @@
     const same = today === `${parts.month}/${parts.day}`;
     return (same ? "" : `${parts.month} 月 ${parts.day} 日 `) + `${parts.hour}:${parts.minute}`;
   };
+  /* Honest estimate: a clock time or "about N hours" from the real off-peak admission rate, else "estimating". */
+  function etaText(bank) {
+    if (bank.complete) return "题库已够一张卷子";
+    if (bank.eta_state === "slow") return "预计需要 2 天以上";
+    if (bank.eta_state !== "estimated" || !bank.eta_at) return "正在估算";
+    const hours = bank.eta_hours < 1 ? "不到 1 小时" : `约 ${Math.round(bank.eta_hours)} 小时`;
+    return `预计${hours}，${clock(bank.eta_at)} 前可开始`;
+  }
   /* While the bank is short and no paper is prepared the start button is grey and says why. */
   let lock = null;
   function applyLock() {
@@ -129,7 +137,7 @@
     $("bank-ready").textContent = String(bank.ready);
     $("bank-needed").textContent = String(bank.needed);
     $("bank-bar").style.width = Math.min(100, bank.needed ? (bank.ready / bank.needed) * 100 : 0) + "%";
-    $("bank-eta").textContent = bank.complete ? "题库已够一张卷子" : bank.eta_at ? `预计 ${clock(bank.eta_at)} 前可开始` : "暂时无法估算";
+    $("bank-eta").textContent = etaText(bank);
     lock = today.state === "none" ? bank : null;
     applyLock();
     const none = (id, value, noteId, empty, shown) => {
@@ -374,7 +382,8 @@
 
   /* ---------------- mistakes + practice ---------------- */
   const filter = { subject: "", question_type: "", chapter: "", offset: 0 };
-  let facets = null;
+  let facets = { subject: [], question_type: [], chapter: [] };
+  let facetsLoaded = false;
   async function loadMistakes(append = false) {
     if (!append) filter.offset = 0;
     const query = new URLSearchParams();
@@ -388,7 +397,8 @@
       $("mistake-count").textContent = error.message;
       return;
     }
-    if (!facets) {
+    if (!facetsLoaded) {
+      facetsLoaded = true;
       facets = data.facets;
       drawFilters();
     }
@@ -403,7 +413,7 @@
       el("span", item.stem || "（题干不可用）", li, "mistake-stem");
     });
     $("mistake-empty").hidden = data.total > 0;
-    $("mistake-empty").querySelector("span").textContent = facets && (facets.subject.length || 0) ? "没有符合条件的错题" : "还没有错题，判分后失分的题会出现在这里";
+    $("mistake-empty").querySelector("span").textContent = facetsLoaded && facets.subject.length ? "没有符合条件的错题" : "还没有错题，判分后失分的题会出现在这里";
     filter.offset += data.items.length;
     $("mistake-more").hidden = filter.offset >= data.total;
     $("chapter-practice").hidden = !(filter.subject && filter.chapter);
@@ -418,13 +428,16 @@
     });
   }
   function drawFilters() {
-    chips($("filter-subject"), facets.subject.map((f) => [f.value, `${SHORT[f.value]} ${f.count}`]), filter.subject, (v) => {
+    // The full set of choices is always shown, even with no mistakes yet; counts are added where there are any.
+    const count = (list, value) => list.find((f) => f.value === value)?.count;
+    const label = (name, n) => (n ? `${name} ${n}` : name);
+    chips($("filter-subject"), Object.keys(SHORT).map((v) => [v, label(SHORT[v], count(facets.subject, v))]), filter.subject, (v) => {
       filter.subject = v;
       filter.chapter = "";
       drawFilters();
       loadMistakes();
     });
-    chips($("filter-type"), facets.question_type.map((f) => [f.value, `${TYPE[f.value]} ${f.count}`]), filter.question_type, (v) => {
+    chips($("filter-type"), TYPES.map((v) => [v, label(TYPE[v], count(facets.question_type, v))]), filter.question_type, (v) => {
       filter.question_type = v;
       drawFilters();
       loadMistakes();
@@ -460,11 +473,12 @@
     const top = Math.max(1, ...days.map((d) => d.count));
     days.forEach((d, i) => {
       const bar = el("i", undefined, box, i === 0 ? "today" : "");
-      bar.style.height = Math.max(4, Math.round((d.count / top) * 40)) + "px";
+      // zero days draw nothing but the baseline (the container's bottom line); other days at least 4px tall
+      bar.style.height = d.count ? Math.max(4, Math.round((d.count / top) * 34)) + "px" : "0";
       bar.title = `${i === 0 ? "今天" : dateLabel(d.day)}：${d.count} 道`;
     });
     box.setAttribute("aria-label", "未来 7 天每天到期：" + days.map((d, i) => `${i === 0 ? "今天" : dateLabel(d.day)} ${d.count} 道`).join("，"));
-    $("due-note").textContent = days.reduce((s2, d) => s2 + d.count, 0) ? "右侧为未来 7 天每天到期数" : "答错的题会自动进入复习安排";
+    $("due-note").textContent = days.reduce((s2, d) => s2 + d.count, 0) ? "" : "答错的题会自动进入复习安排";
   }
   const overviewCharts = () => {};
   $("filter-chapter").onchange = (event) => {
@@ -476,6 +490,7 @@
   };
   $("mistake-more").onclick = () => loadMistakes(true);
   $("chapter-practice").onclick = () => chapterPractice(filter.subject, filter.chapter);
+  drawFilters(); // the full set of choices is there before (and without) any data
 
   /* short practice: objective questions only, checked at once, not part of the daily paper */
   async function startPractice(body) {

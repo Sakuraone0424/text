@@ -467,7 +467,7 @@
     if (!statusEl.textContent.trim()) return statusEl.classList.remove("show");
     statusEl.classList.add("show");
     clearTimeout(statusTimer);
-    statusTimer = setTimeout(() => statusEl.classList.remove("show"), 5000);
+    statusTimer = setTimeout(() => statusEl.classList.remove("show"), statusEl.textContent.trim() === "已登录" ? 2000 : 5000);
   }).observe(statusEl, { childList: true, characterData: true, subtree: true });
   byId("result-back").onclick = () => showView("home");
   byId("stats-back").onclick = () => showView("profile");

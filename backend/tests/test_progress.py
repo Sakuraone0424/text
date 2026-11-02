@@ -107,14 +107,51 @@ def test_the_peak_outlook_names_the_next_off_peak_start():
     assert cost_control.peak_outlook(saturday)["is_peak"] is False
 
 
-def test_the_eta_comes_from_recent_approvals(db, setup_ai, monkeypatch):
-    monkeypatch.setattr(progress, "approved_recently", lambda conn: 12)
+SUNDAY_EVENING = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)  # Sunday 20:00 Beijing; the 48 h before it are all off-peak
+
+
+def test_the_estimate_uses_the_off_peak_rate_and_only_the_coming_off_peak_hours():
+    # 12 approvals over 48 off-peak hours = 0.25 per off-peak hour; 6 missing = 24 off-peak hours.
+    # Sunday 20:00 -> Monday 09:00 (13 h) + 12:00-14:00 (2 h) + 18:00-03:00 (9 h) = Tuesday 03:00 Beijing.
+    state, eta_at, hours, rate = progress.estimate_ready(SUNDAY_EVENING, 6, 12)
+    assert (state, rate) == ("estimated", 0.25)
+    assert eta_at == datetime(2026, 11, 9, 19, 0, tzinfo=timezone.utc) and hours == 31.0
+
+
+def test_too_little_data_says_estimating_and_a_far_date_says_slow():
+    assert progress.estimate_ready(SUNDAY_EVENING, 6, 2)[0] == "estimating"   # two approvals are not a rate
+    assert progress.estimate_ready(SUNDAY_EVENING, 6, 0)[:3] == ("estimating", None, None)
+    state, eta_at, hours, _ = progress.estimate_ready(SUNDAY_EVENING, 60, 12)  # 240 off-peak hours away
+    assert state == "slow" and eta_at is None and hours is None               # never an absurd date like Nov 20
+    assert progress.estimate_ready(SUNDAY_EVENING, 0, 0)[0] == "complete"
+
+
+def test_a_window_with_almost_no_off_peak_time_is_not_an_estimate():
+    monday_noon = datetime(2026, 11, 2, 2, 0, tzinfo=timezone.utc)  # 10:00 Beijing, peak
+    # a 3-hour window that is all peak holds no off-peak time to measure a rate from
+    assert progress.estimate_ready(monday_noon, 6, 12, window_hours=3)[0] == "estimating"
+
+
+def test_the_report_carries_the_estimate_state(db, setup_ai, monkeypatch):
+    monkeypatch.setattr(progress, "approved_recently", lambda conn: 0)
     p = progress.report(db, setup_ai)["next_paper"]
-    assert p["approved_in_window"] == 12 and p["per_hour"] == 0.25
-    assert p["eta_hours"] == 240.0 and p["complete"] is False  # 60 missing at a quarter question per hour
+    assert p["eta_state"] == "estimating" and p["eta_hours"] is None and p["eta_at"] is None
     monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind: 99)
     done = progress.report(db, setup_ai)["next_paper"]
-    assert done["complete"] is True and done["missing_questions"] == 0 and done["eta_hours"] is None
+    assert done["complete"] is True and done["missing_questions"] == 0 and done["eta_state"] == "complete"
+
+
+def test_ready_counts_each_cell_only_up_to_one_papers_need(db, setup_ai, monkeypatch):
+    """A cell holding more than a paper needs must not make up for a cell that is empty."""
+    from app import learning_stats
+
+    need = {"single_choice": 10, "fill_blank": 14, "term": 4, "short_answer": 1, "essay": 1}
+    stock = {(s, k): (30 if k == "single_choice" else 0) for s in ("biochemistry", "cell_biology") for k in need}
+    monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind: stock[(subject, kind)])
+    t = learning_stats.tomorrow_ready(db, setup_ai)
+    assert t["needed"] == 60 and t["ready"] == 20 and t["missing"] == 40 and t["complete"] is False  # not 60
+    stock.update({(s, k): need[k] + 5 for s in ("biochemistry", "cell_biology") for k in need})
+    assert learning_stats.tomorrow_ready(db, setup_ai)["ready"] == 60 and learning_stats.tomorrow_ready(db, setup_ai)["complete"]
 
 
 def test_a_heartbeat_is_written_each_run_and_read_back(db, setup_ai, monkeypatch):

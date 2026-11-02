@@ -1,7 +1,7 @@
 /* Model settings page: same light "data analytics" tokens as the training pages. */
-:root { --bg: #f4f6fa; --card: #fff; --line: #e5e9f0; --ink: #111827; --muted: #556070; --primary: #2563eb; --primary-press: #1d4ed8; --soft: #dbeafe; --input: #f8faff; --accent-ink: #c2410c; }
+:root { --sat: max(env(safe-area-inset-top, 0px), var(--sat-test, 0px)); --sab: max(env(safe-area-inset-bottom, 0px), var(--sab-test, 0px)); --bg: #f4f6fa; --card: #fff; --line: #e5e9f0; --ink: #111827; --muted: #556070; --primary: #2563eb; --primary-press: #1d4ed8; --soft: #dbeafe; --input: #f8faff; --accent-ink: #c2410c; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.6 "Noto Sans SC", system-ui, -apple-system, "PingFang SC", sans-serif; overflow-wrap: anywhere; }
-main { max-width: 640px; margin: auto; padding: 16px 18px calc(40px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
+main { max-width: 640px; margin: auto; padding: calc(var(--sat) + 16px) 18px calc(40px + var(--sab)); display: flex; flex-direction: column; gap: 14px; }
 h1 { margin: 0; font-size: 22px; line-height: 1.3; font-weight: 700; }
 h2 { margin: 0; font-size: 15px; font-weight: 700; }
 a { color: var(--primary); text-decoration: none; display: inline-flex; align-items: center; min-height: 44px; }
@@ -20,3 +20,7 @@ details > summary { cursor: pointer; min-height: 44px; display: flex; align-item
 pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; background: var(--input); border-radius: 12px; padding: 10px 12px; font-size: 12px; }
 #message { color: var(--accent-ink); font-weight: 500; min-height: 1.6em; }
 p { margin: 6px 0; }
+
+/* Opaque band over the status-bar area: scrolling content passes under it instead of into the iOS status bar
+   (which blurs whatever is behind it). Plain page colour only; no blur, no gradient, no mask. */
+body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: var(--sat); background: #f4f6fa; z-index: 1000; pointer-events: none; }

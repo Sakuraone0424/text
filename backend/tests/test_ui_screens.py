@@ -43,7 +43,7 @@ SHORT_BANK = {
     "last7": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None},
     "objective_rate": None, "subjective_rate": None, "weak_chapters": [],
     "reviews": {"due_now": 0, "next_7_days": [{"day": f"2026-11-{2 + k:02d}", "count": 0} for k in range(7)], "mastered": 0},
-    "tomorrow": {"ready": 4, "needed": 60, "missing": 56, "complete": False, "eta_at": "2026-11-02T15:00:00+00:00", "per_hour": 2.0},
+    "tomorrow": {"ready": 4, "needed": 60, "missing": 56, "complete": False, "eta_at": "2026-11-02T15:00:00+00:00", "eta_hours": 6.0, "eta_state": "estimated", "per_hour": 2.0},
     "has_data": False,
 }
 
@@ -105,6 +105,11 @@ def test_empty_state_pages(engine, live_app, mode):
     expect(page.locator("#stat-avg")).to_have_text("—")
     expect(page.locator("#stat-avg-note")).to_contain_text("做完首套后显示")
     assert page.locator("#status").evaluate("(n) => getComputedStyle(n).position") == "fixed"  # a toast, not a status line in the page
+    expect(page.locator("#status")).not_to_contain_text("已登录")  # switching pages and refreshing never shows it
+    toast = page.locator("#status").evaluate("(n) => getComputedStyle(n).bottom")
+    assert toast.endswith("px") and float(toast[:-2]) >= 56 + INSETS[mode][1]  # lives above the bottom nav, never over a title
+    band = page.evaluate("() => { const s = getComputedStyle(document.body, '::before'); return [s.position, s.height, s.backgroundColor]; }")
+    assert band == ["fixed", f"{INSETS[mode][0]}px", "rgb(244, 246, 250)"], band  # the opaque status-bar band
     assert page.locator(".sidebar").bounding_box()["height"] == 56 + INSETS[mode][1]
     clear_of_the_top_inset(page, mode)
     fits(page)
@@ -114,6 +119,14 @@ def test_empty_state_pages(engine, live_app, mode):
         page.wait_for_timeout(400)
         clear_of_the_top_inset(page, mode)
         fits(page)
+        if view == "mistakes":
+            # the full set of choices is there with no mistakes at all
+            expect(page.locator("#filter-subject button")).to_have_text(["全部", "生化", "细胞"])
+            expect(page.locator("#filter-type button")).to_have_text(["全部", "单选", "填空", "名词解释", "简答", "问答"])
+            # zero days draw only the baseline: no little squares; the strip is named
+            heights = page.locator("#due-mini i").evaluate_all("(els) => els.map((e) => e.getBoundingClientRect().height)")
+            assert heights and all(h == 0 for h in heights), heights
+            expect(page.locator(".due-side .stat-label")).to_have_text("未来 7 天")
         snap(page, engine, mode, "empty", name)
     progress, perrors = open_page(engine, mode, base, "/progress")
     expect(progress.locator("#content")).to_be_visible()
@@ -164,3 +177,7 @@ def test_no_blur_layers_anywhere_in_the_styles():
     for sheet in STATIC.glob("*.css"):
         text = sheet.read_text(encoding="utf-8")
         assert "backdrop-filter" not in text and not re.search(r"filter:\s*blur", text), sheet.name
+        # nothing fades, masks or gradients the area under the status bar: plain page colour only
+        assert not re.search(r"mask(-image)?\s*:|-webkit-mask|gradient\(", text), sheet.name
+    for page in STATIC.glob("*.html"):
+        assert not re.search(r"backdrop-filter|filter:\s*blur|mask-image|gradient\(", page.read_text(encoding="utf-8")), page.name
