@@ -214,11 +214,23 @@ app.include_router(reviewed_quiz_router)
 from app.model_api import router as model_router
 
 app.include_router(model_router)
+from app.stats_api import router as stats_router
+
+app.include_router(stats_router)
 
 
 @app.get("/training", include_in_schema=False)
 def training_page():
     return FileResponse(STATIC_DIR / "training.html")
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def web_manifest():
+    return FileResponse(
+        STATIC_DIR / "manifest.webmanifest",
+        media_type="application/manifest+json",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/progress", include_in_schema=False)

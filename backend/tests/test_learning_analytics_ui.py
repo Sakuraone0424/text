@@ -21,9 +21,9 @@ def test_dashboard_focus_navigation_and_two_step_start(live_app, browser, width,
     page.goto(base)
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
-    expect(page.locator("#metric-submitted")).to_have_text("0")
-    expect(page.locator("#score-trend")).to_contain_text("完成考试后")
-    assert page.locator("#score-trend svg").count() == 0
+    expect(page.locator("#stat-avg")).to_have_text("—")  # no paper yet: an empty state, never a made-up number
+    expect(page.locator("#stat-avg-note")).to_contain_text("完成第一套卷子后显示")
+    expect(page.locator("#weak-chapters")).to_contain_text("完成第一套卷子后显示")
     page.locator("#prepare").click()
     expect(page.locator("#start")).to_be_visible()
     assert page.locator("#questions article").count() == 0
@@ -127,37 +127,74 @@ def test_pending_grade_custom_confirmation_and_truthful_chart(live_app, browser)
     first.locator("summary").click()
     page.evaluate("showResult()")
     expect(first).to_have_attribute("open", "")
-    page.locator('[data-view="stats"]').first.click()
+    page.evaluate("TrainingUI.showView('stats')")
     page.evaluate("refresh()")
     expect(page.locator("#stats-view")).to_be_visible()
     page.close()
 
 
-def test_dashboard_data_denominators_and_no_fake_trend(live_app, browser):
+def overview_fixture(**extra):
+    base = {
+        "today": "2026-11-02", "exam_date": "2026-12-21", "days_left": 49, "streak": {"current": 4, "longest": 9},
+        "today_paper": {"state": "none"},
+        "last7": {"papers": 5, "avg_rate": 0.7067, "avg_points": 212.0, "max_points": 300, "delta_points": 6.0},
+        "objective_rate": 0.72, "subjective_rate": 0.55,
+        "weak_chapters": [{"subject": "biochemistry", "chapter": "合成统计章节", "rate": 0.4, "answers": 5},
+                          {"subject": "cell_biology", "chapter": "合成膜章节", "rate": 0.6, "answers": 4}],
+        "reviews": {"due_now": 3, "next_7_days": [], "mastered": 0}, "tomorrow": {"ready": 42, "needed": 60}, "has_data": True,
+    }
+    return {**base, **extra}
+
+
+def test_dashboard_numbers_come_straight_from_the_statistics_endpoint(live_app, browser):
     client, _, _ = live_app
-    page = browser.new_page(viewport={"width": 1440, "height": 900})
-    # Explicit synthetic transport fixtures test display arithmetic; never persisted or shipped as product defaults.
-    history = {"legacy": [{"score": 60}], "training": [
-        {"paper_date": "2026-10-27", "score": 120, "mode": "reviewed_60", "max_points": 150},
-        {"paper_date": "2026-10-26", "score": None, "mode": "reviewed_60", "max_points": 150},
-        {"paper_date": "2026-10-25", "score": 90, "mode": "reviewed_60", "max_points": 150},
-        {"paper_date": "2026-10-20", "score": 100, "mode": "reviewed_28", "max_points": 150},
-        {"paper_date": "2026-10-19", "score": 80, "mode": "reviewed_28", "max_points": 150}]}
-    page.route("**/v2/history", lambda route: route.fulfill(json=history))
-    page.route("**/v2/stats/weekly", lambda route: route.fulfill(json={"chapters": [{"subject": "biochemistry", "chapter": "合成统计章节", "graded_points": 3, "graded_max_points": 6, "pending": 2, "answers": 4}]}))
+    page = browser.new_page(viewport={"width": 390, "height": 844})
+    # Explicit synthetic transport fixture tests display arithmetic; never persisted or shipped as a product default.
+    page.route("**/v2/stats/overview", lambda route: route.fulfill(json=overview_fixture()))
     page.goto(str(client.base_url).rstrip("/"))
     page.locator("#password").fill("test-live-login"); page.locator("#login button").click()
-    expect(page.locator("#metric-submitted")).to_have_text("5")
-    expect(page.locator("#metric-graded")).to_have_text("4")
-    expect(page.locator("#subject-performance")).to_contain_text("3 / 6分 · 50%")
-    expect(page.locator("#subject-performance")).to_contain_text("2题待判分")
-    expect(page.locator("#score-trend svg")).to_have_count(1)
-    expect(page.locator("#score-trend")).to_contain_text("90/150分")
-    expect(page.locator("#score-trend")).not_to_contain_text("80/150分")  # old 28-question papers are a separate chart
-    expect(page.locator("#score-trend-legacy-card")).to_be_visible()
-    expect(page.locator("#score-trend-legacy svg")).to_have_count(1)
-    expect(page.locator("#score-trend-legacy")).to_contain_text("80/150分")
-    assert "60/150" not in page.locator("#score-trend").inner_text()
+    expect(page.locator("#days-left")).to_have_text("49")
+    expect(page.locator("#streak-days")).to_have_text("4")
+    expect(page.locator("#stat-avg")).to_have_text("212")
+    expect(page.locator("#stat-avg-note")).to_have_text("较上周 +6 分")
+    expect(page.locator("#stat-avg-note")).to_have_class("up")
+    expect(page.locator("#stat-objective")).to_have_text("72%")
+    expect(page.locator("#stat-subjective")).to_have_text("55%")
+    rows = page.locator("#weak-chapters .progress-line")
+    expect(rows).to_have_count(2)
+    expect(rows.first).to_contain_text("合成统计章节")
+    expect(rows.first).to_contain_text("40%")
+    assert rows.first.locator(".hbar-track i").evaluate("(n) => getComputedStyle(n).backgroundColor") == "rgb(234, 88, 12)"  # below 50%: orange
+    assert rows.nth(1).locator(".hbar-track i").evaluate("(n) => getComputedStyle(n).backgroundColor") == "rgb(37, 99, 235)"
+    expect(page.locator("#metric-due")).to_have_text("3")
+    expect(page.locator("#tomorrow-ready")).to_have_text("42/60")
+    expect(page.locator("#weak-practice")).to_be_visible()
+    page.close()
+
+
+def test_the_score_trend_never_mixes_papers_of_different_totals(live_app, browser):
+    client, _, _ = live_app
+    page = browser.new_page(viewport={"width": 390, "height": 844})
+    subjects = lambda a, b, m: {"biochemistry": {"points": a, "max": m, "rate": a / m}, "cell_biology": {"points": b, "max": m, "rate": b / m}}
+    trend = [
+        {"paper_id": 1, "date": "2026-10-25", "spec": "xiaohan-60q-150pt-v2", "points": 90, "max": 150, "rate": 0.6, "subjects": subjects(45, 45, 75)},
+        {"paper_id": 2, "date": "2026-10-30", "spec": "xiaohan-60q-300pt-v4", "points": 180, "max": 300, "rate": 0.6, "subjects": subjects(90, 90, 150)},
+        {"paper_id": 3, "date": "2026-11-01", "spec": "xiaohan-60q-300pt-v4", "points": 240, "max": 300, "rate": 0.8, "subjects": subjects(120, 120, 150)},
+    ]
+    profile = {"today": "2026-11-02", "summary": {"papers": 3, "answered": 150, "total_seconds": 9000, "streak_current": 2, "streak_longest": 2},
+               "trend": trend, "type_rates": [], "chapters": [], "calendar": [], "timing": {"papers": [], "by_type": [], "recorded_questions": 0},
+               "reviews": {"due_now": 0, "next_7_days": [], "mastered": 0}}
+    page.route("**/v2/stats/profile", lambda route: route.fulfill(json=profile))
+    page.goto(str(client.base_url).rstrip("/"))
+    page.locator("#password").fill("test-live-login"); page.locator("#login button").click()
+    page.locator('nav.primary-nav [data-view="profile"]').click()
+    chart = page.locator("#profile-data .chart-block").first
+    expect(chart.locator(".chart-dot")).to_have_count(9)  # rates: three papers x (two subjects + total), each against its own maximum
+    page.locator("#profile-data .segmented button", has_text="分数").click()
+    expect(page.locator("#profile-data .chart-block").first.locator(".chart-dot")).to_have_count(6)  # points: only the latest specification
+    expect(page.locator("#profile-data .chart-conclusion").first).to_contain_text("分数模式只显示与最近一套同规格")
+    labels = page.locator("#profile-data .chart-block").first.locator(".chart-dot").evaluate_all("(n) => n.map((x) => x.getAttribute('aria-label')).join('|')")
+    assert "10/25" not in labels and "10/30" in labels  # the older 150-point paper is not on the points chart
     page.close()
 
 
@@ -165,11 +202,12 @@ def test_failed_statistics_remain_unknown_and_reduced_motion(live_app, browser):
     client, _, _ = live_app
     page = browser.new_page(viewport={"width": 390, "height": 844})
     page.emulate_media(reduced_motion="reduce")
-    page.route("**/v2/history", lambda route: route.fulfill(status=503, json={"detail": "Synthetic unavailable response"}))
+    page.route("**/v2/stats/overview", lambda route: route.fulfill(status=503, json={"detail": "Synthetic unavailable response"}))
     page.goto(str(client.base_url).rstrip("/"))
     page.locator("#password").fill("test-live-login"); page.locator("#login button").click()
-    expect(page.locator("#overview-note")).to_contain_text("未将未知数据当作0")
-    expect(page.locator("#metric-submitted")).to_have_text("—")
+    expect(page.locator("#stat-avg-note")).to_contain_text("未将未知数据当作0")
+    expect(page.locator("#stat-avg")).to_have_text("—")
+    expect(page.locator("#days-left")).to_have_text("—")
     assert page.evaluate("getComputedStyle(document.querySelector('#prepare')).transitionDuration") == "0s"
     page.close()
 

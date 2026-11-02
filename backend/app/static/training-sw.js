@@ -6,6 +6,9 @@ const ASSETS = [
   "/static/training.js",
   "/static/app.css",
   "/static/training.css",
+  "/static/charts.js",
+  "/static/insights.js",
+  "/manifest.webmanifest",
   "/static/training-ui.js",
 ];
 self.addEventListener("install", (event) => {

@@ -17,6 +17,35 @@
     if (parent) parent.append(node);
     return node;
   };
+  const typeNames = { single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答", essay: "问答" };
+  /* Time spent per question: counted only while that question is on screen, the exam is running and the
+     page is visible. It is saved with the draft (seconds) and copied into answer_timings at submit. */
+  let dwell = { id: null, since: 0 },
+    flushing = false;
+  function flushDwell(restart = false) {
+    if (flushing) return; // saving a draft re-renders the UI, which must not count time again
+    flushing = true;
+    try {
+      if (dwell.id !== null && dwell.since) {
+        const gained = Math.round((Date.now() - dwell.since) / 1000);
+        if (gained > 0 && active()) actions.addSeconds?.(dwell.id, gained);
+      }
+      dwell.since = restart && dwell.id !== null && !document.hidden && active() && view === "exam" ? Date.now() : 0;
+    } finally {
+      flushing = false;
+    }
+  }
+  function startDwell(id) {
+    if (dwell.id === id) {
+      if (!dwell.since && !document.hidden && view === "exam") dwell.since = Date.now();
+      return; // the same question being re-rendered keeps its running timer
+    }
+    flushDwell();
+    dwell = { id, since: !document.hidden && view === "exam" ? Date.now() : 0 };
+  }
+  setInterval(() => flushDwell(true), 20000);
+  document.addEventListener("visibilitychange", () => (document.hidden ? flushDwell() : flushDwell(true)));
+  window.addEventListener("pagehide", () => flushDwell());
   const answered = (draft) =>
     !!(
       draft?.text?.trim() ||
@@ -37,6 +66,8 @@
     });
     document.body.classList.toggle("focus-mode", view === "exam" && active());
     byId("focus-actions").hidden = view !== "exam" || !active();
+    byId("question-tags").hidden = view !== "exam" || !active();
+    if (view !== "exam") flushDwell();
     const roots = {
       mistakes: "mistakes-content",
       stats: "stats-content",
@@ -45,6 +76,7 @@
     if (roots[view]) byId(roots[view]).append(byId("learning"));
     else byId("learning").hidden = true;
     if (roots[view]) byId("learning").hidden = false;
+    window.Insights?.onView(view);
   }
   function navigate(index, focus = true) {
     const questions = active() ? latest.paper.questions || [] : [];
@@ -64,13 +96,25 @@
     byId("current-number").textContent = String(position + 1);
     byId("current-subject").textContent =
       labels[question.subject] || question.subject;
-    byId("current-points").textContent = `${question.max_points}分`;
+    byId("current-points").textContent = `${typeNames[question.question_type] || ""} · ${question.max_points}分`;
     byId("previous-question").disabled = position === 0;
     byId("next-question").textContent =
-      position === questions.length - 1 ? "检查答题卡" : "下一题 →";
+      position === questions.length - 1 ? "检查答题卡" : "下一题";
     const marked = !!latest.drafts[question.id]?.flagged;
     byId("toggle-mark").setAttribute("aria-pressed", String(marked));
-    byId("toggle-mark").textContent = marked ? "★ 已标记" : "☆ 标记";
+    byId("toggle-mark").textContent = marked ? "★ 已标记稍后看" : "☆ 标记稍后看";
+    // "标记稍后看" and "这题有问题" sit together in one row under the question card
+    const article = document.querySelector(`#questions article[data-id="${question.id}"]`);
+    if (article) {
+      let row = article.querySelector(":scope > .secondary-actions");
+      if (!row) {
+        row = make("div", undefined, article, "secondary-actions");
+        const report = article.querySelector(".question-report");
+        if (report) row.append(report);
+      }
+      row.prepend(byId("toggle-mark"));
+    }
+    startDwell(question.id);
     updateMap();
     if (focus) {
       const stem = document.querySelector(
@@ -142,16 +186,16 @@
           in_progress: "正在作答",
           submitted: "已提交",
         }[timing.status] || "状态待确认"
-      : "状态待载入";
+      : "尚未准备";
     byId("paper-state").classList.toggle(
       "green-pill",
       timing?.status === "submitted",
     );
     byId("prepare").firstChild.textContent = active()
-      ? "继续本次考试 "
+      ? "继续作答"
       : timing?.status === "submitted"
-        ? "查看本次结果 "
-        : "开始今日考试 ";
+        ? "查看成绩"
+        : "开始";
     byId("prepare-note").textContent = active()
       ? "考试计时继续，已存答案不会丢失"
       : "先准备试卷，确认后才开始60分钟计时";
@@ -216,129 +260,6 @@
     );
     byId("focus-toolbar").classList.toggle("time-critical", remaining <= 120);
   }
-  function subjectBars(root, subjects) {
-    root.replaceChildren();
-    Object.entries(labels).forEach(([subject, label]) => {
-      const data = subjects[subject] || { points: 0, max: 0, pending: 0 };
-      const row = make("div", undefined, root, "subject-row"),
-        heading = make("div", undefined, row, "subject-label");
-      make("span", label, heading);
-      make(
-        "span",
-        data.max > 0
-          ? `${data.points} / ${data.max}分 · ${Math.round((data.points / data.max) * 100)}%`
-          : "暂无已判分记录",
-        heading,
-      );
-      const track = make("div", undefined, row, "data-track");
-      track.setAttribute("role", "img");
-      track.setAttribute(
-        "aria-label",
-        `${label}：${data.max > 0 ? `已判分${data.points}/${data.max}分` : "暂无已判分数据"}；待判分${data.pending}题`,
-      );
-      const fill = make(
-        "div",
-        undefined,
-        track,
-        `data-fill ${subject === "cell_biology" ? "cell" : ""}`,
-      );
-      fill.style.width = `${data.max > 0 ? Math.min(100, Math.max(0, (data.points / data.max) * 100)) : 0}%`;
-      if (data.pending)
-        make(
-          "small",
-          `${data.pending}题待判分，未计入得分率`,
-          row,
-          "card-footnote",
-        );
-    });
-  }
-  function trend(root, history) {
-    // Papers have different totals (150 / 300): plot each as a percentage of its own total.
-    const scaled = (row) => (row.score / (row.max_points || 150)) * 100;
-    const rows = history
-      .filter((row) => Number.isFinite(row.score))
-      .slice(0, 10)
-      .reverse();
-    root.replaceChildren();
-    if (rows.length < 2) {
-      root.className = "empty-state";
-      make("span", "↗", root, "empty-icon").setAttribute(
-        "aria-hidden",
-        "true",
-      );
-      make("strong", "让进步留下轨迹", root);
-      make(
-        "p",
-        rows.length
-          ? "已有1份完整判分记录，再完成一份即可查看真实趋势。"
-          : "完成考试后查看成绩趋势。未判完的成绩不绘入曲线。",
-        root,
-      );
-      return;
-    }
-    root.className = "";
-    const ns = "http://www.w3.org/2000/svg",
-      svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 360 180");
-    svg.setAttribute("role", "img");
-    svg.classList.add("chart");
-    const description = rows
-      .map((r) => `${r.paper_date}：${r.score}/${r.max_points || 150}分`)
-      .join("；");
-    const title = document.createElementNS(ns, "title");
-    title.textContent = `真实完整判分成绩：${description}`;
-    svg.append(title);
-    const points = rows.map((r, i) => [
-      32 + (i * 304) / (rows.length - 1),
-      148 - (scaled(r) / 100) * 116,
-    ]);
-    [0, 50, 100].forEach((value) => {
-      const y = 148 - (value / 100) * 116,
-        line = document.createElementNS(ns, "line");
-      Object.entries({
-        x1: 32,
-        x2: 344,
-        y1: y,
-        y2: y,
-        stroke: "#e7ebf0",
-      }).forEach(([k, v]) => line.setAttribute(k, v));
-      svg.append(line);
-      const text = document.createElementNS(ns, "text");
-      text.setAttribute("x", "0");
-      text.setAttribute("y", String(y + 4));
-      text.textContent = value + "%";
-      svg.append(text);
-    });
-    const polyline = document.createElementNS(ns, "polyline");
-    Object.entries({
-      points: points.map((p) => p.join(",")).join(" "),
-      fill: "none",
-      stroke: "#2563eb",
-      "stroke-width": 2.5,
-      "stroke-linejoin": "round",
-    }).forEach(([k, v]) => polyline.setAttribute(k, v));
-    svg.append(polyline);
-    points.forEach(([x, y]) => {
-      const circle = document.createElementNS(ns, "circle");
-      Object.entries({
-        cx: x,
-        cy: y,
-        r: 4,
-        fill: "#fff",
-        stroke: "#2563eb",
-        "stroke-width": 2,
-      }).forEach(([k, v]) => circle.setAttribute(k, v));
-      svg.append(circle);
-    });
-    root.append(svg);
-    make("p", description, root, "chart-description");
-    make(
-      "p",
-      "只统计已全部判分的试卷；反馈有问题的题不计入，成绩按各卷满分折算为百分比（150 分卷与 300 分卷分别折算）。",
-      root,
-      "card-footnote",
-    );
-  }
   async function read(path) {
     const response = await fetch(path, {
       credentials: "same-origin",
@@ -348,87 +269,7 @@
     return response.json();
   }
   async function loadOverview() {
-    const results = await Promise.allSettled([
-      read("/v2/history"),
-      read("/v2/stats/weekly"),
-      read("/v2/memory/due"),
-      read("/v2/model/spend"),
-    ]);
-    const banner = byId("quota-banner");
-    if (results[3].status === "fulfilled" && results[3].value.message) {
-      banner.textContent = results[3].value.message;
-      banner.hidden = false;
-    } else banner.hidden = true;
-    if (results[0].status === "fulfilled") {
-      const records = results[0].value.training;
-      byId("metric-submitted").textContent = String(records.length);
-      byId("metric-graded").textContent = String(
-        records.filter((r) => Number.isFinite(r.score)).length,
-      );
-      const pending = records.filter((r) => r.score === null).length;
-      byId("overview-note").textContent = records.length
-        ? `${pending}份试卷待完成批改；提交不等于完整判分。统计范围为最近100份正式档案。`
-        : "尚无提交记录。完成第一份考试，开始积累你的学习轨迹。";
-      // 60-question and old 28-question papers are different exams: separate charts.
-      trend(byId("score-trend"), records.filter((r) => r.mode === "reviewed_60"));
-      const legacy = records.filter((r) => r.mode !== "reviewed_60");
-      byId("score-trend-legacy-card").hidden = !legacy.length;
-      if (legacy.length) trend(byId("score-trend-legacy"), legacy);
-    } else
-      byId("overview-note").textContent =
-        "历史记录暂时读取失败，未将未知数据当作0。";
-    if (results[1].status === "fulfilled") {
-      const subjects = {},
-        chapters = results[1].value.chapters;
-      chapters.forEach((row) => {
-        const total = (subjects[row.subject] ||= {
-          points: 0,
-          max: 0,
-          pending: 0,
-        });
-        total.points += Number(row.graded_points || 0);
-        total.max += Number(row.graded_max_points || 0);
-        total.pending += Number(row.pending || 0);
-      });
-      subjectBars(byId("subject-performance"), subjects);
-      const weak = chapters
-        .filter(
-          (r) => Number(r.graded_max_points) > Number(r.graded_points || 0),
-        )
-        .sort(
-          (a, b) =>
-            b.graded_max_points -
-            b.graded_points -
-            (a.graded_max_points - a.graded_points),
-        )
-        .slice(0, 4);
-      if (weak.length) {
-        const root = byId("weak-chapters");
-        root.replaceChildren();
-        root.className = "weak-list";
-        weak.forEach((row) => {
-          const button = make("button", undefined, root, "weak-chip"),
-            label = make("span", row.chapter || "未标注章节", button);
-          make("small", `${labels[row.subject]} · 近7天已判分失分`, label);
-          make(
-            "b",
-            `${row.graded_max_points - (row.graded_points || 0)}分待巩固 →`,
-            button,
-          );
-          button.onclick = () => byId("weekly").click();
-        });
-      }
-    } else
-      byId("subject-performance").textContent =
-        "科目统计暂时不可用，请稍后重试。";
-    if (results[2].status === "fulfilled") {
-      const count = results[2].value.items.length;
-      byId("metric-due").textContent = String(count);
-      byId("review-summary").textContent = count
-        ? `当前有${count}道错题到期，复习后更新实际FSRS安排。`
-        : "当前没有到期复习，完成练习后会根据真实错题建立卡片。";
-    } else
-      byId("review-summary").textContent = "到期卡片读取失败，暂不显示数量。";
+    await window.Insights?.loadHome();
   }
   function signedIn(user) {
     const changed = account !== user;
@@ -504,29 +345,9 @@
       info,
       "grade-caption",
     );
-    const subject = make("section", undefined, summary, "card");
-    make("h2", "学科表现", subject);
-    const bars = make("div", undefined, subject);
-    const scores = {};
-    data.answers.forEach((answer) => {
-      const score = (scores[answer.subject] ||= {
-        points: 0,
-        max: 0,
-        pending: 0,
-      });
-      if (answer.points === null) score.pending++;
-      else {
-        score.points += answer.points;
-        score.max += answer.max_points;
-      }
-    });
-    subjectBars(bars, scores);
-    make(
-      "p",
-      "得分率仅含已判分题目，未答0分计入，待批题目排除。",
-      subject,
-      "card-footnote",
-    );
+    const extras = make("section", undefined, summary, "card data-card");
+    make("h2", "成绩分析", extras);
+    void window.Insights?.resultExtras(data, extras);
     const coverage = make("section", undefined, summary, "card");
     make("h2", "知识章节分布", coverage);
     const chapters = new Map();
@@ -808,13 +629,6 @@
     sessionStorage.removeItem("quiz-v2-paper-key");
     location.reload();
   };
-  byId("today-label").textContent =
-    new Intl.DateTimeFormat("zh-CN", {
-      timeZone: "Asia/Shanghai",
-      month: "long",
-      day: "numeric",
-      weekday: "long",
-    }).format(new Date()) + " · 学习工作台";
   window.TrainingUI = {
     state,
     rendered,
@@ -825,6 +639,8 @@
     },
     result,
     weekly,
+    // the mark button lives inside the shown question; park it before the questions are rebuilt
+    parkMarkButton: () => document.querySelector(".focus-secondary")?.append(byId("toggle-mark")),
     confirmSubmit,
     actions: (value) => {
       actions = value;

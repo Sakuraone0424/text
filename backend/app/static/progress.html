@@ -4,7 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#F4F6FA" />
+    <meta name="color-scheme" content="light" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
     <title>出题进度</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" />
     <link rel="stylesheet" href="/static/progress.css" />
   </head>
   <body>
@@ -44,6 +51,7 @@
             <div><dt>出题/审核剩余额度</dt><dd id="spend-left"></dd></div>
             <div><dt>判分预留剩余</dt><dd id="spend-grading"></dd></div>
           </dl>
+          <div id="spend-chart"></div>
           <p id="spend-note" class="muted"></p>
         </section>
         <section class="card" aria-labelledby="h-jobs">
@@ -52,6 +60,7 @@
         </section>
       </div>
     </main>
+    <script src="/static/charts.js" defer></script>
     <script src="/static/progress.js" defer></script>
   </body>
 </html>

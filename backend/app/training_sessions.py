@@ -103,8 +103,12 @@ def valid_value(conn, paper_id, question_id, value):
         "blanks",
         "image_ids",
         "flagged",
+        "seconds",
     }:
         raise ValueError("Invalid draft shape")
+    seconds = value.get("seconds", 0)
+    if type(seconds) is not int or not 0 <= seconds <= 7200:
+        raise ValueError("Invalid time spent")
     text = value.get("text", "")
     blanks = value.get("blanks", [])
     images = value.get("image_ids", [])
@@ -145,12 +149,19 @@ def valid_value(conn, paper_id, question_id, value):
         raise ValueError("Single choice answer must be A-D")
     if type(value.get("flagged", False)) is not bool:
         raise ValueError("Flag must be boolean")
-    return {
+    previous = conn.execute(
+        "SELECT value->>'seconds' AS s FROM answer_drafts WHERE paper_id=%s AND question_id=%s",
+        (paper_id, question_id),
+    ).fetchone()
+    # Time spent only ever grows: a stale tab or an older client cannot erase it.
+    spent = max(seconds, int(previous["s"]) if previous and (previous["s"] or "").isdigit() else 0)
+    kept = {
         "text": text,
         "blanks": blanks,
         "image_ids": images,
         "flagged": value.get("flagged", False),
     }
+    return {**kept, "seconds": spent} if spent else kept
 
 
 def assert_writable(conn, user_id, paper_id, expected_version):
@@ -298,6 +309,12 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
                 Jsonb(feedback) if feedback else None,
             ),
         )
+        spent = value.get("seconds")
+        if type(spent) is int and 0 < spent <= 7200:
+            conn.execute(
+                "INSERT INTO answer_timings(attempt_id,question_id,seconds) VALUES (%s,%s,%s)",
+                (aid, qid, spent),
+            )
         if answered and points is not None and points < q["max_points"]:
             schedule_review(conn, aid, qid)
     conn.execute(

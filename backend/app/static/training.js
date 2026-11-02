@@ -197,6 +197,7 @@ async function clearUnstartedCache() {
   pending = {};
   conflicted = false;
   $("conflict").hidden = true;
+  window.TrainingUI?.parkMarkButton();
   $("questions").replaceChildren();
   $("result").replaceChildren();
   try {
@@ -481,6 +482,7 @@ function renderProgress() {
   emitUI();
 }
 function render() {
+  window.TrainingUI?.parkMarkButton();
   $("questions").replaceChildren();
   if (paper?.timing.status !== "in_progress") {
     renderProgress();
@@ -687,6 +689,7 @@ async function showResult() {
   $("submit").hidden = true;
   const result = await api(`/v2/papers/${paper.paper_id}/result`);
   const signature = JSON.stringify(result);
+  window.TrainingUI?.parkMarkButton();
   $("questions").replaceChildren();
   if (signature === renderedResultSignature && $("result").childElementCount)
     return;
@@ -1004,6 +1007,7 @@ function rejectAccess(
   pending = {};
   localDrafts = {};
   deadline = null;
+  window.TrainingUI?.parkMarkButton();
   $("questions").replaceChildren();
   $("result").replaceChildren();
   $("login").hidden = false;
@@ -1580,10 +1584,17 @@ $("history").onclick = async () => {
     const data = await api("/v2/history");
     $("learning").replaceChildren();
     element("h2", "历史只读档案", $("learning"));
+    // a mini trend on top (percent of each paper's own total), then one row per paper
+    const detail = (await window.Insights?.historyChart($("learning"))) || new Map();
+    const names = { biochemistry: "生化", cell_biology: "细胞" };
     for (const item of data.training) {
+      const extra = detail.get(item.paper_id);
+      const split = extra
+        ? ` · ${Object.entries(extra.subjects).map(([s, v]) => `${names[s]} ${v.points}/${v.max}`).join(" · ")}${extra.seconds ? ` · 用时 ${Math.round(extra.seconds / 60)} 分钟` : ""}`
+        : "";
       const article = element(
         "article",
-        `${item.mode === "reviewed_60" ? "60 题" : "28 题 · 旧版"} · ${item.paper_date} · ${item.score === null ? "待判分" : item.score + "/" + (item.max_points || 150) + "分"}${item.excluded ? ` · 已扣除${item.excluded}道反馈题` : ""}`,
+        `${item.mode === "reviewed_60" ? "60 题" : "28 题 · 旧版"} · ${item.paper_date} · ${item.score === null ? "待判分" : item.score + "/" + (item.max_points || 150) + "分"}${split}${item.excluded ? ` · 已扣除${item.excluded}道反馈题` : ""}`,
         $("learning"),
       );
       const button = element("button", "查看已提交结果", article);
@@ -1687,4 +1698,8 @@ document.addEventListener("compositionend", (event) => {
     queue = queue.then(flush).catch((error) => status(error.message));
   }, 0);
 });
-window.TrainingUI?.actions({ flush });
+function addSeconds(id, gained) {
+  if (!Number.isFinite(gained) || gained <= 0) return;
+  change(id, { seconds: Math.min(7200, (localDrafts[id]?.seconds || 0) + gained) });
+}
+window.TrainingUI?.actions({ flush, addSeconds });
