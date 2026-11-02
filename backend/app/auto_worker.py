@@ -366,7 +366,37 @@ def run(report):
     integrations_tick()
 
 
+def record_heartbeat(report, started, error):
+    """One row per run for the progress page (numbers and codes only). Never lets a run fail."""
+    from decimal import Decimal
+
+    if error:
+        outcome = "error:" + error
+    elif not str(report.get("enabled", "")).startswith("yes"):
+        outcome = "disabled"
+    else:
+        outcome = "ok"
+    queue = {}
+    for part in str(report.get("queue", "")).split(","):
+        name, _, number = part.partition("=")
+        if number.isdigit():
+            queue[name] = int(number)
+    try:
+        with get_db() as conn:
+            conn.execute("DELETE FROM worker_heartbeats WHERE finished_at<clock_timestamp()-interval '14 days'")
+            conn.execute(
+                "INSERT INTO worker_heartbeats(started_at,outcome,calls,cost_cny,stopped_because,queue) VALUES (%s,%s,%s,%s,%s,%s)",
+                (started, outcome, int(report.get("calls", 0) or 0), Decimal(str(report.get("cost_cny", "0") or "0")),
+                 report.get("stopped_because"), ai_jobs.Jsonb(queue)),
+            )
+    except Exception:
+        pass  # a missing table or database hiccup must not turn a good run into a failed one
+
+
 def main():
+    from datetime import datetime, timezone
+
+    started = datetime.now(timezone.utc)
     report = {}
     code = 0
     try:
@@ -376,6 +406,7 @@ def main():
         safe = isinstance(exc, (PermissionError, ValueError)) and getattr(exc, "errno", None) is None  # ours, not the OS's
         report["error"] = type(exc).__name__ + (":" + str(exc)[:120].replace(" ", "_") if safe else "")
         code = 1
+    record_heartbeat(report, started, report.get("error", "").split(":")[0] if code else "")
     report.pop("since", None)
     print("worker-run " + " ".join(f"{k}={_fmt(v)}" for k, v in report.items()), flush=True)
     if code:

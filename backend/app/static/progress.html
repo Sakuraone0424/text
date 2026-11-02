@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="robots" content="noindex" />
+    <title>出题进度</title>
+    <link rel="stylesheet" href="/static/progress.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="top">
+        <a class="back" href="/training" aria-label="返回首页">←</a>
+        <div>
+          <h1>出题进度</h1>
+          <p id="updated" class="muted">正在读取…</p>
+        </div>
+      </header>
+      <p id="notice" role="status" hidden></p>
+      <div id="content" hidden>
+        <section class="card" aria-labelledby="h-paper">
+          <h2 id="h-paper">下一张完整卷子</h2>
+          <p id="paper-main" class="big"></p>
+          <p id="paper-note" class="muted"></p>
+        </section>
+        <section class="card" aria-labelledby="h-worker">
+          <h2 id="h-worker">出题程序与时段</h2>
+          <dl class="facts">
+            <div><dt>当前时段</dt><dd id="period"></dd></div>
+            <div><dt>出题程序上次运行</dt><dd id="worker"></dd></div>
+          </dl>
+          <p id="worker-note" class="muted"></p>
+        </section>
+        <section class="card" aria-labelledby="h-bank">
+          <h2 id="h-bank">题库（已入库 / 目标）</h2>
+          <div id="bank"></div>
+        </section>
+        <section class="card" aria-labelledby="h-spend">
+          <h2 id="h-spend">费用</h2>
+          <dl class="facts">
+            <div><dt>今日</dt><dd id="spend-today"></dd></div>
+            <div><dt>本月</dt><dd id="spend-month"></dd></div>
+            <div><dt>平均每入库一题</dt><dd id="spend-per"></dd></div>
+            <div><dt>出题/审核剩余额度</dt><dd id="spend-left"></dd></div>
+            <div><dt>判分预留剩余</dt><dd id="spend-grading"></dd></div>
+          </dl>
+          <p id="spend-note" class="muted"></p>
+        </section>
+        <section class="card" aria-labelledby="h-jobs">
+          <h2 id="h-jobs">最近 20 个任务</h2>
+          <ol id="jobs" class="jobs"></ol>
+        </section>
+      </div>
+    </main>
+    <script src="/static/progress.js" defer></script>
+  </body>
+</html>

@@ -1539,3 +1539,15 @@
 .training-app .question-card textarea[data-kind="essay"] {
   min-height: 380px;
 }
+
+/* A link that looks like the secondary button (e.g. the progress page entry). */
+.training-app a.secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  text-decoration: none;
+}

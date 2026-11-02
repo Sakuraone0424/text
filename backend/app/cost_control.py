@@ -204,7 +204,7 @@ def bank_target():
 
     TEMPORARY. Unset (or invalid / not positive) means the normal rule: top each
     bucket up to two days of reserve. Set, it replaces that reserve target, e.g. 5
-    gives the 8 buckets x 5 = 40 question first batch.
+    gives the 10 buckets (2 subjects x 5 types) x 5 = 50 question first batch.
     """
     raw = os.environ.get("AI_BANK_TARGET_PER_BUCKET", "").strip()
     try:
@@ -233,3 +233,27 @@ def bucket_supply(conn, subject, kind):
         (subject, kind),
     ).fetchone()["n"]
     return made + queued
+
+
+# ---- peak / off-peak outlook --------------------------------------------------------
+
+
+def peak_outlook(at=None, calendar=None, horizon_days=9):
+    """Is it peak now, when does off-peak next start, and when does the next peak begin."""
+    from datetime import timedelta
+
+    at = (at or datetime.now(timezone.utc)).replace(second=0, microsecond=0)
+    now_peak = is_peak(at, calendar)
+    next_off = next_peak = None
+    step = timedelta(minutes=1)
+    moment = at
+    for _ in range(horizon_days * 24 * 60):
+        moment += step
+        peak = is_peak(moment, calendar)
+        if now_peak and not peak and next_off is None:
+            next_off = moment
+        if not now_peak and peak and next_peak is None:
+            next_peak = moment
+        if (now_peak and next_off) or (not now_peak and next_peak):
+            break
+    return dict(is_peak=now_peak, next_off_peak_at=next_off, next_peak_at=next_peak)

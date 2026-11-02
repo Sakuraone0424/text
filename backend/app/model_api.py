@@ -299,6 +299,14 @@ def spend(name=Depends(require_auth)):
     return operation(name, spend_report)
 
 
+@router.get("/progress")
+def progress_report(name=Depends(require_auth)):
+    """Question-writing progress: counts, codes and times only (no question or textbook text)."""
+    from app.progress import report
+
+    return operation(name, report)
+
+
 @router.post("/prices/refresh")
 def refresh_cny_prices(request: Request, name=Depends(require_auth)):
     origin(request)
