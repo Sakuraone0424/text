@@ -172,7 +172,9 @@ def test_unknown_timeout_and_retry_reservations_immutable(db, setup_ai):
     report = b.summary(db, setup_ai)
     assert (
         report["usage_estimate_cny"]["unknown"] == 1
-        and Decimal(report["unknown_reserved_cny"]) == first["reserved_cny"] * 2
+        # the finished attempt without usage counts as an estimate (no settled call yet: its own ceiling); the second
+        # is still running and is counted separately, at its reservation
+        and Decimal(report["unknown_reserved_cny"]) == first["reserved_cny"]
     )
     assert report["confirmed_invoice_cny"] is None
     with pytest.raises(psycopg.Error), db.transaction():
@@ -297,9 +299,11 @@ def test_concurrent_cny_reservation_one_winner(live_app):  # noqa: F811
     _, dsn, _ = live_app
     with psycopg.connect(dsn, row_factory=dict_row) as c:
         uid = setup_ai.__wrapped__(c)
-        m.configure(
-            c, uid, "deepseek-flash", "high", daily_cny="0.10", max_concurrency=4
-        )
+        m.configure(c, uid, "deepseek-flash", "high", daily_cny="0.10", max_concurrency=4)
+        snap = m.snapshot(c, uid)
+        one = m.cost_bound({**snap, "price_snapshot": b.current_price(c, snap["model_id"])}, at=b.utcnow())
+        # room for exactly one reservation (its price depends on whether it is peak or off-peak right now)
+        c.execute("UPDATE ai_settings SET daily_cny=%s", (one * Decimal("1.5"),))
         jobs.enqueue(c, uid, "parallel1", "science_review", {})
         jobs.enqueue(c, uid, "parallel2", "science_review", {})
 

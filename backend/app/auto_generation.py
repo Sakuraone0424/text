@@ -17,7 +17,7 @@ from app.exam_authoring import instructions as exam_instructions, issues as exam
 from app.transcript_analysis import STYLE_SOURCE_BLOCKERS, stored_types
 from app.source_bibliography import from_database as source_bibliography
 from app.ai_jobs import enqueue, content_sha
-from app import cost_control, past_exam_import
+from app import cost_control, evidence_filter, past_exam_import
 from app.auto_fixes import autofix, FIX_LABELS
 from app.dispatch_codes import safe_dispatch_failure
 from app.evidence_match import locate
@@ -471,7 +471,7 @@ def paragraph_pool(conn, subject):
     pinned = {}
     pool = []
     for row in conn.execute(
-        "SELECT u.id,u.chapter,d.file_id,d.sha256 FROM source_units u "
+        "SELECT u.id,u.chapter,u.text,d.file_id,d.sha256 FROM source_units u "
         "JOIN source_documents d ON d.id=u.document_id WHERE "
         + current_source_sql("d", kind="textbook")
         + " AND d.subject=%s AND u.quality_flags='[]'::jsonb "
@@ -480,7 +480,8 @@ def paragraph_pool(conn, subject):
         (subject, ANCHOR_PARAGRAPH_MIN_CHARS, ANCHOR_PARAGRAPH_MAX_CHARS),
     ).fetchall():
         ok = pinned.setdefault((row["file_id"], row["sha256"]), pinned_source_bytes(row["file_id"], row["sha256"]))
-        if ok:
+        # figure captions, tables, tables of contents and headings cannot support a question: filtered before any call
+        if ok and evidence_filter.usable(row["text"], min_chars=ANCHOR_PARAGRAPH_MIN_CHARS):
             pool.append(dict(unit_id=row["id"], chapter_key=f"{row['file_id']}|{row['chapter']}"))
     return pool
 

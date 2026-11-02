@@ -3,12 +3,14 @@
 import httpx
 import os
 import sys
+import signal
 import threading
 import time
 from app.db import get_db
 from app import cost_control
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
 from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
+from app import cost_reconcile
 from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
@@ -211,6 +213,8 @@ def calls_per_run(env=None):
 # A cron run every 5 minutes must never overlap the next one, so a whole run is held to 4 minutes.
 # A model call takes about 45 s (150 s is the hard HTTP timeout), so a new call is only started while
 # there is still room for one more typical call before the deadline.
+SHUTDOWN = threading.Event()   # set by SIGTERM (a deploy restarts the worker): claim nothing more
+SHUTDOWN_GRACE_SECONDS = 30    # calls whose request is already out get this long to bring their result back
 DEFAULT_RUN_SECONDS = 240
 EXPECTED_CALL_SECONDS = 60
 SAFETY_SECONDS = 15
@@ -224,6 +228,10 @@ def run_seconds(env=None):
     except (TypeError, ValueError):
         return DEFAULT_RUN_SECONDS
     return min(max(value, 60), 270)
+
+
+class WorkerInterrupted(Exception):
+    """A call was still out when the run had to end."""
 
 
 class CallPool:
@@ -241,6 +249,7 @@ class CallPool:
         self.lock = threading.Lock()
         self.cond = threading.Condition(self.lock)
         self.active = 0           # workers between starting to claim and handing their result on
+        self.running_jobs = {}    # job id -> job, while its model call is out
         self.handed_on = 0        # results handed on so far (each may have created new jobs)
         self.started = 0           # calls begun (a claim attempt counts until it turns out to be empty)
         self.calls = 0             # calls actually made
@@ -263,7 +272,7 @@ class CallPool:
     def _worker(self):
         while True:
             with self.cond:
-                if self.stop or self.started >= self.limit:
+                if self.stop or self.started >= self.limit or SHUTDOWN.is_set():
                     return
                 if not self._room_for_another_call():
                     self.stopped_because = self.stopped_because or "run_time_budget"
@@ -288,7 +297,8 @@ class CallPool:
                     self.started -= 1
                     self.active -= 1
                     self.last_claim = dict(ai_jobs.LAST_CLAIM)
-                    self.stopped_because = ai_jobs.LAST_CLAIM.get("outcome")
+                    self.stopped_because = ai_jobs.LAST_CLAIM.get("outcome") + (
+                        ":" + ai_jobs.LAST_CLAIM["scope"] if ai_jobs.LAST_CLAIM.get("scope") else "")
                     self.cond.notify_all()
                     # Nothing to claim right now. While other calls are still running their results may
                     # create new jobs (a review of what was just written), so wait for them; only when
@@ -325,7 +335,10 @@ class CallPool:
 
     def _execute(self, job):
         """The model call itself; counts how many are running at the same moment."""
+        if SHUTDOWN.is_set():
+            raise ai_jobs.Released()  # nothing was sent yet: hand the job back at once, at no cost
         with self.lock:
+            self.running_jobs[job["id"]] = job
             self.in_flight += 1
             self.peak = max(self.peak, self.in_flight)
         try:
@@ -333,6 +346,7 @@ class CallPool:
         finally:
             with self.lock:
                 self.in_flight -= 1
+                self.running_jobs.pop(job["id"], None)
 
     def run(self):
         self.t0 = self.clock()
@@ -343,10 +357,30 @@ class CallPool:
         threads = [threading.Thread(target=self._worker, name=f"call-{i}", daemon=True) for i in range(self.workers)]
         for t in threads:
             t.start()
-        for t in threads:
-            t.join(max(0.0, self.deadline - self.clock()))
+        grace_until = None
+        while any(t.is_alive() for t in threads) and self.clock() < self.deadline:
+            if SHUTDOWN.is_set():
+                grace_until = grace_until or self.clock() + SHUTDOWN_GRACE_SECONDS
+                if self.clock() >= grace_until:
+                    break
+            for t in threads:
+                t.join(0.2)
         self.overran = any(t.is_alive() for t in threads)
+        if self.overran and self.running_jobs:
+            self._give_up_on_running()
         return self
+
+    def _give_up_on_running(self):
+        """A call still out at the deadline or after the shutdown grace: free its slot now. Its cost stays an estimate
+        (the median of recent calls) until reconciliation; the job is queued again."""
+        with self.lock:
+            leftover = list(self.running_jobs.values())
+        for job in leftover:
+            try:
+                with self.get_db() as conn:
+                    ai_jobs.finish(conn, job, error=WorkerInterrupted())
+            except Exception:  # noqa: BLE001  (already finished by its own thread, or the lease moved on)
+                pass
 
 
 def queue_snapshot(conn):
@@ -397,6 +431,8 @@ def run(report):
     private = os.environ.get("DEEPSEEK_PRIVATE_DATA_AUTHORIZED") == "1"
     with get_db() as conn:
         report["since"] = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
+        # calls a previous (restarted) worker process still holds would keep the concurrency slots busy for minutes
+        report["reclaimed"] = ai_jobs.reclaim_orphans(conn)
         dispatch_completed(conn)
         users = conn.execute("SELECT * FROM ai_settings").fetchall()
         report["users"] = len(users)
@@ -463,6 +499,10 @@ def run(report):
             f"{head['id']}:{head['kind']}:{head['state']}:scope={_fmt(head['scope'])}:err={_fmt(head['error_code'])}"
             if head else "-"
         )
+    if users:
+        # hourly, and at Beijing midnight: correct the ledger against DeepSeek's real balance (never blocks writing)
+        with get_db() as conn:
+            report["balance"] = cost_reconcile.reconcile_if_due(conn, users[0]["user_id"])
     limit = calls_per_run()
     workers = min(report.get("max_concurrency") or 1, limit)
     pool = CallPool(get_db, execute, workers, limit, run_seconds() - (time.monotonic() - run_began)).run()
@@ -528,6 +568,7 @@ def main():
     from datetime import datetime, timezone
 
     started = datetime.now(timezone.utc)
+    signal.signal(signal.SIGTERM, lambda *_: SHUTDOWN.set())
     report = {}
     code = 0
     try:

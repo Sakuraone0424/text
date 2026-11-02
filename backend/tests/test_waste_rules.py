@@ -131,8 +131,8 @@ def test_numbers_extra_fields_empty_answers_tags_difficulty_points():
         rubric=[dict(points="3", description="a", knowledge_tags=["t1"]), dict(points=3, description="b", knowledge_tags=[])],
         knowledge_tags=["t0"], difficulty="Easy"), 6)
     assert q["max_points"] == 6 and q["rubric"][0]["points"] == 3 and q["options"] == {} and q["accepted_answers"] == []
-    assert q["knowledge_tags"] == ["t0", "t1"] and q["difficulty"] == "core"
-    assert {"numbers_to_int", "removed_options", "removed_accepted_answers", "rubric_tags_merged", "difficulty_mapped"} <= set(f)
+    assert q["knowledge_tags"] == ["t0"] and q["rubric"][0]["knowledge_tags"] == [] and q["difficulty"] == "core"   # removed from the rubric item, not added to the question
+    assert {"numbers_to_int", "removed_options", "removed_accepted_answers", "rubric_tags_dropped", "difficulty_mapped"} <= set(f)
     assert fixes_of(dict(difficulty="whatever"))[0]["difficulty"] == "core"
     assert fixes_of(dict(difficulty="困难"))[0]["difficulty"] == "application"
     wrong, f = fixes_of(dict(question_type="term", max_points=5, rubric=[dict(points=2), dict(points=4)]), 6)

@@ -194,9 +194,11 @@ def test_the_cap_is_per_calendar_month_not_all_time(db, setup_ai, caps):
 def test_a_settled_call_counts_what_it_cost_a_failed_one_its_worst_case(db, setup_ai, caps):
     spend(db, setup_ai, "generation", "0.02", settled=True)  # reservation was 1, real cost 0.02
     assert cc.month_split(db, setup_ai) == (Decimal(0), Decimal("0.02"))
-    spend(db, setup_ai, "generation", "0.5", settled=False, key="failed")  # timed out: nobody knows, keep the ceiling
-    assert cc.month_split(db, setup_ai)[1] == Decimal("0.52")
-    assert cny_billing.totals(db, setup_ai)["month"] == Decimal("0.52")  # the user limits use the same measure
+    spend(db, setup_ai, "generation", "0.5", settled=False, key="failed")  # timed out: nobody knows
+    # ... so it counts as the median real cost of the last 50 generation calls (0.02), not its 0.5 ceiling,
+    # until reconciliation against the real balance corrects it
+    assert cc.month_split(db, setup_ai)[1] == Decimal("0.04")
+    assert cny_billing.totals(db, setup_ai)["month"] == Decimal("0.04")  # the user limits use the same measure
 
 
 def test_claim_blocks_writing_when_the_cap_is_reached_and_still_serves_grading(db, setup_ai, caps, monkeypatch):

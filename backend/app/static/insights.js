@@ -83,10 +83,11 @@
   /* Honest estimate: a clock time or "about N hours" from the real off-peak admission rate, else "estimating". */
   function etaText(bank) {
     if (bank.complete) return "题库已够一张卷子";
-    if (bank.eta_state === "slow") return "预计需要 2 天以上";
-    if (bank.eta_state !== "estimated" || !bank.eta_at) return "正在估算";
+    const paused = bank.budget && bank.budget.daily_exhausted ? "今日 AI 额度已用完，明天 0 点（北京时间）自动继续；" : "";
+    if (bank.eta_state === "slow") return paused + "预计需要 2 天以上";
+    if (bank.eta_state !== "estimated" || !bank.eta_at) return paused ? paused.replace(/；$/, "") : "正在估算";
     const hours = bank.eta_hours < 1 ? "不到 1 小时" : `约 ${Math.round(bank.eta_hours)} 小时`;
-    return `预计${hours}，${clock(bank.eta_at)} 前可开始`;
+    return `${paused}预计${hours}，${clock(bank.eta_at)} 前可开始`;
   }
   /* While the bank is short and no paper is prepared the start button is grey and says why. */
   let lock = null;

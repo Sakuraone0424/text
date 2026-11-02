@@ -89,6 +89,7 @@ def main():
                 diagnostic=safe_diagnostic(dict(receipt=measured, sdk_finish_reason=result.finish_reason)),
             ),
             sys.stdout,
+            ensure_ascii=False,  # Chinese stays 3 bytes per character, not a 6-byte \\uXXXX escape
         )
 
 

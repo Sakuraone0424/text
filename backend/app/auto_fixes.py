@@ -28,7 +28,7 @@ FIX_LABELS = {
     "answer_letter_normalized": "答案统一成选项字母",
     "blank_marker_unified": "填空的空格写法统一成 ____",
     "fill_answer_added_to_accepted": "标准答案补进了可接受答案",
-    "rubric_tags_merged": "评分要点的知识标签并入了题目标签",
+    "rubric_tags_dropped": "评分要点里不在题目标签中的知识标签已删除",
     "difficulty_mapped": "难度改成了规定的三档之一",
     "max_points_set_to_spec": "满分改成了规格分值（评分要点合计正好等于它）",
 }
@@ -141,18 +141,20 @@ def autofix(raw, spec_points=None, *, evidence_has_rubric_tags=True):
             q["accepted_answers"] = accepted + [answer.strip()]
             note("fill_answer_added_to_accepted")
 
-    # 7. rubric tags that the question does not list are added to the question's tags
+    # 7. rubric tags that the question does not list are removed from the rubric item (never added to the question)
     tags, rubric = q.get("knowledge_tags"), q.get("rubric")
     if isinstance(tags, list) and all(isinstance(t, str) for t in tags) and isinstance(rubric, list):
-        extra = []
+        cleaned, dropped = [], False
         for item in rubric:
-            if isinstance(item, dict) and isinstance(item.get("knowledge_tags"), list):
-                for tag in item["knowledge_tags"]:
-                    if isinstance(tag, str) and tag not in tags and tag not in extra:
-                        extra.append(tag)
-        if extra and len(tags) + len(extra) <= 30:
-            q["knowledge_tags"] = tags + extra
-            note("rubric_tags_merged")
+            if isinstance(item, dict) and isinstance(item.get("knowledge_tags"), list) and all(isinstance(t, str) for t in item["knowledge_tags"]):
+                kept = [t for t in item["knowledge_tags"] if t in tags]
+                dropped = dropped or kept != item["knowledge_tags"]
+                cleaned.append({**item, "knowledge_tags": kept})
+            else:
+                cleaned.append(item)
+        if dropped:
+            q["rubric"] = cleaned
+            note("rubric_tags_dropped")
 
     # 8. difficulty
     difficulty = q.get("difficulty")

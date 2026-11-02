@@ -65,6 +65,16 @@ app = FastAPI(lifespan=lifespan, title="肖涵 · 中科大考研智能答题", 
 
 
 @app.middleware("http")
+async def json_charset(request, call_next):
+    """Every JSON reply says it is UTF-8, so a browser opening an API address directly shows Chinese, not mojibake."""
+    response = await call_next(request)
+    content_type = response.headers.get("content-type", "")
+    if content_type.startswith("application/json") and "charset" not in content_type:
+        response.headers["content-type"] = "application/json; charset=utf-8"
+    return response
+
+
+@app.middleware("http")
 async def model_privacy(request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/v2/model"):

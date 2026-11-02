@@ -11,6 +11,7 @@ from app.evidence_match import locate
 
 POLICY = "auto-evidence/2"  # /2: one independent review round (older two-round events no longer count)
 MAX_REPAIRS = 1
+MAX_VIEWS = 4  # paragraphs one request may carry (auto_execution.MAX_EVIDENCE_UNITS)
 FORMAT_RETRY_SUFFIX = ":format_retry"
 
 
@@ -256,6 +257,18 @@ def source_views(q, refs, style):
         excerpts.setdefault(e["source_unit_id"], [])
         if e["excerpt"] not in excerpts[e["source_unit_id"]]:
             excerpts[e["source_unit_id"]].append(e["excerpt"])
+    # `refs` has one entry per cited excerpt. A single-choice question cites its own evidence plus the proof for every
+    # wrong option, easily more than the 4 paragraphs a request may carry: the execution guard then refused the review
+    # (ValueError evidence_exceeds_hard_cap) every time and the question never reached the bank. Beyond 4 entries the
+    # views are collapsed to one per paragraph (up to 4 entries the payload stays exactly as it always was, so stored
+    # reviews of questions already in the bank still match).
+    if len(refs) > MAX_VIEWS:
+        seen, unique = set(), []
+        for u in refs:
+            if u["unit_id"] not in seen:
+                seen.add(u["unit_id"])
+                unique.append(u)
+        refs = unique
     evidence_view = [
         {**{k: u[k] for k in fields}, "text": "\n\n".join(excerpts[u["unit_id"]])}
         for u in refs

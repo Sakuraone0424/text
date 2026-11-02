@@ -237,8 +237,8 @@ def wire_thinking(effort):
     }
 
 
-def cost_bound(s):
+def cost_bound(s, at=None):
     from app.cny_billing import validate_price, reserve_bound
 
     price = validate_price(s.get("price_snapshot", {}), s["model_id"])
-    return reserve_bound(price, s["token_limit"])
+    return reserve_bound(price, s["token_limit"], at)

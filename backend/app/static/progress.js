@@ -16,7 +16,15 @@ const REASON = {
   automation_stopped: "已停止AI任务",
   verified_cny_price_required: "价格未核实",
   model_delisted_or_catalog_changed: "模型目录变化",
-  superseded_scoring: "旧分值已停用",
+  superseded_scoring: "旧分值已停用（规则变更，一次性）",
+  worker_restarted: "后台服务重启时被中断，已重新排队",
+  released_on_shutdown: "服务重启前还没发出请求，已退回队列",
+  output_truncated: "模型输出被长度上限截断（不是格式问题）",
+  provider_output_truncated: "模型输出被长度上限截断（不是格式问题）",
+  provider_incomplete_model_response: "模型回应不完整",
+  provider_invalid_response_json: "模型回应不是有效的 JSON",
+  provider_sdk_exception: "调用模型时出现异常",
+  WorkerInterrupted: "运行结束时调用还没返回，已重新排队",
   invalid_or_uncertain_result: "结果无效或不确定",
   unspecified: "未注明",
   model_delisted_or_catalog_changed: "原模型已下架或目录变化",
@@ -81,7 +89,22 @@ const fmtTime = (iso) =>
     ? new Date(iso).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false })
     : "—";
 const yuan = (value) => (value === null || value === undefined ? "—" : "¥" + Number(value).toFixed(2));
-const reasonText = (code) => REASON[code] || REASON[String(code).split(":")[0]] || "原因未归类";
+const BUDGET_STOP = { daily: "今日额度已用完", monthly: "本月额度已用完", task: "单任务额度已用完", trial: "累计试验额度已用完", cap: "本月 AI 额度已用完" };
+function stopText(code) {
+  const m = /^blocked:budget_exceeded(?::(\w+))?$/.exec(String(code));
+  if (m) return BUDGET_STOP[m[1]] || "额度已用完";
+  const known = { "blocked:automation_stopped": "AI 任务已停止", no_claimable_job: "队列里没有可领取的任务", max_concurrency_reached: "并发名额已用满", run_time_budget: "已到本次运行的时间上限" };
+  return known[code] || reasonText(code);
+}
+const VALUE_ERROR = {
+  payload_exceeds_hard_cap: "请求内容超过 24000 字节上限", evidence_exceeds_hard_cap: "引用的教材超过 4 段或 5000 字的上限",
+  oversized_harness_response: "模型回答超过大小上限", oversized_result: "模型回答超过大小上限", stale_lease: "任务已被收回",
+  unapproved_wire_text: "发出的内容与批准的提示不一致", unapproved_automatic_parameters: "模型参数不在批准范围",
+};
+const reasonText = (code) =>
+  String(code).startsWith("ValueError:")
+    ? "内部检查没通过：" + (VALUE_ERROR[String(code).slice(11)] || String(code).slice(11))
+    : REASON[code] || REASON[String(code).split(":")[0]] || "原因未归类";
 
 function duration(hours) {
   if (hours < 1) return "不到 1 小时";
@@ -93,6 +116,11 @@ function paper(report) {
   const p = report.next_paper;
   const main = $("paper-main"), note = $("paper-note");
   main.className = "";
+  if (p.budget && p.budget.daily_exhausted && !p.complete) {
+    main.textContent = "还差 " + p.missing_questions + " 题";
+    note.textContent = "今日 AI 额度已用完，明天 0 点（北京时间）自动继续" + (p.eta_hours !== null ? "；预计" + duration(p.eta_hours) + "。" : "。");
+    return;
+  }
   if (p.complete) {
     main.textContent = "已经够了";
     note.textContent = "每个科目 × 题型的已入库题数都达到整卷所需。";
@@ -127,7 +155,7 @@ function status(report) {
   cell.textContent = w.minutes_ago < 1 ? "刚刚运行" : w.minutes_ago + " 分钟前";
   const outcome = w.outcome === "ok" ? "正常" : w.outcome === "disabled" ? "未启用" : "出错（" + w.outcome.replace("error:", "") + "）";
   const parts = ["上次 " + fmtTime(w.last_run_at) + " · " + outcome, "调用 " + w.calls + " 次", "同时最多 " + (w.concurrency || 1) + " 个", "用时 " + Math.round(w.duration_seconds || 0) + " 秒", "费用 " + yuan(w.cost_cny)];
-  if (w.stopped_because) parts.push("停止原因：" + reasonText(w.stopped_because));
+  if (w.stopped_because) parts.push("停止原因：" + stopText(w.stopped_because));
   note.textContent = parts.join(" · ") + (w.stale ? "。已超过 15 分钟没有运行（正常每 5 分钟一次）。" : "。");
   if (w.stale || w.outcome !== "ok") {
     note.classList.add("warn");
@@ -222,7 +250,7 @@ function waste(report) {
   const root = $("waste");
   root.replaceChildren();
   const w = report.waste;
-  if (!w || !w.blocked.length) {
+  if (!w || (!w.blocked.length && !(w.one_time || []).length)) {
     el("p", "近 24 小时没有被挡的任务", root, "note");
     return;
   }
@@ -235,6 +263,12 @@ function waste(report) {
     item.fields.forEach((f) => el("p", f.field + " ×" + f.count, row, "reason-line"));
     el("code", item.code, el("p", undefined, row, "reason-line"));
   }
+  if ((w.one_time || []).length) {
+    // one-off reasons (a rule change retired the work, a restart): kept apart and folded
+    const once = el("details", undefined, root, "waste-row");
+    el("summary", `一次性原因（不会再出现）· ${w.one_time.reduce((n, i) => n + i.count, 0)} 次`, once);
+    w.one_time.forEach((item) => el("p", `${reasonText(item.code)} ×${item.count}`, once, "reason-line"));
+  }
   const fixed = Object.entries(w.auto_fixed || {});
   if (fixed.length) el("p", "近 24 小时自动修正：" + fixed.map(([k, n]) => `${FIXES[k] || k} ${n}`).join("、"), root, "note");
   const layers = Object.entries(w.evidence_layers || {});
@@ -243,7 +277,7 @@ function waste(report) {
 const FIXES = {
   json_extracted: "提取 JSON", numbers_to_int: "数值转整数", removed_accepted_answers: "删多余可接受答案", removed_options: "删多余选项",
   empty_accepted_answers_removed: "删空答案", choice_keys_normalized: "选项键统一", choice_prefix_removed: "去选项前缀", answer_letter_normalized: "答案字母统一",
-  blank_marker_unified: "空格写法统一", fill_answer_added_to_accepted: "标准答案补入", rubric_tags_merged: "标签并入", difficulty_mapped: "难度映射", max_points_set_to_spec: "满分改规格值",
+  blank_marker_unified: "空格写法统一", fill_answer_added_to_accepted: "标准答案补入", rubric_tags_dropped: "删多余标签", difficulty_mapped: "难度映射", max_points_set_to_spec: "满分改规格值",
 };
 
 function spend(report) {
@@ -258,6 +292,20 @@ function spend(report) {
   $("spend-left").textContent = yuan(s.remaining_writing_review_cny);
   $("spend-grading").textContent = yuan(s.remaining_grading_cny);
   $("spend-note").textContent = s.message || "";
+  const ledger = report.ledger || {};
+  const month = (ledger.breakdown || {}).month;
+  if (month) {
+    const actual = Number(month.settled.counted_cny) + Number(month.reconciled.counted_cny);
+    $("ledger-actual").textContent = yuan(actual);
+    $("ledger-reserved").textContent = yuan(month.running.counted_cny);
+    const checked = ledger.reconciliation && ledger.reconciliation.last_checked_at;
+    $("ledger-checked").textContent = checked ? fmtTime(checked) : "还没有";
+    const est = Number(month.estimated.counted_cny);
+    const corr = ledger.reconciliation && ledger.reconciliation.last_correction;
+    $("ledger-note").textContent =
+      (month.estimated.count ? `另有 ${month.estimated.count} 笔没拿到用量的调用按近期中位数估算 ${yuan(est)}，等对账后修正。` : "") +
+      (corr ? ` 上次修正：${fmtTime(corr.at)}，多算的 ${yuan(corr.difference_cny)} 已退回额度。` : "");
+  }
   // cumulative spend this month by day, against the writing/review stop line and the monthly cap
   const days = s.daily || [];
   let running = 0;
