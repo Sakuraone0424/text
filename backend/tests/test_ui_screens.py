@@ -38,7 +38,7 @@ def engine(request):
 
 
 SHORT_BANK = {
-    "today": "2026-11-02", "exam_date": "2026-12-21", "days_left": 49, "streak": {"current": 0, "longest": 0},
+    "today": "2026-11-02", "exam_date": "2026-12-19", "days_left": 47, "streak": {"current": 0, "longest": 0},
     "today_paper": {"state": "none"},
     "last7": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None},
     "objective_rate": None, "subjective_rate": None, "weak_chapters": [],

@@ -260,16 +260,17 @@ def worker_status(conn, now):
     )
 
 
-def approved_recently(conn):
+def approved_recently(conn, hours=None):
     return conn.execute(
         "SELECT count(*) AS n FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
         "WHERE s.status='ready' AND q.status='published' AND s.updated_at>clock_timestamp()-%s*interval '1 hour'",
-        (RATE_WINDOW_HOURS,),
+        (hours or RATE_WINDOW_HOURS,),
     ).fetchone()["n"]
 
 
 MIN_APPROVALS_FOR_ETA = 3      # fewer recent approvals than this is a guess, not an estimate
-MIN_OFF_PEAK_HOURS_FOR_ETA = 3.0
+MIN_OFF_PEAK_HOURS_FOR_ETA = 1.0
+RATE_OFF_PEAK_HOURS = 6        # the rate comes from the last 6 off-peak hours (fewer if that is all the data there is)
 ETA_HORIZON_HOURS = 48         # beyond this the page says "more than 2 days" instead of a date
 
 
@@ -286,7 +287,20 @@ def _off_peak_hours(start, end, step_minutes=15):
     return hours
 
 
-def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horizon_hours=ETA_HORIZON_HOURS):
+def trailing_window(now, off_peak_hours=RATE_OFF_PEAK_HOURS, limit_hours=RATE_WINDOW_HOURS):
+    """(hours back, off-peak hours inside) for the most recent `off_peak_hours` of off-peak time, looking back at most `limit_hours`."""
+    from datetime import timedelta
+
+    step, moment, seen, back = 15, now, 0.0, 0.0
+    while seen < off_peak_hours and back < limit_hours:
+        moment -= timedelta(minutes=step)
+        back += step / 60
+        if not cost_control.is_peak(moment):
+            seen += step / 60
+    return round(back, 2), seen
+
+
+def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horizon_hours=ETA_HORIZON_HOURS, observed_off_peak_hours=None):
     """When will `missing` more questions be in the bank?
 
     The rate is approvals per OFF-PEAK hour over the last window (nothing is written in peak hours), and the
@@ -297,7 +311,7 @@ def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horiz
 
     if missing <= 0:
         return "complete", None, None, None
-    window_hours_off = _off_peak_hours(now - timedelta(hours=window_hours), now)
+    window_hours_off = observed_off_peak_hours if observed_off_peak_hours is not None else _off_peak_hours(now - timedelta(hours=window_hours), now)
     if approved < MIN_APPROVALS_FOR_ETA or window_hours_off < MIN_OFF_PEAK_HOURS_FOR_ETA:
         return "estimating", None, None, None
     rate = approved / window_hours_off
@@ -315,10 +329,11 @@ def estimate_ready(now, missing, approved, window_hours=RATE_WINDOW_HOURS, horiz
 def next_paper(conn, rows, now):
     """How long until the bank holds one complete paper (counting each cell only up to one paper's need)."""
     missing = sum(max(0, b["required"] - b["stocked"]) for b in rows)
-    admitted = approved_recently(conn)
-    state, eta_at, eta_hours, per_off_peak = estimate_ready(now, missing, admitted)
-    return dict(missing_questions=missing, approved_last_hours=RATE_WINDOW_HOURS, approved_in_window=admitted,
-                per_hour=round(admitted / RATE_WINDOW_HOURS, 3), per_off_peak_hour=per_off_peak,
+    back, off_hours = trailing_window(now)
+    admitted = approved_recently(conn, back)
+    state, eta_at, eta_hours, per_off_peak = estimate_ready(now, missing, admitted, back, observed_off_peak_hours=off_hours)
+    return dict(missing_questions=missing, approved_last_hours=round(back), approved_in_window=admitted,
+                per_hour=round(admitted / back, 3) if back else 0, per_off_peak_hour=per_off_peak, rate_off_peak_hours=round(off_hours, 2),
                 complete=missing == 0, eta_state=state, eta_hours=eta_hours, eta_at=eta_at)
 
 

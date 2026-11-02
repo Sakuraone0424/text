@@ -64,7 +64,7 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     # ---- home
     expect(page.locator("#days-left")).not_to_have_text("—")
     days = int(page.locator("#days-left").inner_text())
-    assert days == max(0, (date(2026, 12, 21) - datetime.now(timezone(timedelta(hours=8))).date()).days)
+    assert days == max(0, (date(2026, 12, 19) - datetime.now(timezone(timedelta(hours=8))).date()).days)
     assert int(page.locator("#streak-days").inner_text()) >= 10
     expect(page.locator("#stat-avg")).not_to_have_text("—")
     expect(page.locator("#stat-objective")).to_contain_text("%")
