@@ -221,6 +221,11 @@ def training_page():
     return FileResponse(STATIC_DIR / "training.html")
 
 
+@app.get("/progress", include_in_schema=False)
+def progress_page():
+    return FileResponse(STATIC_DIR / "progress.html", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/training-sw.js", include_in_schema=False)
 def training_service_worker():
     return FileResponse(

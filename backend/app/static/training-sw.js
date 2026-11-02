@@ -1,5 +1,5 @@
 "use strict";
-const CACHE = "xiaohan-training-shell-v11-essay-v4";
+const CACHE = "xiaohan-training-shell-v12-progress";
 const ASSETS = [
   "/",
   "/training",

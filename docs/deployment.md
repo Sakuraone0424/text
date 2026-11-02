@@ -57,6 +57,17 @@ worker 真正开始调用模型，需要同时满足：
 
 `deploy/railway-automation/worker.railway.json` 只作为上述设置的参考，不会被任何服务读取。正式站（`xiao-ustc-quiz`）运行 `main`，不受此变更影响；第 10 步切换时需在其服务级设置里同样写明。
 
+## 出题进度页
+
+登录后打开 `/progress`（首页「出题进度」卡片和「我的」里都有入口），每 30 秒自动刷新，只读。数据来自 `GET /v2/model/progress`（需登录），只返回数字、代码和时间，不含题干、教材原文、提示词和密钥：
+
+- 每个科目 × 题型：已入库 / 目标、排队中、出题中、审核中、被挡住（附原因代码统计）；目标 = `AI_BANK_TARGET_PER_BUCKET`，没设就是两天储备；
+- 最近 20 个任务：种类、状态、原因、时间；
+- 今日 / 本月花费、本月计入上限的金额、平均每入库一题多少钱、出题与审核剩余额度、判分预留剩余、本月每日花费；
+- 当前高峰 / 低峰及下一个低峰开始时间；
+- worker 上次运行时间和结果：每次运行写一行心跳到 `worker_heartbeats`（迁移 032，保留 14 天），超过 15 分钟没有心跳会标红；`worker-run` 日志照旧；
+- 预计还要多久能凑够下一张完整卷子：按最近 48 小时的入库速度估算，没有足够记录时只给缺口。
+
 ## worker 状态日志与「不领任务」排查
 
 每次运行 `python -m app.auto_worker` 结束时输出**一行** `worker-run …`（只含 ID、数量、代码，不含密钥和教材内容）：
@@ -208,7 +219,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 2. 创建 worker 服务（b），配置变量、**不部署**，把 worker 服务 ID 发给我；我改守卫、过 CI、合并，之后你再部署。
 3. 先部署 `training-api-qa`：preDeploy 阶段无；启动命令里的 `python migrate.py` 先跑迁移，再启动 uvicorn。验收：
    - `GET /health` → `{"status":"healthy"}`；
-   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 31，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
+   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 32，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
    - 登录后 `GET /v2/model/spend` 返回今日/本月、上限 90、预留 15。
 4. 再部署 worker：日志出现正常结束（cron 任务每 5 分钟起一次、`restartPolicyType: NEVER`）；若报 `Railway target identity mismatch: SERVICE`，说明第 1 点的代码改动还没合并。
 5. 做 c) 的设置与探测，再把 `AI_QUEUE_AUTOPLAN` 改 `1`，然后通知我做第 8.5 步。
