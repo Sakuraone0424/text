@@ -5,7 +5,7 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import Field, StrictBool, StrictInt
-from app.auth import require_auth
+from app.auth import require_auth, same_secret
 from app.common import ensure_user
 from app.db import get_db
 from app.question_quality import StrictModel
@@ -414,7 +414,7 @@ def benchmark_approval(data: BenchmarkApproval, request: Request, name=Depends(r
     configured = os.environ.get("QUIZ_REVIEW_API_KEY", "")
     if not configured:
         raise HTTPException(503, "Operator approval is disabled: QUIZ_REVIEW_API_KEY is not configured")
-    if not hmac.compare_digest(request.headers.get("x-review-api-key", ""), configured):
+    if not same_secret(request.headers.get("x-review-api-key", ""), configured):
         raise HTTPException(403, "Operator authorization required")
     from app.model_compatibility import approve_benchmark
 

@@ -222,7 +222,9 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     qa = https_app
     context = https_browser
     page = context.new_page()
-    page.goto(qa['origin'] + '/training#/model')
+    # The stale v7 cache is planted from a plain static file on the same origin, where no service worker exists yet: the
+    # application's worker then installs and activates over it, exactly like a real upgrade (and in the same order every time).
+    page.goto(qa['origin'] + '/static/tokens.css')
     page.evaluate("""async () => {
       const old = await caches.open('xiaohan-training-shell-v7-offline-recovery');
       await old.put('/static/training.js', new Response(
@@ -236,7 +238,10 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
         }
       ));
     }""")
-    # (the worker may already be activating and deleting the old cache, so its presence is not asserted here)
+    assert page.evaluate(
+        "async () => (await caches.keys()).includes('xiaohan-training-shell-v7-offline-recovery')"
+    )
+    page.goto(qa['origin'] + '/training#/model')
     paper = login_start(page, qa)
     q = next(x for x in paper['questions'] if x['question_type'] == 'term')
     open_question(page, q['id'])
@@ -245,16 +250,14 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     wait_saved(page)
     page.evaluate('navigator.serviceWorker.ready')
     page.wait_for_function('navigator.serviceWorker.controller !== null')
+    # the new cache is created when the worker starts to install and filled when it finishes: wait for the content itself
     page.wait_for_function("""async () => {
       const keys = await caches.keys();
-      return keys.includes('xiaohan-training-shell-v19-one-shell') &&
-             !keys.includes('xiaohan-training-shell-v7-offline-recovery');
-    }""")
-    assert page.evaluate("""async () => {
+      if (!keys.includes('xiaohan-training-shell-v19-one-shell') || keys.includes('xiaohan-training-shell-v7-offline-recovery')) return false;
       const cache = await caches.open('xiaohan-training-shell-v19-one-shell');
       const asset = await cache.match('/static/training.js');
       return !!asset && (await asset.text()).includes('cachedPaper(username, paper.paper_id)');
-    }""")
+    }""", timeout=60000)
     context.set_offline(True)
     field.fill('v8升级后离线刷新保留的草稿')
     page.reload()

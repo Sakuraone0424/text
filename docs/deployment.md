@@ -250,7 +250,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 2. 创建 worker 服务（b），配置变量、**不部署**，把 worker 服务 ID 发给我；我改守卫、过 CI、合并，之后你再部署。
 3. 先部署 `training-api-qa`：preDeploy 阶段无；启动命令里的 `python migrate.py` 先跑迁移，再启动 uvicorn。验收：
    - `GET /health` → `{"status":"healthy"}`；
-   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 35，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完，`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
+   - `GET /db/health` → 200，`"status":"healthy"`，`"database":"connected"`，`migration_count` = 37，`formal_training` = `{"specification":"xiaohan-60q-300pt-v4","questions":60,"points":300,"duration_seconds":…}`；503 且信息为 `V2 schema migrations are incomplete` 表示迁移没跑完；503 且 `detail.code` 为 `not_ready_for_training` 表示业务还没就绪，`detail.missing` 列出缺的核心表或「科目 × 题型」当前题量（有 / 需要，需要 = 一张卷子的题数）——这只影响 `/db/health`，Railway 的健康检查用的 `/health` 不受影响；`Unknown QUIZ_DAILY_SPECIFICATION` 表示规格变量不对；
    - 登录后 `GET /v2/model/spend` 返回今日/本月、上限 90、预留 15。
 4. 再部署 worker：日志出现正常结束（cron 任务每 5 分钟起一次、`restartPolicyType: NEVER`）；若报 `Railway target identity mismatch: SERVICE`，说明第 1 点的代码改动还没合并。
 5. 做 c) 的设置与探测，再把 `AI_QUEUE_AUTOPLAN` 改 `1`，然后通知我做第 8.5 步。
@@ -292,17 +292,78 @@ QA 库 schema source_staging_ocr_20261030
 | 已入库题目及其审核证据 | `reviewed_questions、question_audits、auto_question_states、auto_quality_events、auto_knowledge_events、candidate_review_packets、candidate_revision_links、candidate_human_decisions、candidate_science_assessments、legacy_question_publications、legacy_proposals、legacy_hints、legacy_page_calibration、legacy_reuse_state` |
 | 用户与设置 | `users`（仅正式站那一个登录用户，见下）、`ai_settings`（复制后逐项核对金额、并发、`stopped`）、`ai_model_catalog`、`selection_policies` 及其 assignments |
 | 出题/审核的任务记录 | `ai_jobs`、`ai_call_events`：**需要用户决定**（见第 7 节问题 2） |
+| **学习数据（全部搬，见 3.1）** | `papers_v2、paper_items_v2、selection_runs、training_sessions、answer_drafts、answer_images、attempts_v2、answers_v2、answer_timings、grading_events、answer_reflections、reviews_v2、fsrs_cards、fsrs_events、question_reports（“这题有问题”反馈）、practice_sets、handwriting_*、notion_state、notion_sync_jobs、notion_mistake_pages、notion_sync_events、archive_consent、selection_policy_assignments` |
+| **费用账本（搬，见 3.3）** | `ai_cny_events、ai_cny_adjustments、ai_cny_reservations、ai_cny_prices、ai_cny_price_resolutions、ai_budget_reservations、ai_settings_events`（本月部分） |
 
-**不搬**（QA 上的测试作答与计费，搬了会污染正式学习记录和月费用）：`papers_v2、paper_items_v2、attempts_v2、answers_v2、reviews_v2、training_sessions、answer_drafts、answer_images、handwriting_*、fsrs_*、grading_events、answer_reflections、selection_runs、question_reports、ai_budget_reservations、ai_cny_*、ai_settings_events、ai_review_campaign*、qa_automation_*、archive_*、automation_jobs、reviewer_*`。实现上用 `pg_dump --exclude-table-data=…`：这些表的结构仍会建出（外键保持完整），只是空表。
+> 修订说明：本节早先版本把上面两行列为「不搬」，理由是 QA 上的测试作答会污染正式记录。这个前提不成立：你现在每天在 QA 上学习，这些就是真实学习数据，必须一起搬。污染的只有「测试垃圾」，见 3.2，按明确规则排除，而不是整类不搬。
 
-用户行：正式站登录靠 `APP_PASSWORD` + `SESSION_SECRET`，会话令牌里是用户名；新 schema 里只放一个用户行，用户名与现有登录一致（执行前请你告诉我旧 `users` 表里那一行的用户名，我只读 `username`，不读别的），`id` 不要求等于旧表的 1。不复制 QA 的其它用户行。
+#### 3.1 学习数据：全部搬，关联不变
+
+- **ID 原样保留**：`users.id`、`papers_v2.id`、`attempts_v2.id`、`questions`（`reviewed_questions.id`）等一律不改号，所以题目 ID、试卷 ID、用户 ID 之间的外键天然一致，不需要映射表。正式 schema 里只放那一个学习者用户行，`id` 取 QA 里该学习者的 `id`，`username` 改为正式站登录用的用户名（执行前你告诉我；我只读 `username`）。
+- **搬运方式**：结构和「题库/资料」仍用 `pg_dump --schema`（第 2 节）；学习数据不能靠 `pg_dump` 过滤行，也不能在新库里逐行 `DELETE`（`answers_v2`、`question_audits` 等有不可变触发器）。改为**按选定行复制**：搬家脚本（设计见 3.5）用 `COPY (SELECT … WHERE paper_id IN <保留集>) TO STDOUT` → `COPY … FROM STDIN`，按外键顺序（`users` → `papers_v2` → `paper_items_v2` → `selection_runs` → `training_sessions` → `answer_drafts / answer_images` → `attempts_v2` → `answers_v2 / answer_timings / grading_events / answer_reflections / reviews_v2` → `fsrs_cards → fsrs_events` → `question_reports` → `notion_*`）写入，**一个事务**；身份列用 `OVERRIDING SYSTEM VALUE` 保留原 ID，写完后 `setval` 把序列推到最大值之后。
+- **复习卡片和错题本**：`fsrs_cards`、`fsrs_events` 按用户整表搬（它们只含 QA 学习者自己的复习状态）；错题本不是单独的表，而是「`answers_v2` 中得分低于满分的题 + 其 FSRS 卡片」，所以随这两部分一起到位；`notion_mistake_pages` 也搬，避免正式站重复建 Notion 页面。
+- 「这题有问题」反馈（`question_reports`）、每题用时（`answer_timings` 与 `answer_drafts.value.seconds`）、判分记录（`grading_events`，只追加）、反思（`answer_reflections`）、手写转写（`handwriting_*`）、照片答案（`answer_images`）原样搬。`answer_images` 的图片字节在表里，随表一起走。
+- 题目与卷子的引用必须在目标里存在：因为 `reviewed_questions` 整表搬（第 3 节首表），`paper_items_v2` 里保存的题目快照（`snapshot`，等于开卷时的完整题目内容）和 `reviewed_questions` 的外键都成立；保留集里任何一张卷子引用到目标没有的题目，则整个搬家中止。
+
+#### 3.2 排除规则：只排除测试垃圾
+
+排除的是下面三类，**其余一律搬**。规则按「创建时间 + 规格 ID + 用户」判断，不按表整体丢弃：
+
+1. **GPT 时期与 v4 规格切换之前的测试作答**：卷子 `papers_v2` 满足下面**任一**条件即排除，它名下的 `paper_items_v2 / selection_runs / training_sessions / answer_* / attempts_v2 / answers_v2 / 判分 / 反思 / 用时 / 反馈 / archive 任务` 一并排除：
+   - `blueprint->>'specification'` **不等于** `xiaohan-60q-300pt-v4`（GPT 时期的 28 题卷、`xiaohan-60q-150pt-v2`、各种 `synthetic-test-spec` 等）；
+   - `papers_v2.created_at` **早于 v4 切换时刻** `T_v4`。`T_v4` 的取法：QA 上第一张 v4 规格卷子的 `created_at`；脚本把候选值列在清单里，由你确认或改成别的时刻，**不是脚本自己决定**。
+2. **CI / 测试用户的全部数据**：`users.username` 不是正式学习者的用户（包括 `test-owner`、`ci-*`、`e2e-*`、`stranger`、`quiz_live_test_*` 夹具创建的用户等）。规则写成**白名单**：只保留你指定的那一个用户名，其余用户名及其全部数据都排除；脚本把「被排除的用户名及各自行数」列出来给你看，避免误排除。
+3. **测试垃圾的衍生行**：仅属于被排除卷子/用户的 `fsrs_cards / fsrs_events`（卡片的 `user_id` 属于被排除用户）、`notion_sync_jobs`、`notion_mistake_pages`、`notion_sync_events`、`question_reports`、`archive_consent`。
+
+**搬家前先输出清单，等你确认**（脚本的 `plan` 子命令，只读，不写任何库）。输出分两张表，每行有数量：
+
+| 将搬 | 将排除 |
+|---|---|
+| 每张表保留的行数；卷子数、已交卷数、作答数；FSRS 卡片数及其中到期数；错题数；反馈数；`T_v4`；保留的用户名 | 每张表排除的行数；排除的卷子（逐张列出：id、日期、规格、创建时间、排除原因）；排除的用户名及其行数 |
+
+清单同时给出「**没被任何规则命中、但也不在保留集**」的卷子数，必须为 0；不为 0 脚本拒绝继续（说明有规则没覆盖到的情形）。你回复「确认」后才执行下一步，确认的是一份带哈希的清单（脚本执行时重算清单，哈希不一致即中止），防止确认之后数据又变了。
+
+#### 3.3 费用账本：本月已花的钱要搬，月上限连续
+
+- 月上限是按本月 `ai_cny_events`（实际记账）、`ai_cny_adjustments`（人工校正）、`ai_cny_reservations / ai_budget_reservations`（预占）累计出来的，不是一个独立计数器（`cost_control` / `cny_billing`）。若不搬，正式站会把本月已花的钱当成 0 重新计算，上限被绕过。
+- 所以搬：**本月（按中国时区自然月）全部**费用事件、校正、预占、价格表与价格决议（`ai_cny_prices / ai_cny_price_resolutions`，月费用口径依赖它们）、`ai_settings_events`（上限、`stopped` 的变更历史），以及当前的 `ai_settings` 行（上限、并发、`stopped`）。上月及更早的费用记录不搬，留在 QA。
+- 搬完后用同一个函数在两边各算一次「本月已花 / 剩余」，**两边必须相等到分**；`stopped` 仍保持 `true` 直到你确认再放开。
+- 注意：这与第 7 节旧的风险 4 相反。旧结论是「默认不复制 ai_cny_*，避免把 QA 费用算进正式站」；现在 QA 就是你实际在用的环境，QA 本月花的钱就是这个项目本月花的钱，应当计入。
+
+#### 3.4 搬家后校验：两边逐表核对，不一致就回滚
+
+脚本在目标 schema 的**同一个事务**里写完所有表之后、`COMMIT` 之前执行校验；任何一项不一致就 `ROLLBACK`，目标保持搬家前的样子（正式 schema 里没有任何学习数据），并输出不一致的表、键和两边的值。
+
+1. **行数**：每张「搬」的表，目标行数 = 源端按保留集算出的行数（清单里的数字）。
+2. **每张卷子**：`papers_v2.id` 一一对应；每卷的 `paper_items_v2` 条数、每个 `snapshot` 的内容哈希（`md5(snapshot::text)`）相同；已交卷的卷子，`attempts_v2.submitted_at`、`SUM(answers_v2.points)`（**总分**）、待判分题数相同；每道题的 `answers_v2.points / answer` 相同。
+3. **每道错题**：每条 `fsrs_cards`，`question_id`、`due`（**下次复习日期**）、`stability / difficulty / state / reps / lapses` 与源端相同；`fsrs_events` 条数与每题最后一次事件相同。
+4. **反馈与用时**：`question_reports` 的 `(paper_id, question_id)` 集合相同；每卷 `answer_timings` 的用时合计相同。
+5. **费用**：本月已花合计、各来源（`ai_cny_events` 合计、校正合计、预占合计）两边相等到分；`ai_settings` 的上限、并发、`stopped` 相同。
+6. **外键与孤儿**：目标里不存在指向被排除数据的外键（`paper_id / attempt_id / question_id / user_id` 都能在目标里找到）；序列值大于各表最大 ID。
+7. **抽样回放**：对 3 张已交卷的卷子，用目标库重新调用 `result()`，与源端同函数的输出逐字段比较（总分、每题得分、解析）。
+
+先在演练库（第 4 节第 3 步）完整做一遍并核对，通过后才在正式库做；正式库的写入同样走「一个事务 + 校验 + 回滚」。
+
+#### 3.5 搬家脚本的设计（只有设计，没有实现，也没有运行）
+
+`prod-move/move_learning_data.py`（在单独分支，不合并进 `feat/60q-v2-spec`）：
+
+- `plan --keep-user <用户名> --cutover <T_v4>`：只读连 QA，打印 3.2 的清单和哈希。
+- `apply --manifest <哈希>`：重算清单，哈希一致才继续；按 3.1 的顺序复制；3.4 全部通过才提交。
+- `verify`：随时对两边重新做 3.4 的 1–7 项，只读。
+- 目标 schema 名、源端 schema 名、是否 `--rehearsal` 都是必填参数，不读环境里的默认值，避免误写 `public` 或 QA；脚本拒绝目标是 `public`、拒绝源与目标是同一个库同一个 schema。
+- 不打印任何答案正文、教材原文或密钥，日志只含表名、行数、ID 和哈希。
+
+#### 3.6 旧正式站的 4 张卷子：方案 A，导出留档
+
+旧正式站 `public` 里的 4 张卷子（2026-09-26、10-27、10-28、10-30，`user_id=1`）不导入新系统的历史（新旧表结构不同，答案没有题目快照），而是**导出留档**：搬家第 1 步的 `pg_dump -n public` 备份之外，再导出一份只读档案：`papers / paper_questions / questions / attempts / answers / review_schedule` 这几张卷子相关的行，各存成 CSV 加一份可读的 `旧正式站4张卷子.md`（每张卷子：日期、得分、每题题干/选项/你的答案/正确答案/解析），放在你的机器上，**不进仓库、不写日志**。`public` 里的八张旧表本身保持原样不动、不删除。导出后用 `COUNT(*)` 核对：4 张卷子、每卷 60 题、`answers` 行数与库里一致。
 
 ### 4. 步骤（每步都有检查点；先在演练库做一遍）
 
 0. **前提**：第 8、8.5 步完成，QA 上的题库就是你愿意带上正式站的版本；在 QA 停止 worker（`AI_AUTOMATION_ENABLED=0` 或停服务），保证转储时数据不再变化。
 1. **备份**：Railway 为正式 Postgres 做一次备份/快照；另外 `pg_dump -n public` 导出旧八张表到你手里的文件（4 张卷子的数据体量很小）。检查点：备份文件可读，`papers` 4 行。
-2. **转储**：`pg_dump -n source_staging_ocr_20261030 --no-owner --no-privileges` + 上表的 `--exclude-table-data`。教材原文在转储文件里，**文件只放在你的机器/受控位置，不进仓库、不写日志、不进 Docker 镜像**。
-3. **演练**：新建临时库，建 schema，恢复，执行 `migrate.py`（`QUIZ_DB_SCHEMA` 指向演练 schema），然后核对：每张「搬」的表行数 = QA 行数；「不搬」的表行数 = 0；`/db/health` 为 200；`reviewed_questions` 中 `published` 且 `auto_question_states.status='ready'` 的数量按（科目 × 题型）与 QA 一致；抽 5 道题确认引用的教材段落能在 `source_units` 里按原文精确找到；`ai_settings` 的 `stopped` 为 `true`。演练失败则整个丢弃重来，不影响任何环境。
+2. **转储**：`pg_dump -n source_staging_ocr_20261030 --no-owner --no-privileges`，加 `--exclude-table-data` 排除 3 节里所有「学习数据」和「费用账本」表的行（这些表按 3.1/3.3 用搬家脚本按选定行复制，结构仍随转储建出）。教材原文在转储文件里，**文件只放在你的机器/受控位置，不进仓库、不写日志、不进 Docker 镜像**。
+3. **演练**：新建临时库，建 schema，恢复，执行 `migrate.py`（`QUIZ_DB_SCHEMA` 指向演练 schema），然后核对：每张「随转储搬」的表行数 = QA 行数；学习数据与费用表此时为空，等 3.2 清单确认后由搬家脚本写入并按 3.4 核对；`/db/health` 为 200；`reviewed_questions` 中 `published` 且 `auto_question_states.status='ready'` 的数量按（科目 × 题型）与 QA 一致；抽 5 道题确认引用的教材段落能在 `source_units` 里按原文精确找到；`ai_settings` 的 `stopped` 为 `true`。演练失败则整个丢弃重来，不影响任何环境。
 4. **正式站建 schema**：`CREATE SCHEMA prod_v2_…`（应用本身不允许创建 schema：`db.py` 要求 schema 必须事先存在），恢复转储到该 schema，行数核对同第 3 步。检查点：`public` 的八张表行数、列、索引与备份时一致（用第 1 步的清单逐项比）。
 5. **改守卫的代码合入正式服务**（单独分支，见第 6 节）并部署到正式站之前，先把所有新变量配到服务上（旧代码会忽略它们）：`QUIZ_DB_SCHEMA`、`QUIZ_DEPLOYMENT_PROFILE`、`QUIZ_APPROVED_*`、`QUIZ_DAILY_SPECIFICATION`、DeepSeek 三项等（完整清单见第 8 节）。
 6. **部署新代码**：preDeploy 的 `python migrate.py` 在 `QUIZ_DB_SCHEMA` 内只应用转储里没有的迁移（若转储来自最新 QA，则为空操作）。失败即不切换，旧版本继续服务。
@@ -344,7 +405,7 @@ QA 库 schema source_staging_ocr_20261030
 1. **误碰旧表**：只要 `QUIZ_DB_SCHEMA` 漏设，`migrate.py` 就会改旧表（模拟 B 已证实）。靠第 6 节的档案 + 运行时断言防住；执行前再做一次正式库「改前/改后」对比。
 2. **转储里的教材原文**：是你的私有资料，转储文件不得入仓库/日志/镜像；演练库用完即删。
 3. **QA 与正式的身份混淆**：`ai_settings`、`users` 复制后必须人工核对（尤其预算和 `stopped`）。
-4. **月费用口径**：若复制 `ai_cny_*`，QA 的 11 月花费会算进正式站的 90 元上限，所以默认不复制（见上表）。
+4. **月费用口径**：本月已花的费用必须搬（3.3），否则正式站的月上限会从 0 重新累计；搬完两边必须相等到分。
 5. **题目的审核证据依赖任务记录**：`ready()` 需要「真实完成的审核调用且载荷可重算」，若不带 `ai_jobs/ai_call_events`，复制来的已入库题可能不被认作 ready（取决于重算方式，演练时会验证，不通过就改为带上这两张表）。
 6. 搬家期间 QA 必须停写；转储之后在 QA 产生的新题不会自动同步。
 7. 未知：正式 Postgres 角色是否有建 schema 的权限（演练前先用只读检查 `has_database_privilege`，不行则由你在 Railway 后台用管理角色建 schema）。
@@ -485,3 +546,10 @@ Home-screen (standalone) mode: the bottom bar and the exam's fixed bar get a fix
 - 教材检索：名词解释先在全部段落里逐字找这个名词（不受长度和 OCR 标记过滤），带前后相邻段落，最多 4 段；找不到则不调用模型（`term_not_in_textbook`）。只有严重 OCR 标记（`corrupt_ocr`、`untranscribed_image`、`image_dependent`、表格、`ocr_uncertain`、缺页）让段落不可用；`chemical_structure` 和 `scientific_notation_requires_source_review` 属轻微标记，段落保留，审核员不必解释。
 - 规划：按缺口比例分配出题名额，单选不低于最近 20 次请求的 30%；真题名词解释仍最多占 20%（`PAST_TERM_MAX_SHARE`），通过率超过 30% 后设为 1 恢复。
 - 部署后对比：`python -m app.waste_report compare --at <部署时间> --hours 6` 给出前后 6 小时各题型的审核通过率、入库数和每入库一题的费用。
+
+
+## 登录与会话（安全加固）
+
+- 登录失败按来源计数：同一来源 10 分钟内失败 10 次，锁定 15 分钟（返回 429 和中文提示「登录失败次数过多，已暂时锁定，请 15 分钟后再试。」，带 `Retry-After`）。来源取平台代理追加的最后一个 `X-Forwarded-For`。
+- 退出登录会让当前这个会话失效（会话号写入 `revoked_sessions`）；修改 `APP_PASSWORD` 后所有旧会话立即失效（会话里带密码版本号）。部署本次更新后，旧格式的登录 Cookie 也会失效，需要重新登录一次。
+- 密码、`X-API-Key`、`Authorization`、`X-Review-API-Key` 一律按 UTF-8 字节做常量时间比较，中文密码或非 ASCII 请求头得到 401/403，而不是 500。

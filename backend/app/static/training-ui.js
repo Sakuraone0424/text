@@ -271,8 +271,8 @@
     byId("result").hidden = timing?.status !== "submitted";
     byId("result-bar").hidden = timing?.status !== "submitted";
     byId("questions").hidden = !active();
-    byId("questions").inert = !active() || !!latest.expired;
-    byId("submit").disabled = !!latest.expired || !!latest.serverPending;
+    byId("questions").inert = !active() || !!latest.expired || document.body.classList.contains("is-submitting");
+    byId("submit").disabled = !!latest.expired || !!latest.serverPending || document.body.classList.contains("is-submitting");
     byId("toggle-mark").disabled = !!latest.expired;
     byId("focus-toolbar").hidden = !active();
     if (!active()) {

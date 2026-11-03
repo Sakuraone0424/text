@@ -142,6 +142,7 @@ def test_the_database_accepts_essay_past_exam_items(db):
 
 
 def test_health_stays_green_while_the_previous_specification_id_is_still_set(client, monkeypatch):
+    monkeypatch.setattr("app.main.business_gaps", lambda: [])  # readiness of the bank is tested in test_hardening.py
     monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", v2.SPECIFICATION)
     body = client.get("/db/health").json()
     assert body["specification_env_outdated"] is True

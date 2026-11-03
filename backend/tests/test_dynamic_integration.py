@@ -583,7 +583,8 @@ def test_unanswered_and_pending_records_cannot_initialize_fsrs_on_repeated_updat
     assert db.execute("SELECT COUNT(*) AS n FROM fsrs_events").fetchone()["n"] == 0
 
 
-def test_public_contract_exposes_only_v2_training_and_schema_readiness(client):
+def test_public_contract_exposes_only_v2_training_and_schema_readiness(client, monkeypatch):
+    monkeypatch.setattr("app.main.business_gaps", lambda: [])  # bank readiness is tested in test_hardening.py
     schema = client.get("/openapi.json").json()
     assert (
         "/quiz/today" not in schema["paths"] and "/quiz/submit" not in schema["paths"]

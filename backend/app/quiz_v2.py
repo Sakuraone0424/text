@@ -393,6 +393,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     subject,
                     kind,
                     decisions,
+                    due,
                 )
             )
     if shortages:

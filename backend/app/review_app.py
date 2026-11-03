@@ -90,7 +90,8 @@ def csrf(token):
 
 def write_identity(request: Request, name=Depends(identity)):
     if not hmac.compare_digest(
-        request.headers.get("x-review-csrf", ""), csrf(request.cookies.get(COOKIE, ""))
+        request.headers.get("x-review-csrf", "").encode("utf-8", "surrogatepass"),
+        csrf(request.cookies.get(COOKIE, "")).encode("utf-8"),
     ):
         raise HTTPException(403, "Reload the review session before saving")
     origin = request.headers.get("origin")
