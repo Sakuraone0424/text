@@ -57,7 +57,7 @@ def execution_guard(job):
     s = job["settings_snapshot"]
     if job.get("kind") not in KINDS:
         raise ValueError("unsupported_automatic_job_kind")
-    if job.get("state") != "running" or not 1 <= job.get("attempts", 0) <= s.get("retry_limit", 0) + 1:
+    if job.get("state") != "running" or not 1 <= job.get("attempts", 0) - job.get("transient_attempts", 0) <= s.get("retry_limit", 0) + 1:
         raise ValueError("leased_automatic_attempt_required")
     if (
         s.get("model_id") != "deepseek-flash"

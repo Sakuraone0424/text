@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app import cny_billing, cost_control, cost_reconcile
+from app import ai_jobs, cny_billing, cost_control, cost_reconcile
 from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count
 from app.training_spec_v4 import COUNTS, SUBJECTS
 
@@ -206,7 +206,7 @@ def _notes(norm):
 def recent_jobs(conn, limit=20):
     held = cost_control.held_back_kinds()
     rows = conn.execute(
-        "SELECT id,kind,state,attempts,error_code,next_retry,dispatched_at,payload->>'subject' AS subject,"
+        "SELECT id,kind,state,attempts,transient_attempts,error_code,next_retry,dispatched_at,payload->>'subject' AS subject,"
         "payload->>'question_type' AS question_type,payload->>'origin' AS origin,payload->>'item_id' AS item_id,"
         "payload->>'question_id' AS question_id,settings_snapshot->>'effort' AS effort,settings_snapshot->>'model_id' AS model,"
         "COALESCE(finished_at,started_at,created_at) AS at,result->'dispatch_failure' AS failure,result->'normalization' AS norm "
@@ -262,7 +262,9 @@ def recent_jobs(conn, limit=20):
         out.append(dict(
             id=r["id"], kind=r["kind"], label=label, source=source, state=r["state"], reason=reason,
             detail=detail["text"] if detail else None, notes=_notes(r["norm"]), at=r["at"], subject=r["subject"], question_type=r["question_type"],
-            question_id=q["id"] if q else None, attempts=r["attempts"],
+            question_id=q["id"] if q else None, attempts=r["attempts"] - r["transient_attempts"],   # the task's own tries
+            # DeepSeek busy / unreachable: the job is just waiting, which is not a failure of the task
+            platform_busy=bool(r["state"] in ("pending", "retrying") and r["error_code"] in ai_jobs.PLATFORM_CODES),
             next_retry=r["next_retry"] if r["state"] == "retrying" else None, outcome=outcome,
             awaiting_dispatch=bool(r["state"] == "succeeded" and r["dispatched_at"] is None),
         ))
@@ -278,7 +280,33 @@ def worker_status(conn, now):
         last_run_at=row["finished_at"], outcome=row["outcome"], calls=row["calls"], cost_cny=str(row["cost_cny"]),
         stopped_because=row["stopped_because"], queue=row["queue"], minutes_ago=minutes,
         concurrency=row["concurrency"], duration_seconds=float(row["duration_seconds"]),
+        busy_503=row["busy_503"], busy_429=row["busy_429"], timeouts=row["timeouts"],
+        effective_concurrency=row["effective_concurrency"],
         stale=minutes > STALE_AFTER_MINUTES,
+    )
+
+
+PLATFORM_RECENT_MINUTES = 30
+
+
+def platform_status(conn):
+    """Is DeepSeek struggling right now? Jobs waiting to retry after a 429/5xx/timeout, and how the last run went.
+    Numbers and codes only."""
+    waiting = conn.execute(
+        "SELECT count(*) AS n,min(next_retry) AS next_at FROM ai_jobs WHERE state IN ('pending','retrying') AND error_code=ANY(%s)",
+        (list(ai_jobs.PLATFORM_CODES),),
+    ).fetchone()
+    run = conn.execute(
+        "SELECT calls,busy_503,busy_429,timeouts,effective_concurrency,finished_at FROM worker_heartbeats "
+        "WHERE calls>0 ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    recent = bool(run and run["finished_at"] > conn.execute(
+        "SELECT clock_timestamp()-%s*interval '1 minute' AS t", (PLATFORM_RECENT_MINUTES,)).fetchone()["t"])
+    run_busy = bool(recent and (run["busy_503"] + run["busy_429"]) * 2 > run["calls"])
+    return dict(
+        busy=bool(waiting["n"]) or run_busy, waiting_jobs=waiting["n"], next_retry_at=waiting["next_at"],
+        last_run=dict(calls=run["calls"], busy_503=run["busy_503"], busy_429=run["busy_429"], timeouts=run["timeouts"],
+                      effective_concurrency=run["effective_concurrency"]) if run else None,
     )
 
 
@@ -440,5 +468,6 @@ def report(conn, uid):
         )} | dict(daily=daily_spend(conn, uid), remaining_daily_cny=cny_billing.summary(conn, uid)["remaining_daily_cny"]),
         period=cost_control.peak_outlook(now),
         worker=worker_status(conn, now),
+        platform=platform_status(conn),
         next_paper=next_paper(conn, rows, now),
     )

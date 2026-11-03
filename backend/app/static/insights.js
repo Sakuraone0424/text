@@ -106,7 +106,12 @@
     return (same ? "" : `${parts.month} 月 ${parts.day} 日 `) + `${parts.hour}:${parts.minute}`;
   };
   /* Honest estimate: a clock time or "about N hours" from the real off-peak admission rate, else "estimating". */
+  // one line more when DeepSeek is struggling: the paper may take longer than the estimate, nothing is wrong with the tasks
   function etaText(bank) {
+    const text = etaBase(bank);
+    return bank.platform_busy && !bank.complete ? "DeepSeek 繁忙，出题可能变慢，会自动等待重试；" + text : text;
+  }
+  function etaBase(bank) {
     if (bank.complete) return "题库已够一张卷子";
     const paused = bank.budget && bank.budget.daily_exhausted ? "今日 AI 额度已用完，明天 0 点（北京时间）自动继续；" : "";
     if (bank.eta_state === "slow") return paused + "预计需要 2 天以上";
