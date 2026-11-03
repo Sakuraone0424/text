@@ -19,6 +19,5 @@
     if (field.matches && field.matches("input, textarea, select") && field.type !== "checkbox" && field.type !== "radio")
       setTimeout(() => field.scrollIntoView({ block: "center" }), 250);
   });
-  // every view script has loaded: the page the URL names (#/progress, #/model ...) can now draw itself
-  window.dispatchEvent(new Event("shell-ready"));
+  // ("shell-ready" is sent by training.js once the last script has hooked up its pages: see the end of that file)
 })();

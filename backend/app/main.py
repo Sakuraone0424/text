@@ -91,6 +91,18 @@ async def timing(request, call_next):
 
 
 @app.middleware("http")
+async def revalidate_the_shell(request, call_next):
+    """The pages, scripts and styles of the application shell are checked with the server on every load (an ETag makes that
+    cheap). Without a Cache-Control header a browser may reuse a script for hours by its own guess, so a home-screen app kept
+    running yesterday's script after a deploy."""
+    response = await call_next(request)
+    path = request.url.path
+    if (path.startswith("/static/") or path in ("/", "/training")) and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
 async def model_privacy(request, call_next):
     response = await call_next(request)
     if request.url.path.startswith("/v2/model"):

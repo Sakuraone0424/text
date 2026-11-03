@@ -112,7 +112,7 @@ UNSTYLED = """
   const root = [...document.querySelectorAll('[data-page]')].filter((n) => !n.hidden)[0];
   if (!root) return ['no visible page'];
   for (const list of root.querySelectorAll('ol, ul')) {
-    if (shown(list) && getComputedStyle(list).listStyleType !== 'none' && !list.classList.contains('legacy-list'))
+    if (shown(list) && getComputedStyle(list).listStyleType !== 'none' && !list.classList.contains('legacy-list') && !list.classList.contains('steps'))
       bad.push('list numbering/bullets: ' + (list.id || list.className || list.tagName));
   }
   for (const s of root.querySelectorAll('summary')) {
@@ -222,7 +222,7 @@ def test_the_progress_page_shows_ring_bars_dots_and_a_split_bar(engine, live_app
     assert li.evaluate("(n) => getComputedStyle(n).display") == "grid"
     # spend: one split bar and the reconciliation folded away
     expect(page.locator("#spend-split .split")).to_be_visible()
-    expect(page.locator("#spend-split .legend li")).to_have_count(3)
+    expect(page.locator("#spend-split .spend-legend li")).to_have_count(3)
     assert not page.locator("#ledger").evaluate("(n) => n.open")
     assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
     assert not errors, errors
@@ -265,4 +265,145 @@ def test_screenshots_of_the_changed_pages(engine, live_app, mode, scheme):
         go(page, route)
         page.wait_for_timeout(400)
         snap(page, engine, mode, prefix + "route", name)
+    assert not errors, errors
+
+
+# ---------------------------------------------------------------- PR 2b: the Notion card, the spend legend
+
+NOTION_CARD = "Notion归档状态"
+
+
+def tap(page, selector, wait=700):
+    page.locator(selector).first.click()
+    page.wait_for_timeout(wait)
+
+
+def clean_main_page(page, label):
+    assert learning_children(page) == 0, f"{label}: a sub-page left content behind"
+    assert NOTION_CARD not in visible_page_text(page), f"{label}: the Notion card is on a main page"
+    assert page.locator("#learning").evaluate("(n) => n.getBoundingClientRect().height") == 0, f"{label}: the sub-page container takes room"
+
+
+def test_the_notion_card_is_only_ever_on_the_archive_sub_page_whatever_the_way_in_and_out(engine, live_app):
+    client, dsn, _ = live_app
+    seed(client, dsn)
+    base = str(client.base_url).rstrip("/")
+    # opened directly: the profile page and the mistakes page
+    for route in ("#/profile", "#/mistakes"):
+        page, errors = open_page(engine, "safari", base, "/training" + route)
+        page.wait_for_timeout(900)
+        clean_main_page(page, "direct " + route)
+    # with real taps: in, out by the tab bar, in again, out by the browser's back, in and out at once
+    page, errors = open_page(engine, "safari", base)
+    page.wait_for_timeout(900)
+    tap(page, 'nav.primary-nav [data-view="profile"]')
+    clean_main_page(page, "profile")
+    tap(page, "#archive", 1200)
+    assert NOTION_CARD in visible_page_text(page) and learning_children(page) > 0       # here, and only here
+    tap(page, 'nav.primary-nav [data-view="mistakes"]', 900)
+    clean_main_page(page, "mistakes after archive")
+    tap(page, 'nav.primary-nav [data-view="profile"]', 900)
+    clean_main_page(page, "profile after archive")
+    tap(page, "#archive", 1200)
+    page.go_back()
+    page.wait_for_timeout(800)
+    clean_main_page(page, "back from archive")
+    tap(page, "#archive", 80)                                                       # leave before it has loaded
+    tap(page, 'nav.primary-nav [data-view="mistakes"]', 1500)
+    clean_main_page(page, "left while loading")
+    for sub_button in ("#weekly", "#history", "#insights", "#source-status"):          # the stats sub-pages, in and out
+        go(page, "#/stats")
+        tap(page, sub_button, 1200)
+        assert learning_children(page) > 0
+        for main in ("#/profile", "#/mistakes", "#/home"):
+            go(page, main)
+            clean_main_page(page, f"{sub_button} then {main}")
+    assert not errors, errors
+
+
+def test_scripts_and_pages_of_the_shell_are_revalidated_on_every_load(live_app):
+    client, _, _ = live_app
+    for path in ("/static/training-ui.js", "/static/training.js", "/static/views.css", "/training", "/"):
+        assert client.get(path, follow_redirects=True).headers.get("cache-control") == "no-cache", path
+    assert "v19-one-shell" in client.get("/training-sw.js").text
+
+
+def test_the_spend_legend_is_one_row_under_the_bar_at_390px(engine, live_app):
+    client, dsn, _ = live_app
+    base = str(client.base_url).rstrip("/")
+    page, errors = open_page(engine, "safari", base, "/training#/progress")
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.locator("#pv-content")).to_be_visible()
+    legend = page.locator("#spend-split .spend-legend")
+    legend.scroll_into_view_if_needed()
+    box, bar, card = legend.bounding_box(), page.locator("#spend-split .split").bounding_box(), page.locator("#spend-split").locator("xpath=ancestor::section[1]").bounding_box()
+    assert box["y"] >= bar["y"] + bar["height"] - 1                                  # under the bar, not beside or behind it
+    assert box["width"] > 0.8 * bar["width"] and card["x"] <= box["x"] and box["x"] + box["width"] <= card["x"] + card["width"] + 1
+    items = legend.locator("li").evaluate_all("(els) => els.map((e) => { const r = e.getBoundingClientRect(); return [r.top, r.height, r.width]; })")
+    assert len(items) == 3 and all(h < 32 and w > 60 for _, h, w in items), items        # horizontal text, not a vertical column
+    assert len({round(top) for top, _, _ in items}) <= 2                                 # a row (it may wrap to two when narrow)
+    assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
+    page.locator("#spend-split").screenshot(path="/tmp/claude-0/shots/" + engine[0] + "-spend-legend-390.png")
+    assert not errors, errors
+
+
+ARCHIVE_STATUS = """() => {
+  const real = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (!url.includes('/v2/archive/status')) return real(input, init);
+    const body = {configured: true, consented: true, last_synced_at: new Date().toISOString(), success: 4, failed: 1, pending: 2,
+      recent: [{at: new Date().toISOString(), ok: false, code: 'not_found', message: '找不到这个页面：请把页面分享（连接）给集成，并确认页面 ID 正确', detail: {}},
+               {at: new Date().toISOString(), ok: true, code: null, message: null, detail: {training: 1, mistakes: 12}}]};
+    return Promise.resolve(new Response(JSON.stringify(body), {status: 200, headers: {'Content-Type': 'application/json'}}));
+  };
+}"""
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_the_archive_page_shows_status_switch_buttons_records_and_the_setup_steps(engine, live_app, scheme):
+    client, dsn, _ = live_app
+    seed(client, dsn)
+    base = str(client.base_url).rstrip("/")
+    page, errors = open_page(engine, "safari", base, "/training#/profile/archive", scheme=scheme)
+    page.set_viewport_size({"width": 390, "height": 844})
+    expect(page.locator("#learning .archive-card")).to_be_visible()
+    expect(page.locator("#learning .tile")).to_have_count(6)
+    expect(page.locator("#learning")).to_contain_text("服务器还没有设置 NOTION_TOKEN")      # unconfigured: honest, no pretend sync
+    expect(page.get_by_role("button", name="立即同步")).to_be_disabled()
+    expect(page.get_by_role("button", name="测试连接")).to_be_enabled()
+    page.locator("#learning input[type=checkbox]").check()                                # the switch really saves
+    expect(page.locator("#learning")).to_contain_text("同步已打开")
+    page.evaluate(ARCHIVE_STATUS)                                                         # a configured server with some history
+    go(page, "#/profile")
+    go(page, "#/profile/archive")
+    expect(page.locator("#learning .sync-list li")).to_have_count(2)
+    expect(page.locator("#learning .sync-list li").first).to_contain_text("同步失败：找不到这个页面")
+    expect(page.locator("#learning .sync-list li").nth(1)).to_contain_text("12 道错题")
+    expect(page.get_by_role("button", name="立即同步")).to_be_enabled()
+    help_box = page.locator("#learning details.fold")
+    assert not help_box.evaluate("(n) => n.open")
+    help_box.locator("summary").click()
+    expect(help_box.locator("ol.steps li")).to_have_count(7)
+    expect(help_box).to_contain_text("notion.so/my-integrations")
+    expect(help_box).to_contain_text("NOTION_PARENT_PAGE_ID")
+    assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
+    snap(page, engine, "safari", ("" if scheme == "light" else "dark-") + "route", "archive-notion")
+    assert not errors, errors
+
+
+@pytest.mark.parametrize("sub,marker", SUBS)
+def test_a_sub_page_opened_by_its_address_draws_itself(engine, live_app, sub, marker):
+    """A deep link or a home-screen app restored to a sub-page: shell-ready used to be sent before training.js had hooked up the
+    sub-pages' buttons, so the page stayed empty."""
+    client, dsn, _ = live_app
+    seed(client, dsn)
+    base = str(client.base_url).rstrip("/")
+    page, errors = open_page(engine, "safari", base, "/training" + sub)
+    page.wait_for_function("document.getElementById('learning').childElementCount > 0", timeout=8000)
+    if marker:
+        assert marker in visible_page_text(page)
+    for main in ("#/mistakes", "#/profile"):
+        go(page, main)
+        clean_main_page(page, f"{sub} opened directly, then {main}")
     assert not errors, errors

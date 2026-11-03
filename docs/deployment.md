@@ -454,4 +454,34 @@ All learner pages are views of `/training`: `#/home`, `#/exam`, `#/mistakes`, `#
 
 Speed: `Data.swr` shows the cached copy of a page at once and refreshes it behind (a visible retry card on network errors); the server keeps a 30 s `StaleCache` for the progress page (`?fresh=1` bypasses it, cancelling a job invalidates it) and memoises the OCR file integrity hash per `(document, sha)`. `GET /v2/perf` (learner key) returns p50/p95/max per route over the last 500 requests; requests over 300 ms are logged as `slow request`. Every response carries `Server-Timing: app;dur=…`.
 
-Home-screen (standalone) mode: the bottom bar and the exam's fixed bar get a fixed 30 px bottom gap through `@media (display-mode: standalone)` (and `html.standalone` for iOS' `navigator.standalone`); `viewport-fit=cover` stays off and Safari is unchanged. The service worker cache is `v17-one-shell`.
+Home-screen (standalone) mode: the bottom bar and the exam's fixed bar get a fixed 30 px bottom gap through `@media (display-mode: standalone)` (and `html.standalone` for iOS' `navigator.standalone`); `viewport-fit=cover` stays off and Safari is unchanged. The service worker cache is `v19-one-shell`; pages, scripts and styles of the shell are sent with `Cache-Control: no-cache` (revalidated on every load, ETag keeps it cheap).
+
+
+## Notion 同步（训练记录 + 错题本）
+
+服务器端用 Notion **内部集成**（Internal Integration）。两个环境变量（Railway → 服务 → Variables），密钥只放在这里，不会出现在页面、日志或接口返回里：
+
+| 变量 | 说明 |
+| --- | --- |
+| `NOTION_TOKEN` | 内部集成密钥（`secret_…` 或 `ntn_…`） |
+| `NOTION_PARENT_PAGE_ID` | 已分享给该集成的页面 ID（32 位字母数字，也可以直接填整条页面链接） |
+| `PUBLIC_BASE_URL`（可选） | 本网站地址，用于「训练记录」里的成绩页链接 |
+
+在 iPhone 的 Safari 上设置：
+
+1. 打开 `notion.so/my-integrations` → 新集成 → 类型「内部」→ 选工作区 → 提交，点「显示」复制密钥。
+2. 在 Notion 里新建一个空白页面（如「学习档案」）→ 右上角「…」→「连接」→ 选这个集成。
+3. 同一页面「分享」→「复制链接」；链接最后那串 32 位字母数字就是页面 ID。
+4. Railway 里加 `NOTION_TOKEN`、`NOTION_PARENT_PAGE_ID`（可选 `PUBLIC_BASE_URL`），保存并等重新部署。
+5. 网站「我的 → 归档状态」：先点「测试连接」（只读，不写数据），通过后打开开关，再点「立即同步」。
+
+行为：开关默认关闭，关闭时不向 Notion 发送任何数据。首次同步在父页面下创建「训练记录」（每套卷子一行：日期、两科得分/满分、总分、各题型得分率、用时、是否含复用题、成绩页链接）和「错题本」（每道失分题一行：科目、题型、章节、题干、我的答案、参考答案、得分/满分、评分要点逐条得分和理由、依据位置、错误次数、下次复习日期）；已有同名数据库就复用。交卷并判完分后由后台任务同步；失败自动重试 3 次（1 分钟、5 分钟、30 分钟后），第 3 次失败后等「立即同步」。同步是幂等的：试卷按试卷 ID、错题按题目 ID 找到原条目并更新，不会重复新建。不发送整段教材原文，只写「依据：教材第 X 章 · 第 Y 页」。
+
+## 出题质量（审核契约 11）
+
+- 真题题目的审核不再把自己的来源条目作为风格示例；审核员不用示例判重复，重复由程序和已发布题比较（同科目同题型，0.9）。因这个原因被挡的真题题目重新排队审核（不重新出题）。
+- 评分要点只需「意思被所给段落支持」（可概括、改写）；引用仍逐字匹配。出题提示词：评分要点只能来自所给段落，被截断的段落末尾不写进评分要点；单空填空题只有一条评分要点（这个空的答案，满分）。
+- 真题导入：由题目文本决定题型（A–D 选项 → 单选，多选标记 → 不支持；空格标记 → 填空），章节标题不再拼进上一题；已导入的条目在第一次规划时重新分类一次，前后数量在 `waste/stats.past_exam_route.reclassification` 和日志里。
+- 教材检索：名词解释先在全部段落里逐字找这个名词（不受长度和 OCR 标记过滤），带前后相邻段落，最多 4 段；找不到则不调用模型（`term_not_in_textbook`）。只有严重 OCR 标记（`corrupt_ocr`、`untranscribed_image`、`image_dependent`、表格、`ocr_uncertain`、缺页）让段落不可用；`chemical_structure` 和 `scientific_notation_requires_source_review` 属轻微标记，段落保留，审核员不必解释。
+- 规划：按缺口比例分配出题名额，单选不低于最近 20 次请求的 30%；真题名词解释仍最多占 20%（`PAST_TERM_MAX_SHARE`），通过率超过 30% 后设为 1 恢复。
+- 部署后对比：`python -m app.waste_report compare --at <部署时间> --hours 6` 给出前后 6 小时各题型的审核通过率、入库数和每入库一题的费用。

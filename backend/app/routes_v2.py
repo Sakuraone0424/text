@@ -436,50 +436,50 @@ class Consent(StrictModel):
 
 @router.put("/archive/consent")
 def archive_consent(payload: Consent, username: str = Depends(require_auth)):
+    from app import notion_sync
+
     def consent(c, u):
         c.execute(
             "INSERT INTO archive_consent VALUES (%s,%s) ON CONFLICT(user_id) DO UPDATE SET enabled=EXCLUDED.enabled",
             (u, payload.enabled),
         )
         if payload.enabled:
-            from app.archiving import enqueue
-
-            for row in c.execute(
-                "SELECT a.paper_id FROM attempts_v2 a JOIN papers_v2 p ON p.id=a.paper_id WHERE p.user_id=%s",
-                (u,),
-            ).fetchall():
-                enqueue(c, u, row["paper_id"])
-        return {
-            "consented": payload.enabled,
-            "configured": __import__("os").environ.get("NOTION_SYNC_ENABLED") == "1",
-        }
+            notion_sync.backfill(c, u)          # papers already graded are queued; nothing is sent until the worker or 立即同步 runs
+        return {"consented": payload.enabled, "configured": notion_sync.configured()}
 
     return operation(consent, username)
 
 
 @router.get("/archive/status")
 def archive_status(username: str = Depends(require_auth)):
-    return operation(
-        lambda c, u: {
-            "configured": os.environ.get("NOTION_SYNC_ENABLED") == "1"
-            and bool(os.environ.get("NOTION_TOKEN"))
-            and bool(os.environ.get("NOTION_DATABASE_ID")),
-            "consented": bool(
-                (
-                    c.execute(
-                        "SELECT enabled FROM archive_consent WHERE user_id=%s", (u,)
-                    ).fetchone()
-                    or {}
-                ).get("enabled")
-            ),
-            "jobs": c.execute(
-                "SELECT j.id,j.state,j.attempts,j.error,j.verified_at FROM archive_jobs j "
-                "JOIN attempts_v2 a ON a.id=j.attempt_id JOIN papers_v2 p ON p.id=a.paper_id WHERE p.user_id=%s ORDER BY j.id",
-                (u,),
-            ).fetchall(),
-        },
-        username,
-    )
+    from app import notion_sync
+
+    return operation(lambda c, u: notion_sync.status(c, u), username)
+
+
+@router.post("/archive/test")
+def archive_test(username: str = Depends(require_auth)):
+    """Read-only check of the secret and the page permission. Writes nothing, anywhere."""
+    from app import notion_sync
+
+    result = notion_sync.test_connection()
+    return {**result, "message": None if result["ok"] else notion_sync.MESSAGES.get(result["code"], notion_sync.MESSAGES["unexpected"])}
+
+
+@router.post("/archive/sync")
+def archive_sync(username: str = Depends(require_auth)):
+    from app import notion_sync
+
+    def run(c, u):
+        try:
+            outcome = notion_sync.sync_now(c, u)
+        except PermissionError:
+            raise HTTPException(409, "sync_switched_off") from None
+        except notion_sync.NotionError as exc:
+            raise HTTPException(409, exc.code) from None
+        return {**outcome, **notion_sync.status(c, u)}
+
+    return operation(run, username)
 
 
 @router.get("/sources/search", dependencies=[Depends(require_reviewer)])
@@ -665,7 +665,7 @@ def reflect(
                 payload.note,
             ),
         )
-        from app.archiving import enqueue
+        from app.notion_sync import enqueue
 
         enqueue(c, u, paper_id)
         return {"recorded": True, "replayed": False}
