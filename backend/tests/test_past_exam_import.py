@@ -52,6 +52,12 @@ def old_planning_order(monkeypatch):
     monkeypatch.setattr(pei, "_PRIORITY_SQL", "CASE question_type WHEN 'term' THEN 0 WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 WHEN 'fill_blank' THEN 2 ELSE 3 END")
 
 
+@pytest.fixture(autouse=True)
+def no_reclassification(monkeypatch):
+    """These tests edit items by hand; reclassifying them is tested in test_quality_pr3.py."""
+    monkeypatch.setattr(pei, "reclassify_once", lambda conn: None)
+
+
 @pytest.fixture
 def corpus(db, tmp_path, monkeypatch):
     path, meta = material(tmp_path, "biochemistry_lower", content=TEXTBOOK)

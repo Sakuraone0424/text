@@ -16,8 +16,8 @@ def test_the_reviewer_gets_the_whole_paragraph_the_writer_had_and_the_request_st
     written(db, setup_ai)
     review = review_jobs(db)["review"]
     p = review["payload"]
-    assert p["instructions"].startswith("Single independent review of one exam question (contract 10)")
-    assert quality.job_contract_version(review) == 10
+    assert p["instructions"].startswith("Single independent review of one exam question (contract 11)")
+    assert quality.job_contract_version(review) == 11
     qid = p["question_id"]
     q, refs, style = quality.evidence(db, qid)
     cited = {e["source_unit_id"]: e["excerpt"] for e in q["evidence"]}
@@ -167,6 +167,6 @@ def test_pass_rate_and_average_cost_are_reported_per_contract_and_thinking_level
                (f"cost-{review['id']}", review["id"]))
     rows = waste_report.review_by_contract(db, 72)
     row = next(r for r in rows if r["question_type"] == "single_choice")
-    assert (row["contract"], row["thinking"], row["reviewed"], row["passed"], row["pass_rate"]) == ("10", "high", 1, 1, 1.0)
+    assert (row["contract"], row["thinking"], row["reviewed"], row["passed"], row["pass_rate"]) == ("11", "high", 1, 1, 1.0)
     assert row["avg_cost_cny"] == "0.0123"
     assert waste_report.full_stats(db, 24)["review_by_contract"] == rows or waste_report.full_stats(db, 24)["review_by_contract"]

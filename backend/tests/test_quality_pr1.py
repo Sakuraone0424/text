@@ -69,7 +69,7 @@ def test_review_errors_are_split_before_and_after_the_first_contract_10_review(d
                ('{"code":"evidence_version_changed"}', review["id"]))
     errors = waste_report.review_value_errors(db, 24)
     assert errors["contract10_first_job_at"] is not None
-    assert any("evidence_version_changed" in k and "合约10" in k for k in errors["after_pr26"]) and not errors["before_pr26"]
+    assert any("evidence_version_changed" in k and "合约11" in k for k in errors["after_pr26"]) and not errors["before_pr26"]
     row = errors["rows"][0]
     assert row["code"] == "evidence_version_changed" and row["after_pr26"] and row["count"] == 1
 
@@ -108,10 +108,10 @@ def test_a_very_short_line_is_kept_with_its_neighbours_when_together_they_are_lo
     assert got.index(ids[0]) < got.index(ids[1]) < got.index(ids[2])
 
 
-def test_a_very_short_line_with_no_substantial_neighbours_is_dropped(db, corpus):
+def test_a_term_is_found_in_a_paragraph_of_any_length_and_its_neighbours_come_along(db, corpus):
     ids = add_units(db, ["丙", "孟德尔试剂丙：虚构物。", "丁"])
     got = [u["unit_id"] for u in pei.retrieve_evidence(db, "biochemistry", "孟德尔试剂丙", term=True)]
-    assert ids[1] not in got
+    assert got == ids                      # the 12-character hit and the paragraph before and after it, in reading order
 
 
 def _term_item(db, stem):
@@ -138,3 +138,21 @@ def test_a_term_that_is_in_the_paragraph_is_still_queued(db, corpus, setup_ai):
     item = _term_item(db, "冈崎片段")
     result = pei._enqueue_item(db, setup_ai, item)
     assert result == "queued", db.execute("SELECT blocked_reason FROM past_exam_items WHERE id=%s", (item["id"],)).fetchone()
+
+
+# ---- the before / after view around a deploy ---------------------------------------------------------------------------
+
+def test_compare_windows_splits_reviews_and_cost_around_a_moment(db, corpus, setup_ai):
+    from app import auto_quality as quality
+
+    qid, review = review_round(db, setup_ai)
+    assert quality.accept_round(db, review)
+    db.execute("INSERT INTO ai_cny_events(event_key,job_id,attempt,kind,amount_cny,detail) VALUES ('cmp-1',%s,1,'usage_estimate',0.5,'{}')", (review["id"],))
+    now = db.execute("SELECT clock_timestamp() AS t").fetchone()["t"].isoformat()
+    result = waste_report.compare_windows(db, now, 6)                              # everything happened BEFORE `now`
+    assert result["before"]["single_choice"]["reviewed"] == 1 and result["before"]["single_choice"]["cost_cny"] == "0.50"
+    assert result["before"]["all"]["reviewed"] == 1 and result["after"]["all"]["reviewed"] == 0
+    earlier = db.execute("SELECT (clock_timestamp()-interval '7 hours') AS t").fetchone()["t"].isoformat()
+    assert "single_choice" not in waste_report.compare_windows(db, earlier, 6)["after"]   # 7 h ago + 6 h: it is outside
+    ago_1h = db.execute("SELECT (clock_timestamp()-interval '1 hour') AS t").fetchone()["t"].isoformat()
+    assert waste_report.compare_windows(db, ago_1h, 6)["after"]["single_choice"]["reviewed"] == 1

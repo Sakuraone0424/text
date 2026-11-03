@@ -3,7 +3,7 @@
 import json
 import random
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from pydantic import Field, StrictInt
 
@@ -233,7 +233,7 @@ def bounded_textbook_evidence(conn, primary, kind=None):
         "SELECT u.id FROM source_units u "
         "JOIN source_units anchor ON anchor.id=%s "
         "WHERE u.document_id=anchor.document_id AND u.chapter=anchor.chapter "
-        "AND u.id<>anchor.id AND u.quality_flags='[]'::jsonb "
+        "AND u.id<>anchor.id AND " + evidence_filter.SEVERE_SQL + " "
         "AND length(u.text) BETWEEN 80 AND 4000 "
         "ORDER BY abs(u.ordinal-anchor.ordinal),u.ordinal,u.id LIMIT 8",
         (primary["unit_id"],),
@@ -251,7 +251,7 @@ def bounded_textbook_evidence(conn, primary, kind=None):
             or other["source_sha256"] != primary["source_sha256"]
             or other["chapter"] != primary["chapter"]
             or other["source_kind"] != "textbook"
-            or other["quality_flags"]
+            or evidence_filter.severe(other["quality_flags"])
             or not pinned_source_bytes(other["file_id"], other["source_sha256"])
         ):
             continue
@@ -398,7 +398,7 @@ def plan(conn, uid):
             if (
                 u["unit_sha256"] != concept["unit_sha256"]
                 or u["source_kind"] != "textbook"
-                or u["quality_flags"]
+                or evidence_filter.severe(u["quality_flags"])
                 or u["subject"] != subject
                 or not pinned_source_bytes(u["file_id"], u["source_sha256"])
             ):
@@ -476,7 +476,7 @@ def paragraph_pool(conn, subject):
         "SELECT u.id,u.chapter,u.text,d.file_id,d.sha256 FROM source_units u "
         "JOIN source_documents d ON d.id=u.document_id WHERE "
         + current_source_sql("d", kind="textbook")
-        + " AND d.subject=%s AND u.quality_flags='[]'::jsonb "
+        + " AND d.subject=%s AND " + evidence_filter.SEVERE_SQL + " "
         "AND u.chapter NOT IN ('','unclassified','contents') AND length(u.text) BETWEEN %s AND %s "
         "ORDER BY u.id",
         (subject, ANCHOR_PARAGRAPH_MIN_CHARS, ANCHOR_PARAGRAPH_MAX_CHARS),
@@ -566,7 +566,7 @@ def _enqueue_gap(conn, uid, subject, kind):
             anchor is None
             or primary["source_kind"] != "textbook"
             or primary["subject"] != subject
-            or primary["quality_flags"]
+            or evidence_filter.severe(primary["quality_flags"])
             or not pinned_source_bytes(primary["file_id"], primary["source_sha256"])
         ):
             continue
@@ -590,6 +590,36 @@ def claimable_count(conn):
     ).fetchone()["n"]
 
 
+SINGLE_CHOICE_MIN_SHARE = 0.30
+ALLOCATION_WINDOW = 20   # the share is measured over the last 20 question-writing requests
+
+
+def allocate_order(conn, gaps):
+    """Order the short buckets so the requests are shared out in proportion to the gaps: a bucket whose share of the
+    recent requests is furthest below its share of the total gap goes first. Single choice (the biggest gap) never gets
+    less than SINGLE_CHOICE_MIN_SHARE of the recent requests while it has a gap."""
+    if len(gaps) < 2:
+        return list(gaps)
+    recent = Counter()
+    for r in conn.execute(
+        "SELECT payload->>'subject' AS s, payload->>'question_type' AS t FROM ai_jobs WHERE kind='generation' "
+        "AND COALESCE(payload->>'origin','')<>'past_exam' ORDER BY id DESC LIMIT %s", (ALLOCATION_WINDOW,)
+    ).fetchall():
+        recent[(r["s"], r["t"])] += 1
+    seen = sum(recent.values())
+    total_gap = sum(g for _, _, g in gaps) or 1
+
+    def deficit(g):
+        return g[2] / total_gap - (recent[(g[0], g[1])] / seen if seen else 0)
+
+    ordered = sorted(gaps, key=lambda g: -deficit(g))
+    single = [g for g in ordered if g[1] == "single_choice"]
+    share = sum(v for (s_, t_), v in recent.items() if t_ == "single_choice") / seen if seen else 0
+    if single and share < SINGLE_CHOICE_MIN_SHARE:
+        ordered = single + [g for g in ordered if g[1] != "single_choice"]
+    return ordered
+
+
 def plan_gap(conn, uid, max_active=2):
     """Queue one question-writing request for the largest uncovered bucket.
 
@@ -604,7 +634,7 @@ def plan_gap(conn, uid, max_active=2):
     if active >= max_active:
         return None
     past_exam_import.index_item_chapters(conn)
-    for subject, kind, _ in bucket_gaps(conn, uid):
+    for subject, kind, _ in allocate_order(conn, bucket_gaps(conn, uid)):
         job = _enqueue_gap(conn, uid, subject, kind)
         if job:
             return job
@@ -657,7 +687,7 @@ def repair_source_identity_from_locked_units(raw_question, units):
         if (
             unit is None
             or unit.get("source_kind") != "textbook"
-            or unit.get("quality_flags")
+            or evidence_filter.severe(unit.get("quality_flags"))
             or not isinstance(excerpt, str)
             or not excerpt.strip()
             or excerpt.strip() not in unit.get("text", "")

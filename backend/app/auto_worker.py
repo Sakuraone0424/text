@@ -140,6 +140,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
 
 
 def plan(conn, uid, target=None):
+    auto_quality.requeue_past_exam_duplicates(conn)   # before anything can retire them
     auto_quality.retire_stale(conn)
     auto_quality.retire_old_scoring(conn)
     auto_quality.discard_unfixable(conn)

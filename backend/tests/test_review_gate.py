@@ -82,7 +82,7 @@ def test_the_review_sees_answer_and_scoring_but_not_the_authors_reasoning(db, co
 
 def test_the_review_job_is_recognised_and_recomputed_exactly(db, corpus, setup_ai):
     qid, job, _ = fresh_choice(db, setup_ai)
-    assert quality.job_contract_version(job) == 10 and job["payload"]["instructions"].startswith("Single independent review")
+    assert quality.job_contract_version(job) == 11 and job["payload"]["instructions"].startswith("Single independent review")
     q, refs, style = quality.evidence(db, qid)
     assert quality.review_payload("review", qid, job["payload"]["content_sha256"], q, refs, style) == job["payload"]
 

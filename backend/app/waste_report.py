@@ -3,6 +3,7 @@ no-model replay of recent failures through the current rules (nothing is written
 
     python -m app.waste_report stats  [--hours 24]
     python -m app.waste_report replay [--hours 24] [--limit 300]
+    python -m app.waste_report compare --at 2026-11-03T12:00:00Z [--hours 6]   # before / after a deploy, per question type
 """
 
 import json
@@ -80,6 +81,39 @@ def _bucket(row_subject, row_type):
     return f"{row_subject or '?'}/{row_type or '?'}"
 
 
+_AXIS_WORDS = {
+    "duplication": ("重复", "雷同", "一致", "相同", "duplicate", "identical", "same as"),
+    "uniqueness": ("歧义", "不唯一", "多种", "未定义", "ambig", "unique", "more than one", "undefined"),
+    "scientific_correctness": ("科学", "事实", "错误", "不正确", "不符", "不准确", "不支持", "证据", "教材", "逐字", "correct", "factual", "support", "evidence", "verbatim"),
+    "exam_style": ("风格", "style"),
+    "type_fit": ("题型", "type", "一个空", "第二问", "两问"),
+}
+
+
+def categorised(result, finding):
+    """(category, reason) pairs for one failed review. A review belongs to EVERY category the reviewer actually failed: each
+    axis whose check is false, each program-found issue. The reason shown for an axis is the reviewer's own sentence about
+    THAT axis (matched by its words); when none can be matched, all of the reviewer's sentences are shown, never another
+    axis's sentence presented as this one's."""
+    unresolved = [str(x) for x in (finding.get("unresolved") or [])]
+    out = []
+    for issue in result.get("issues", []):
+        if issue == "unresolved_quality_findings":
+            failed = [a for a, ok in (finding.get("checks") or {}).items() if not ok]
+            if not failed:
+                out.append(("审核发现未解决的问题（未指明维度）", "；".join(unresolved) or finding.get("rationale") or ""))
+            for axis in failed:
+                words = _AXIS_WORDS.get(axis, ())
+                mine = [u for u in unresolved if any(w in u.lower() for w in words)]
+                out.append((AXIS_CATEGORY.get(axis, axis), "；".join(mine) if mine else "（未单独说明）全部理由：" + "；".join(unresolved)))
+        else:
+            out.append((ISSUE_CATEGORY.get(issue, issue), "程序检查：" + ISSUE_CATEGORY.get(issue, issue)))
+    unique = {}
+    for category, reason in out:
+        unique.setdefault(category, reason)
+    return list(unique.items())
+
+
 def review_failures(conn, hours=24, samples=2, origin=None):
     """Why reviews did not pass, by question type and by problem kind, with two samples each (stem summary + reason).
     `origin` ('past_exam' / 'generated') narrows it to one route."""
@@ -101,15 +135,7 @@ def review_failures(conn, hours=24, samples=2, origin=None):
         bucket["failed"] += 1
         result = r["result"] or {}
         finding = result.get("finding") or {}
-        cats = []
-        for issue in result.get("issues", []):
-            if issue == "unresolved_quality_findings":
-                failed_axes = [a for a, ok in (finding.get("checks") or {}).items() if not ok]
-                cats += [AXIS_CATEGORY.get(a, a) for a in failed_axes] or ["审核发现未解决的问题（未指明维度）"]
-            else:
-                cats.append(ISSUE_CATEGORY.get(issue, issue))
-        reason = (finding.get("unresolved") or [None])[0] or finding.get("rationale") or ""
-        for cat in dict.fromkeys(cats):
+        for cat, reason in categorised(result, finding):
             bucket["categories"][cat] += 1
             entry = categories[cat]
             entry["count"] += 1
@@ -129,7 +155,8 @@ def review_by_contract(conn, hours=72):
     """Review pass rate and average cost per review call, by review contract (9 = the cited spans, 10 = whole paragraphs,
     program-derived mapping, single choice at high thinking), question type and thinking level: the before/after view."""
     rows = conn.execute(
-        "SELECT CASE WHEN j.payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%' THEN '10' "
+        "SELECT CASE WHEN j.payload->>'instructions' LIKE 'Single independent review of one exam question (contract 11)%%' THEN '11' "
+        "            WHEN j.payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%' THEN '10' "
         "            WHEN j.payload->>'instructions' LIKE 'Single independent review%%' THEN '9' ELSE 'older' END AS contract, "
         "q.content->>'subject' AS subject, q.content->>'question_type' AS qtype, j.settings_snapshot->>'effort' AS effort, "
         "ev.passed, COALESCE((SELECT sum(c.amount_cny) FROM ai_cny_events c WHERE c.job_id=j.id AND c.kind='usage_estimate'),0) AS cost "
@@ -233,10 +260,12 @@ def review_value_errors(conn, hours=24):
     period before and after contract 10 (PR #26) first ran: `after` is anything created since the first contract-10 job."""
     cutoff = conn.execute(
         "SELECT min(created_at) AS t FROM ai_jobs WHERE kind='quality_review' "
-        "AND payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%'"
+        "AND (payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%' "
+        "  OR payload->>'instructions' LIKE 'Single independent review of one exam question (contract 11)%%')"
     ).fetchone()["t"]
     rows = conn.execute(
-        "SELECT CASE WHEN payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%' THEN '10' "
+        "SELECT CASE WHEN payload->>'instructions' LIKE 'Single independent review of one exam question (contract 11)%%' THEN '11' "
+        "            WHEN payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%' THEN '10' "
         "            WHEN payload->>'instructions' LIKE 'Single independent review%%' THEN '9' ELSE 'older' END AS contract, "
         "payload->>'question_type' AS qtype, "
         "COALESCE(result->'dispatch_failure'->>'code', error_code, 'unspecified') AS code, error_code, "
@@ -314,7 +343,10 @@ def past_exam_route(conn, hours=24, sample_limit=150):
     skipped = {f"{r['t']}:{r['why']}": r["n"] for r in conn.execute(
         "SELECT question_type AS t, blocked_reason AS why, count(*) AS n FROM past_exam_items WHERE status='blocked' "
         "AND blocked_reason IN ('term_not_in_textbook','no_textbook_evidence') AND updated_at>" + _since(hours) + " GROUP BY 1,2", (hours,)).fetchall()}
-    return dict(skipped_before_model=dict(hours=hours, by_type_and_reason=skipped,
+    from app import legacy_reuse
+    state = legacy_reuse._state(conn, "past_exam_classification")
+    return dict(reclassification=state,   # {version, before, after, retired_by_old_type, new_items, blocked}: item counts per type
+                skipped_before_model=dict(hours=hours, by_type_and_reason=skipped,
                                           term_not_in_textbook=sum(v for k, v in skipped.items() if k.endswith("term_not_in_textbook"))),
                 model_calls_ended={k: dict(v.most_common()) for k, v in ended.items()}, insufficient_textbook_evidence=insufficient,
                 review_by_type=review["by_type"], review_failure_kinds=review["categories"], items_by_state=dict(status),
@@ -344,7 +376,8 @@ def single_choice_options(conn, hours=24):
 
 
 def filter_report(conn):
-    """Textbook paragraphs before and after the usability filter (generation pool needs >= 120 characters)."""
+    """Textbook paragraphs before and after the usability filter (the generation pool needs >= 120 characters): the old rule
+    dropped a paragraph for ANY OCR quality flag, the current rule only for a severe one (see evidence_filter)."""
     from app.evidence_filter import reason_unusable
     from app.source_policy import current_source_sql
 
@@ -353,8 +386,11 @@ def filter_report(conn):
         rows = conn.execute(
             "SELECT u.text,u.quality_flags FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE "
             + current_source_sql("d", kind="textbook") + " AND d.subject=%s", (subject,)).fetchall()
-        reasons = Counter(reason_unusable(r["text"], r["quality_flags"] or (), min_chars=120) or "usable" for r in rows)
-        out[subject] = dict(before=len(rows), after=reasons["usable"], filtered=dict((k, v) for k, v in reasons.items() if k != "usable"))
+        new = Counter(reason_unusable(r["text"], r["quality_flags"] or (), min_chars=120) or "usable" for r in rows)
+        old = Counter(("ocr_quality_flag" if r["quality_flags"] else reason_unusable(r["text"], (), min_chars=120)) or "usable" for r in rows)
+        out[subject] = dict(before=len(rows), after=new["usable"], after_old_rule=old["usable"],
+                            filtered=dict((k, v) for k, v in new.items() if k != "usable"),
+                            filtered_old_rule=dict((k, v) for k, v in old.items() if k != "usable"))
     return out
 
 
@@ -429,6 +465,42 @@ def full_stats(conn, hours=24):
     )
 
 
+def compare_windows(conn, at, hours=6):
+    """The `hours` before and the `hours` after the moment `at` (an ISO time, e.g. when a version was deployed): per question
+    type, reviews / passed / pass rate, questions put in the bank, and the cost per question put in the bank (all model
+    spending of the window, writing + repair + review, divided by what reached the bank)."""
+    out = {}
+    for label, lo, hi in (("before", f"%s::timestamptz-{hours}*interval '1 hour'", "%s::timestamptz"),
+                          ("after", "%s::timestamptz", f"%s::timestamptz+{hours}*interval '1 hour'")):
+        table = defaultdict(lambda: dict(reviewed=0, passed=0, admitted=0, cost=Decimal(0)))
+        for r in conn.execute(
+            "SELECT q.content->>'question_type' AS t, count(*) AS reviewed, count(*) FILTER (WHERE ev.passed) AS passed FROM auto_quality_events ev "
+            f"JOIN reviewed_questions q ON q.id=ev.question_id WHERE ev.phase='review' AND ev.created_at>={lo} AND ev.created_at<{hi} GROUP BY 1",
+            (at, at)).fetchall():
+            table[r["t"]].update(reviewed=r["reviewed"], passed=r["passed"])
+        for r in conn.execute(
+            "SELECT q.content->>'question_type' AS t, count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+            f"WHERE st.status='ready' AND q.status='published' AND st.updated_at>={lo} AND st.updated_at<{hi} GROUP BY 1", (at, at)).fetchall():
+            table[r["t"]]["admitted"] = r["n"]
+        for r in conn.execute(
+            "SELECT COALESCE(j.payload->>'question_type', qq.content->>'question_type') AS t, COALESCE(sum(c.amount_cny),0) AS cny "
+            "FROM ai_cny_events c JOIN ai_jobs j ON j.id=c.job_id LEFT JOIN reviewed_questions qq ON qq.id=(CASE WHEN j.payload->>'question_id' ~ '^[0-9]+$' THEN (j.payload->>'question_id')::bigint END) "
+            f"WHERE c.kind='usage_estimate' AND j.kind IN ('generation','repair','quality_review') AND c.created_at>={lo.replace('%s', '%s')} AND c.created_at<{hi} GROUP BY 1",
+            (at, at)).fetchall():
+            if r["t"]:
+                table[r["t"]]["cost"] = Decimal(r["cny"])
+        total = dict(reviewed=0, passed=0, admitted=0, cost=Decimal(0))
+        for v in table.values():
+            for k in total:
+                total[k] += v[k]
+        table["all"] = total
+        out[label] = {t: dict(reviewed=v["reviewed"], passed=v["passed"], pass_rate=round(v["passed"] / v["reviewed"], 3) if v["reviewed"] else None,
+                              admitted=v["admitted"], cost_cny=str(v["cost"].quantize(Decimal("0.01"))),
+                              cost_per_admitted_cny=str((v["cost"] / v["admitted"]).quantize(Decimal("0.01"))) if v["admitted"] else None)
+                      for t, v in sorted(table.items())}
+    return dict(at=at, hours=hours, **out)
+
+
 def replay(conn, hours=24, limit=300, samples_per_layer=3):
     """Re-run the matching and the format rules on recently failed drafts. No model call, nothing written."""
     from app import auto_generation as gen
@@ -485,7 +557,10 @@ def main(argv=None):
     hours = int(argv[argv.index("--hours") + 1]) if "--hours" in argv else 24
     limit = int(argv[argv.index("--limit") + 1]) if "--limit" in argv else 300
     with get_db() as conn:
-        out = full_stats(conn, hours) if what == "stats" else replay(conn, hours, limit)
+        if what == "compare":
+            out = compare_windows(conn, argv[argv.index("--at") + 1], hours if "--hours" in argv else 6)
+        else:
+            out = full_stats(conn, hours) if what == "stats" else replay(conn, hours, limit)
     print(json.dumps(out, ensure_ascii=False, indent=2, default=str))
 
 
