@@ -178,11 +178,13 @@ def plan(conn, uid, target=None):
     # Past-exam questions need no corpus-wide sweep: each request carries only
     # the few textbook paragraphs relevant to that one question.
     legacy_reuse.plan(conn, uid)
-    past_exam_import.plan(conn, uid, batch=max(past_exam_import.MAX_CONCURRENT_JOBS, target or 0))
+    # New questions are planned FIRST: past-exam term requests may take at most 20% of the tasks in flight, and that
+    # share is counted against what was just queued
     if target:
         auto_generation.fill_queue(conn, uid, target)
     else:
         auto_generation.plan_gap(conn, uid)
+    past_exam_import.plan(conn, uid, batch=max(past_exam_import.MAX_CONCURRENT_JOBS, target or 0))
 
 
 # Sizing: about 160 calls a day (60 questions at ~75% review pass rate = ~80 written

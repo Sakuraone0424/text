@@ -231,7 +231,7 @@ def test_bucket_gap_deducts_work_already_on_its_way(db, corpus, setup_ai):
     pei.import_items(db)
     gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
     assert gaps[("biochemistry", "single_choice")] == 20
-    assert gaps[("biochemistry", "term")] == 8 - 1  # one imported past-exam term awaits its answer
+    assert gaps[("biochemistry", "term")] == 8  # an imported past-exam term is throttled (20% cap): it no longer holds back a new one
     assert gaps[("biochemistry", "short_answer")] == 2 - 1
     job = gen.plan_gap(db, setup_ai)
     after = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
@@ -245,7 +245,7 @@ def test_temporary_bank_target_gives_five_per_bucket_forty_in_all(db, corpus, se
     assert len(gaps) == 10 and set(gaps.values()) == {5} and sum(gaps.values()) == 50
     pei.import_items(db)
     gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
-    assert gaps[("biochemistry", "term")] == 5 - 1  # the imported past-exam term is counted
+    assert gaps[("biochemistry", "term")] == 5  # an imported (not yet queued) past-exam term is throttled and not counted
     job = gen.plan_gap(db, setup_ai)
     assert job is not None
     key = (job["payload"]["subject"], job["payload"]["question_type"])

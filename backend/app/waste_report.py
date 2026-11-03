@@ -78,13 +78,15 @@ def _bucket(row_subject, row_type):
     return f"{row_subject or '?'}/{row_type or '?'}"
 
 
-def review_failures(conn, hours=24, samples=2):
-    """Why reviews did not pass, by question type and by problem kind, with two samples each (stem summary + reason)."""
+def review_failures(conn, hours=24, samples=2, origin=None):
+    """Why reviews did not pass, by question type and by problem kind, with two samples each (stem summary + reason).
+    `origin` ('past_exam' / 'generated') narrows it to one route."""
     rows = conn.execute(
         "SELECT ev.question_id, ev.passed, ev.result, q.content->>'subject' AS subject, q.content->>'question_type' AS qtype, "
         "left(q.content->>'stem', 60) AS stem FROM auto_quality_events ev JOIN reviewed_questions q ON q.id=ev.question_id "
+        + ("JOIN question_origins o ON o.question_id=q.id AND o.origin=%s " if origin else "") +
         "WHERE ev.phase='review' AND ev.created_at>" + _since(hours),
-        (hours,),
+        ((origin,) if origin else ()) + (hours,),
     ).fetchall()
     per_bucket = defaultdict(lambda: dict(reviewed=0, passed=0, failed=0, categories=Counter()))
     categories = defaultdict(lambda: dict(count=0, by_bucket=Counter(), samples=[]))
@@ -224,6 +226,116 @@ def single_choice_steps(conn, hours=24):
     return steps
 
 
+def review_value_errors(conn, hours=24):
+    """Review jobs that ended in an error code (the 'ValueError' family), by code and review contract, split into the
+    period before and after contract 10 (PR #26) first ran: `after` is anything created since the first contract-10 job."""
+    cutoff = conn.execute(
+        "SELECT min(created_at) AS t FROM ai_jobs WHERE kind='quality_review' "
+        "AND payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%'"
+    ).fetchone()["t"]
+    rows = conn.execute(
+        "SELECT CASE WHEN payload->>'instructions' LIKE 'Single independent review of one exam question (contract 10)%%' THEN '10' "
+        "            WHEN payload->>'instructions' LIKE 'Single independent review%%' THEN '9' ELSE 'older' END AS contract, "
+        "payload->>'question_type' AS qtype, "
+        "COALESCE(result->'dispatch_failure'->>'code', error_code, 'unspecified') AS code, error_code, "
+        "(%s::timestamptz IS NOT NULL AND created_at>=%s::timestamptz) AS after_pr26, count(*) AS n, "
+        "min(job_key) AS example_job_key FROM ai_jobs "
+        "WHERE kind='quality_review' AND COALESCE(finished_at,started_at,created_at)>" + _since(hours) +
+        " AND (state='blocked' OR error_code LIKE 'ValueError%%' OR result->'dispatch_failure' IS NOT NULL) "
+        "GROUP BY 1,2,3,4,5 ORDER BY n DESC",
+        (cutoff, cutoff, hours),
+    ).fetchall()
+    out = dict(contract10_first_job_at=cutoff, before_pr26=Counter(), after_pr26=Counter(), rows=[])
+    for r in rows:
+        key = f"{r['code']} ({r['qtype'] or '?'}, 合约{r['contract']})"
+        out["after_pr26" if r["after_pr26"] else "before_pr26"][key] += r["n"]
+        out["rows"].append(dict(code=r["code"], error_code=r["error_code"], question_type=r["qtype"], contract=r["contract"],
+                                after_pr26=r["after_pr26"], count=r["n"], example_job_key=r["example_job_key"]))
+    out["before_pr26"], out["after_pr26"] = dict(out["before_pr26"].most_common()), dict(out["after_pr26"].most_common())
+    return out
+
+
+def past_exam_route(conn, hours=24, sample_limit=150):
+    """The 真题 route (past-exam answers), per question type: how its writing calls ended, why 'insufficient_textbook_evidence'
+    happened (how many paragraphs were supplied, whether the term itself appears in them, which paragraphs today's filter
+    would drop and why), and why its questions fail review. Reads only; calls no model."""
+    from app import past_exam_import as pei
+    from app.evidence_filter import MIN_CHARS, reason_unusable
+
+    ended = defaultdict(Counter)
+    for r in conn.execute(
+        "SELECT payload->>'question_type' AS t, COALESCE(result->'dispatch_failure'->>'code', error_code, "
+        "CASE WHEN state='succeeded' THEN 'accepted' ELSE state END) AS code, count(*) AS n FROM ai_jobs "
+        "WHERE kind='generation' AND payload->>'origin'='past_exam' AND COALESCE(finished_at,started_at,created_at)>" + _since(hours) +
+        " AND state IN ('succeeded','blocked') GROUP BY 1,2", (hours,)).fetchall():
+        ended[r["t"] or "?"][r["code"]] += r["n"]
+    insufficient = dict(total=0, by_type=Counter(), no_units_supplied=0, term_missing_from_units=0, term_present_in_units=0,
+                        units_per_request=Counter(), dropped_by_filter=Counter(), would_have_found_with_20_chars=0, samples=[])
+    jobs = conn.execute(
+        "SELECT id, payload FROM ai_jobs WHERE kind='generation' AND payload->>'origin'='past_exam' "
+        "AND COALESCE(result->'dispatch_failure'->>'code', error_code)='insufficient_textbook_evidence' "
+        "AND COALESCE(finished_at,started_at,created_at)>" + _since(hours) + " ORDER BY id DESC", (hours,)).fetchall()
+    insufficient["total"] = len(jobs)
+    for j in jobs:
+        p = j["payload"]
+        kind = p.get("question_type")
+        insufficient["by_type"][kind] += 1
+        units = p.get("evidence") or []
+        insufficient["units_per_request"][len(units)] += 1
+        if not units:
+            insufficient["no_units_supplied"] += 1
+        if kind == "term":
+            term = pei.term_of_stem(p.get("stem", ""))
+            present = pei.term_in_units(term, units)
+            insufficient["term_present_in_units" if present else "term_missing_from_units"] += 1
+            if len(insufficient["samples"]) < 5:
+                insufficient["samples"].append(dict(job_id=j["id"], term=term, units=len(units), term_in_units=present,
+                                                    unit_lengths=[len(u["text"]) for u in units]))
+    # replay today's retrieval for the items that ended this way: which candidate paragraphs does the filter drop, and why?
+    for j in jobs[:sample_limit]:
+        p = j["payload"]
+        text = p.get("stem", "") + " " + " ".join((p.get("options") or {}).values())
+        for score, uid, *_ in pei.ranked_paragraphs(conn, p["subject"], text)[:12]:
+            row = conn.execute("SELECT text, quality_flags FROM source_units WHERE id=%s", (uid,)).fetchone()
+            why = reason_unusable(row["text"], row["quality_flags"] or ())
+            if why:
+                insufficient["dropped_by_filter"][why] += 1
+            if len(row["text"]) < MIN_CHARS:
+                insufficient["would_have_found_with_20_chars"] += 1
+    review = review_failures(conn, hours, origin="past_exam")
+    insufficient["by_type"], insufficient["units_per_request"] = dict(insufficient["by_type"]), dict(insufficient["units_per_request"])
+    insufficient["dropped_by_filter"] = dict(insufficient["dropped_by_filter"].most_common())
+    status = defaultdict(dict)
+    for r in conn.execute("SELECT question_type AS t, status, coalesce(blocked_reason,'-') AS why, count(*) AS n FROM past_exam_items "
+                          "GROUP BY 1,2,3").fetchall():
+        status[r["t"]][f"{r['status']}:{r['why']}"] = r["n"]
+    return dict(model_calls_ended={k: dict(v.most_common()) for k, v in ended.items()}, insufficient_textbook_evidence=insufficient,
+                review_by_type=review["by_type"], review_failure_kinds=review["categories"], items_by_state=dict(status),
+                term_cap_share=pei.PAST_TERM_MAX_SHARE)
+
+
+def single_choice_options(conn, hours=24):
+    """Single-choice reviews seen from the option_checks side: how many reviews had a complete A-D check, how many ended in
+    each option-related problem, and the thinking level they ran at."""
+    out = Counter()
+    for r in conn.execute(
+        "SELECT ev.passed, ev.result->'issues' AS issues, j.settings_snapshot->>'effort' AS effort FROM auto_quality_events ev "
+        "JOIN ai_jobs j ON j.id=ev.job_id JOIN reviewed_questions q ON q.id=ev.question_id WHERE ev.phase='review' "
+        "AND q.content->>'question_type'='single_choice' AND ev.created_at>" + _since(hours), (hours,)).fetchall():
+        out["reviews"] += 1
+        out["passed"] += 1 if r["passed"] else 0
+        for issue in set(r["issues"] or []):
+            out[issue] += 1
+    formats = Counter()
+    for r in conn.execute(
+        "SELECT COALESCE(j.result->'dispatch_failure'->>'code','-') AS code, count(*) AS n FROM ai_jobs j "
+        "JOIN reviewed_questions q ON q.id=(j.payload->>'question_id')::bigint WHERE j.kind='quality_review' "
+        "AND q.content->>'question_type'='single_choice' AND j.result->'dispatch_failure' IS NOT NULL AND j.created_at>" + _since(hours) +
+        " GROUP BY 1", (hours,)).fetchall():
+        formats[r["code"]] = r["n"]
+    return dict(reviews=dict(out.most_common()), review_job_failures=dict(formats.most_common()))
+
+
 def filter_report(conn):
     """Textbook paragraphs before and after the usability filter (generation pool needs >= 120 characters)."""
     from app.evidence_filter import reason_unusable
@@ -294,7 +406,20 @@ def full_stats(conn, hours=24):
     """blocked_stats plus the per type funnel, review failure kinds with samples, the single choice steps and the paragraph filter."""
     base = blocked_stats(conn, hours)
     f = funnel(conn, hours)
-    return dict(base, review_by_contract=review_by_contract(conn, max(hours, 72)), funnel=f["table"], review_failure_kinds=f["review_failure_kinds"], single_choice=single_choice_steps(conn, hours), paragraph_filter=filter_report(conn))
+    reviews = review_failures(conn, hours, samples=3)
+    # the question "why did reviews not pass" comes first: the problem kinds with samples, then the pass rate per type
+    return dict(
+        review_failure_kinds=f["review_failure_kinds"],
+        review_pass_by_type={k: {x: v[x] for x in ("reviewed", "passed", "failed", "pass_rate")} for k, v in reviews["by_type"].items()},
+        review_by_contract=review_by_contract(conn, max(hours, 72)),
+        **base,
+        funnel=f["table"],
+        single_choice=single_choice_steps(conn, hours),
+        single_choice_options=single_choice_options(conn, hours),
+        review_errors=review_value_errors(conn, hours),
+        past_exam_route=past_exam_route(conn, hours),
+        paragraph_filter=filter_report(conn),
+    )
 
 
 def replay(conn, hours=24, limit=300, samples_per_layer=3):

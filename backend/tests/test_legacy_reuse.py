@@ -26,6 +26,12 @@ FAKE_TERMS = ["星尘激酶", "月光磷酸", "雾凇合酶", "琥珀转移", "�
               "墨羽连接", "银汉还原", "金乌异构", "玄冰裂解", "紫电羧化", "碧落脱氢"]
 
 
+@pytest.fixture(autouse=True)
+def no_term_cap(monkeypatch):
+    """These tests are about the draft hint and page hints, not the stop-loss that caps past-exam term requests at 20%."""
+    monkeypatch.setattr(pei, "PAST_TERM_MAX_SHARE", 1.0)
+
+
 def unique_textbook(tmp_path, key, special):
     """A textbook whose every page is different; `special` maps page -> body."""
     path, meta = material(tmp_path, key)
@@ -342,7 +348,7 @@ def hinted_term(db, explanation=MARK):
 
 def test_draft_goes_to_answer_writing_with_a_warning_and_only_for_hinted_items(db, books, setup_ai):
     term = hinted_term(db)
-    pei.plan(db, setup_ai)
+    pei.plan(db, setup_ai, batch=50)
     jobs = db.execute("SELECT * FROM ai_jobs WHERE payload->>'origin'='past_exam' ORDER BY id").fetchall()
     by_item = {j["payload"]["item_id"]: j["payload"] for j in jobs}
     hinted = by_item[term["id"]]
@@ -370,7 +376,7 @@ def test_draft_is_dropped_before_any_textbook_paragraph_when_the_request_is_too_
 
 def test_the_review_never_sees_the_draft(db, books, setup_ai):
     term = hinted_term(db)
-    pei.plan(db, setup_ai)
+    pei.plan(db, setup_ai, batch=50)
     for job in queued_jobs(db).values():
         finish_job(db, job, model_result(job))
     auto_worker.dispatch_completed(db)

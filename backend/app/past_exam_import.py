@@ -9,6 +9,7 @@ rounds; nothing here approves a question.
 """
 
 import hashlib
+import os
 import re
 import unicodedata
 from collections import Counter, defaultdict
@@ -59,9 +60,12 @@ IMPORT_BLOCK_REASONS = frozenset(
         "fill_blank_marker_unsupported",
     }
 )
+# Past-exam term (名词解释) answers pass review about 8% of the time: until that route is fixed they come LAST in the
+# order and may hold at most PAST_TERM_MAX_SHARE of the generation tasks in flight (set the variable to 1 to restore).
+PAST_TERM_MAX_SHARE = float(os.environ.get("PAST_TERM_MAX_SHARE", "0.2"))
 _PRIORITY_SQL = (
-    "CASE question_type WHEN 'term' THEN 0 WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
-    "WHEN 'fill_blank' THEN 2 ELSE 3 END"
+    "CASE question_type WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
+    "WHEN 'fill_blank' THEN 2 WHEN 'term' THEN 4 ELSE 3 END"
 )
 
 _NUMBER = re.compile(r"^\s*\d{1,3}\s*[.、．)）]\s*")
@@ -559,6 +563,7 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
         (ORIGIN_PAST_EXAM,),
     ).fetchone()["n"]
     room, queued = batch - active, 0
+    term_room = term_room_now(conn)
     for item in conn.execute(
         "SELECT * FROM past_exam_items WHERE status='imported' ORDER BY "
         + _PRIORITY_SQL
@@ -569,9 +574,44 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
         target = cost_control.bank_target()
         if target and cost_control.bucket_supply(conn, item["subject"], item["question_type"]) >= target:
             continue  # temporary first-batch limit: this bucket is already stocked
+        if item["question_type"] == "term":
+            if term_room <= 0:
+                continue  # the 20% cap: the places go to the other types
         if _enqueue_item(conn, uid, item) == "queued":
             queued += 1
+            if item["question_type"] == "term":
+                term_room -= 1
     return queued
+
+
+_TERM_PREFIX = re.compile(r"^\s*(?:\d{1,3}\s*[.、．)）]\s*)?(?:名词解释|解释名词|名词)?\s*[:：]?\s*")
+
+
+def term_of_stem(stem):
+    """The term a 名词解释 question asks about: the stem without its number and the words 名词解释 / punctuation."""
+    value = _TERM_PREFIX.sub("", stem or "")
+    return re.sub(r"[\s（(【\[]*\d+\s*分[）)】\]]*|[？?。.．:：（）()【】\[\]]", "", value).strip()
+
+
+def term_in_units(term, units):
+    """Does the term appear word for word (after normalising width, case and spacing) in one of the supplied paragraphs?"""
+    needle = stem_key(term)
+    return bool(needle) and any(needle in stem_key(u["text"]) for u in units)
+
+
+def term_room_now(conn, share=None):
+    """How many more past-exam term requests may be queued: they may be at most `share` of ALL generation tasks in
+    flight, i.e. term <= others * share / (1 - share). 1 or more means no cap."""
+    share = PAST_TERM_MAX_SHARE if share is None else share
+    if share >= 1:
+        return 10**6
+    row = conn.execute(
+        "SELECT count(*) FILTER (WHERE payload->>'origin'=%s AND payload->>'question_type'='term') AS term, "
+        "count(*) FILTER (WHERE NOT (COALESCE(payload->>'origin','')=%s AND payload->>'question_type'='term')) AS other "
+        "FROM ai_jobs WHERE kind='generation' AND state IN ('pending','running','retrying')",
+        (ORIGIN_PAST_EXAM, ORIGIN_PAST_EXAM),
+    ).fetchone()
+    return int(row["other"] * share / (1 - share) + 1e-9) - row["term"]
 
 
 # --------------------------------------------------------------------------
