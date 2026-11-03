@@ -5,7 +5,8 @@ import pytest
 from test_live_training import live_app  # noqa: F401
 from test_ui_screens import engine, open_page  # noqa: F401
 
-ROUTES = ["#/home", "#/mistakes", "#/profile", "#/stats", "#/progress", "#/model",
+# (#/stats is only a menu of four buttons: it loads nothing, so it cannot fail to load; its four sub-pages are below)
+ROUTES = ["#/home", "#/mistakes", "#/profile", "#/progress", "#/model",
           "#/stats/weekly", "#/stats/history", "#/stats/insights", "#/stats/source-status", "#/profile/archive"]
 
 FAIL_DATA = """(mode) => {
@@ -34,10 +35,10 @@ def test_a_failed_load_shows_the_reason_and_a_retry_button_on_the_same_page(engi
     page, errors = open_page(engine, "safari", base, path="/training")
     page.evaluate("localStorage.clear(); sessionStorage.clear()")   # a first visit: nothing cached to fall back on
     page.add_init_script("(" + FAIL_DATA + ")(" + repr(mode).replace("'", '"') + ")")
+    page.goto("about:blank")                                         # so the next goto is a real load, not a hash change
     page.goto(base + "/training" + route)
     page.wait_for_timeout(1800)
     assert page.evaluate("getComputedStyle(document.getElementById('login')).display") == "none" or page.evaluate("document.getElementById('login').hidden"), route
     assert page.evaluate("location.hash") == route
     assert page.evaluate(VISIBLE_RETRY) >= 1, f"{route}: no visible retry button"
-    print("PROBE", route, mode, "|", page.evaluate("[...document.querySelectorAll('[data-page]')].filter(n=>!n.hidden).map(n=>n.innerText).join(' / ').replace(/\\s+/g,' ').slice(0,260)"))
     assert not errors, errors

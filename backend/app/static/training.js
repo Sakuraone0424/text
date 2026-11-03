@@ -1448,6 +1448,21 @@ $("memory").onclick = async () => {
     status(e.message);
   }
 };
+// A learning sub-page that cannot load says why, inside the page, with a retry button (never a bare toast, never the sign-in form).
+function learningError(handler, error, heading) {
+  const root = $("learning");
+  root.replaceChildren();
+  if (heading) element("h2", heading, root);
+  const card = element("div", undefined, root);
+  card.className = "error-card";
+  card.setAttribute("role", "alert");
+  element("p", `${error.message || error}。已有的数据没有被改动。`, card);
+  const retry = element("button", "重试", card);
+  retry.type = "button";
+  retry.className = "secondary";
+  retry.onclick = handler;
+  status(error.message || String(error));
+}
 $("source-status").onclick = async () => {
   const root = $("learning");
   root.replaceChildren();
@@ -1466,6 +1481,10 @@ $("source-status").onclick = async () => {
     element("h3", endpoints[index][1], section);
     if (answer.status !== "fulfilled") {
       element("p", "暂时无法读取该部分：" + answer.reason.message, section);
+      const again = element("button", "重试", section);
+      again.type = "button";
+      again.className = "secondary";
+      again.onclick = () => $("source-status").onclick();
       return;
     }
     const value = answer.value;
@@ -1518,14 +1537,14 @@ $("weekly").onclick = async () => {
       );
     window.TrainingUI?.weekly(result.chapters);
   } catch (e) {
-    status(e.message);
+    learningError($("weekly").onclick, e, "近7天章节情况");
   }
 };
 $("archive").onclick = async () => {
   try {
     renderArchive(await api("/v2/archive/status"));
   } catch (e) {
-    status(e.message);
+    learningError($("archive").onclick, e, "Notion归档状态");
   }
 };
 
@@ -1751,7 +1770,7 @@ $("history").onclick = async () => {
       };
     }
   } catch (e) {
-    status(e.message);
+    learningError($("history").onclick, e, "历史只读档案");
   }
 };
 
@@ -1796,7 +1815,7 @@ $("insights").onclick = async () => {
       );
     }
   } catch (error) {
-    status(error.message);
+    learningError($("insights").onclick, error, "学习建议");
   }
 };
 
