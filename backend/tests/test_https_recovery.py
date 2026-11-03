@@ -222,7 +222,9 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     qa = https_app
     context = https_browser
     page = context.new_page()
-    page.goto(qa['origin'] + '/training#/model')
+    # The stale v7 cache is planted from a plain static file on the same origin, where no service worker exists yet: the
+    # application's worker then installs and activates over it, exactly like a real upgrade (and in the same order every time).
+    page.goto(qa['origin'] + '/static/tokens.css')
     page.evaluate("""async () => {
       const old = await caches.open('xiaohan-training-shell-v7-offline-recovery');
       await old.put('/static/training.js', new Response(
@@ -236,10 +238,10 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
         }
       ));
     }""")
-    # The worker may already have activated before the old cache existed (then it would never clean it up). Drop it and
-    # reload, so a fresh install + activation runs with the stale v7 cache present: the same thing a real upgrade does.
-    page.evaluate("async () => { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); }")
-    page.reload()
+    assert page.evaluate(
+        "async () => (await caches.keys()).includes('xiaohan-training-shell-v7-offline-recovery')"
+    )
+    page.goto(qa['origin'] + '/training#/model')
     paper = login_start(page, qa)
     q = next(x for x in paper['questions'] if x['question_type'] == 'term')
     open_question(page, q['id'])
