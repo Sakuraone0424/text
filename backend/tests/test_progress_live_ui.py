@@ -34,10 +34,10 @@ def test_it_polls_every_five_seconds_when_the_stream_is_down_and_shows_the_stamp
     seen = watch(page, "/v2/model/progress")
     page.evaluate("location.hash = '#/progress'")
     page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)
-    page.wait_for_timeout(11500)
+    page.wait_for_timeout(13500)
     gaps = [b - a for a, b in zip(seen, seen[1:])]
-    assert len(seen) >= 3, seen                                   # the first read and at least two polls in ~11 s
-    assert all(3.5 <= g <= 6.5 for g in gaps[-2:]), gaps          # ~5 s apart
+    assert len(seen) >= 3, seen                                   # the first read and at least two polls in ~13 s
+    assert all(4.0 <= g <= 6.5 for g in gaps[-2:]), gaps          # ~5 s apart (not 6: the check runs twice a second)
     text = page.inner_text("#updated")
     assert STAMP.search(text) and "每 5 秒刷新" in text, text
     assert not errors, errors
@@ -123,4 +123,20 @@ def test_the_home_card_keeps_itself_fresh_and_shows_the_stamp(engine, live_app):
     quiet = len(seen)
     page.wait_for_timeout(7000)
     assert len(seen) == quiet
+    assert not errors, errors
+
+
+def test_a_poll_that_finds_the_same_numbers_does_not_redraw_the_page(engine, live_app):
+    client, dsn, _ = live_app
+    base = str(client.base_url).rstrip("/")
+    page, errors = open_page(engine, "safari", base, path="/training")
+    no_stream(page)
+    page.evaluate("location.hash = '#/progress'")
+    page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)
+    page.evaluate("""() => { document.querySelector('#jobs li').dataset.mark = 'kept'; window.__reads = 0;
+      const real = window.fetch.bind(window);
+      window.fetch = (...a) => { if (String(a[0]).includes('/v2/model/progress')) window.__reads++; return real(...a); }; }""")
+    page.wait_for_function("window.__reads >= 2", timeout=20000)     # two polls have come back
+    assert page.evaluate("document.querySelector('#jobs li').dataset.mark") == "kept"   # the list was not rebuilt
+    assert STAMP.search(page.inner_text("#updated"))
     assert not errors, errors

@@ -72,13 +72,13 @@
     open();
     const wait = connected ? SAFETY_MS : POLL_MS;
     for (const view of views.values()) {
-      if (!document.hidden && view.visible() && Date.now() - (view.last || 0) >= wait - 200) run(view);
+      if (!document.hidden && view.visible() && Date.now() - (view.last || 0) >= wait - 250) run(view);
     }
   }
 
   function register(name, { visible, load }) {
     views.set(name, { visible, load, last: 0 });
-    if (!timer) timer = setInterval(tick, 1000);
+    if (!timer) timer = setInterval(tick, 500);   // a finer grid than the 5 s period, so a poll is never a whole second late
   }
 
   document.addEventListener("visibilitychange", () => {

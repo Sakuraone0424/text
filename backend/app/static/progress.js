@@ -645,18 +645,28 @@ function showError(message, hadCache) {
   }
 }
 
+const drawn = {};
 function render(report, meta) {
   $("pv-skeleton").hidden = true;
   $("pv-error").hidden = true;
   $("pv-content").hidden = false;
-  batch(report);
+  // Each section is redrawn only when ITS numbers changed (it reads the fields listed here). A page refreshed every 5 s would
+  // otherwise close the details you opened and replace the buttons under your finger. The sections that show the time
+  // (the next paper's estimate, the worker's "x minutes ago") are cheap and always redrawn.
+  const same = (name, ...fields) => {
+    const key = JSON.stringify(fields.map((f) => report[f]));
+    if (drawn[name] === key) return true;
+    drawn[name] = key;
+    return false;
+  };
+  if (!same("batch", "totals", "target_kind", "review_today")) batch(report);
   paper(report);
   status(report);
-  bank(report);
-  funnel(report);
-  spend(report);
-  waste(report);
-  jobs(report);
+  if (!same("bank", "buckets", "legacy", "target_kind")) bank(report);
+  if (!same("funnel", "funnel")) funnel(report);
+  if (!same("spend", "spend", "ledger")) spend(report);
+  if (!same("waste", "waste")) waste(report);
+  if (!same("jobs", "recent_jobs")) jobs(report);
   paintStamp(meta && meta.stale);
 }
 let lastShown = null;
