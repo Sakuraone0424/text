@@ -159,8 +159,9 @@ def snapshot(conn, user_id, questions, as_of=None):
     context["legacy_data_use"] = (
         "read_only_unmapped_history_not_used_as_verified_knowledge_observations"
     )
+    # question id -> when it fell due (a dict: `in` still works, and the paper builder serves the longest-waiting first)
     due = {
-        c["question_id"]
+        c["question_id"]: instant(c["due"])
         for c in cards
         if c.get("last_review") and instant(c["due"]) <= as_of
     }
@@ -221,12 +222,28 @@ def candidate_score(question, context, policy):
     return score * cognitive_factor
 
 
-def pick(pool, count, chapter_counts, context, policy, seed, subject, kind, decisions):
+def pick(pool, count, chapter_counts, context, policy, seed, subject, kind, decisions, due=None):
     rng = random.Random(f"{seed}:{subject}:{kind}")
     pool = sorted(pool, key=lambda r: r["id"])
     chosen = []
+    # Questions that are DUE come first, the longest-waiting first (ties by id), so a wrong answer is never pushed aside
+    # for long by newer cards; the weighted draw below only fills the places that are left.
+    for row in sorted((r for r in pool if r["id"] in (due or {})), key=lambda r: (due[r["id"]], r["id"]))[:count]:
+        pool.remove(row)
+        chosen.append(row)
+        chapter_counts[(subject, row["content"]["evidence"][0]["chapter"])] += 1
+        decisions.append(
+            {
+                "subject": subject,
+                "question_type": kind,
+                "slot": len(chosen),
+                "selected_id": row["id"],
+                "due_since": due[row["id"]].isoformat(),
+                "candidates": [{"question_id": row["id"], "reason": "due_longest_waiting_first"}],
+            }
+        )
     available_chapters = len({r["content"]["evidence"][0]["chapter"] for r in pool})
-    for slot in range(count):
+    for slot in range(len(chosen), count):
         if not pool:
             break
         weights = []

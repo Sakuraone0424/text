@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field, StrictInt
 
-from app.auth import require_auth
+from app.auth import require_auth, same_secret
 from app.db import get_db
 from app.question_quality import (
     Audit,
@@ -46,7 +46,7 @@ def require_reviewer(request: Request):
         raise HTTPException(
             503, "Review operations are disabled: QUIZ_REVIEW_API_KEY is not configured"
         )
-    if not hmac.compare_digest(request.headers.get("x-review-api-key", ""), configured):
+    if not same_secret(request.headers.get("x-review-api-key", ""), configured):
         raise HTTPException(403, "Reviewer authorization required")
 
 

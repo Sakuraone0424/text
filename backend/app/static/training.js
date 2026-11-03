@@ -159,7 +159,8 @@ $("login").onsubmit = async (e) => {
     window.dispatchEvent(new Event("signed-in")); // the page that asked for the sign-in loads itself now
     status("已登录"); // shown once, right after signing in; clears itself after 2 s, above the bottom nav
   } catch (e) {
-    status(e.message);
+    // 429 already carries the Chinese lock message from the server
+    status(e.status === 401 ? "密码不正确，请重新输入。" : e.message);
   }
 };
 async function prepare() {
@@ -661,11 +662,37 @@ async function sendImage(id, file, article, jobKey) {
   await photoStore("delete", jobKey);
   status("图片已保存；手写内容在确认后批改。");
 }
+let submitting = false;
+// While the paper is on its way the answers and the button are frozen ("提交中"); a failure gives them back and says why.
+function freezeForSubmit(on) {
+  const button = $("submit");
+  const questions = $("questions");
+  if (on) {
+    button.dataset.label = button.textContent;
+    button.textContent = "提交中…";
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    questions.dataset.wasInert = questions.inert ? "1" : "";
+    questions.inert = true;
+    document.body.classList.add("is-submitting");
+    status("提交中，请稍候……");
+  } else {
+    button.textContent = button.dataset.label || "交卷";
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    questions.inert = questions.dataset.wasInert === "1";
+    document.body.classList.remove("is-submitting");
+  }
+}
 $("submit").onclick = async () => {
+  if (submitting) return;
   const approved = window.TrainingUI
     ? await window.TrainingUI.confirmSubmit()
     : confirm("确认统一交卷？未答题按0分，已答主观题由AI判分。");
-  if (!approved) return;
+  if (!approved || submitting) return;
+  submitting = true;
+  freezeForSubmit(true);
+  let done = false;
   try {
     if (!serverConfirmed) await reconnect();
     if (!serverConfirmed || !paper)
@@ -677,9 +704,13 @@ $("submit").onclick = async () => {
       method: "POST",
       body: JSON.stringify({ expected_version: version, answers: {} }),
     });
+    done = true; // accepted: the paper is submitted and cannot be edited any more
     await showResult();
   } catch (e) {
-    status(e.message);
+    status(done ? `已交卷，但成绩暂时读不出来：${e.message}` : `交卷失败：${e.message}。答案已保留，可以再次点交卷（重复提交不会重复计分）。`);
+  } finally {
+    submitting = false;
+    freezeForSubmit(false); // after a success the answers are gone from the page (the result replaces them) and the button is hidden
   }
 };
 async function showResult() {

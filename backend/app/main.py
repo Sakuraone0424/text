@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager, suppress
 
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -12,9 +12,15 @@ from pydantic import BaseModel, Field
 from app.auth import (
     SESSION_COOKIE,
     SESSION_TTL_SECONDS,
+    LOCKED_MESSAGE,
     create_session_token,
+    lock_remaining,
+    login_source,
     password_is_valid,
+    record_failure,
+    record_success,
     require_auth,
+    revoke_session,
 )
 from app.db import get_db
 from app.routes_v2 import router as reviewed_quiz_router
@@ -144,6 +150,40 @@ def health():
     return {"status": "healthy"}
 
 
+CORE_TABLES = (
+    "users", "reviewed_questions", "auto_question_states", "papers_v2", "paper_items_v2", "attempts_v2",
+    "answers_v2", "training_sessions", "answer_drafts", "fsrs_cards", "source_units", "ai_jobs", "revoked_sessions",
+)
+
+
+def business_gaps():
+    """What is missing for the app to do its job (empty list = ready): core tables, and for the CURRENT specification at
+    least one paper's worth of published, verified questions in every subject x question type."""
+    from app import training_spec_v4 as spec
+
+    gaps = []
+    with get_db() as conn:
+        for table in CORE_TABLES:
+            if conn.execute("SELECT to_regclass(%s) AS t", (table,)).fetchone()["t"] is None:
+                gaps.append({"kind": "table", "name": table})
+        if gaps:
+            return gaps
+        have = {
+            (r["subject"], r["kind"]): r["n"]
+            for r in conn.execute(
+                "SELECT q.content->>'subject' AS subject, q.content->>'question_type' AS kind, count(*)::int AS n "
+                "FROM reviewed_questions q JOIN auto_question_states s ON s.question_id=q.id "
+                "WHERE q.status='published' AND s.status='ready' GROUP BY 1,2"
+            ).fetchall()
+        }
+    for subject in spec.SUBJECTS:
+        for kind, need in spec.COUNTS.items():
+            n = have.get((subject, kind), 0)
+            if n < need:
+                gaps.append({"kind": "questions", "subject": subject, "question_type": kind, "have": n, "need": need})
+    return gaps
+
+
 @app.get("/db/health")
 def db_health():
     try:
@@ -157,6 +197,11 @@ def db_health():
                 raise HTTPException(503, "V2 schema migrations are incomplete")
         from app.automation import selected_daily_blueprint
         from app import training_spec_v4 as current, training_spec_v2 as retired_spec
+
+        missing = business_gaps()
+        if missing:
+            # /health (the platform's check) stays green; this one says what the business still lacks
+            raise HTTPException(503, detail={"code": "not_ready_for_training", "missing": missing})
 
         outdated = os.environ.get("QUIZ_DAILY_SPECIFICATION") == retired_spec.SPECIFICATION
         try:
@@ -189,8 +234,18 @@ def db_health():
 
 
 @app.post("/auth/login")
-def login(payload: LoginRequest, response: Response):
+def login(payload: LoginRequest, request: Request, response: Response):
+    source = login_source(request)
+    with get_db() as conn:
+        remaining = lock_remaining(conn, source)
+    if remaining:
+        raise HTTPException(429, LOCKED_MESSAGE, headers={"Retry-After": str(remaining)})
     if not password_is_valid(payload.password):
+        # the failure is committed on its own, so the 401 below cannot roll it back
+        with get_db() as conn:
+            locked = record_failure(conn, source)
+        if locked:
+            raise HTTPException(429, LOCKED_MESSAGE, headers={"Retry-After": str(locked)})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password"
         )
@@ -199,6 +254,8 @@ def login(payload: LoginRequest, response: Response):
         token = create_session_token(username)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    with get_db() as conn:
+        record_success(conn, source)
     response.set_cookie(
         SESSION_COOKIE,
         token,
@@ -212,7 +269,10 @@ def login(payload: LoginRequest, response: Response):
 
 
 @app.post("/auth/logout")
-def logout(response: Response):
+def logout(request: Request, response: Response):
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        revoke_session(token)
     response.delete_cookie(SESSION_COOKIE, path="/")
     return {"ok": True}
 

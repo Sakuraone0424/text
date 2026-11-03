@@ -43,7 +43,7 @@ def db(raw_db):
 @pytest.fixture
 def client(db, monkeypatch):
     from app.main import app
-    from app import main, routes_v2
+    from app import auth, main, routes_v2
 
     @contextmanager
     def test_db():
@@ -52,6 +52,7 @@ def client(db, monkeypatch):
 
     monkeypatch.setattr(main, "get_db", test_db)
     monkeypatch.setattr(routes_v2, "get_db", test_db)
+    monkeypatch.setattr(auth, "get_db", test_db)
     monkeypatch.setenv("QUIZ_API_KEY", "learner-test-key")
     monkeypatch.setenv("QUIZ_REVIEW_API_KEY", "operator-test-key")
     monkeypatch.setenv("QUIZ_USERNAME", "test-owner")
