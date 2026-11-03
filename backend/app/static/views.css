@@ -249,3 +249,7 @@
 
 /* while the paper is being submitted the answers are frozen */
 body.is-submitting #questions { opacity: 0.6; }
+
+/* pull down to refresh */
+.pull-hint { text-align: center; color: var(--muted); font-size: 13px; padding: 8px 0; }
+.pull-hint[hidden] { display: none; }

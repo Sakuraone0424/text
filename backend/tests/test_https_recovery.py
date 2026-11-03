@@ -1,5 +1,6 @@
 """Authentic HTTPS+PostgreSQL recovery regressions on synthetic fixtures only."""
 # ruff: noqa: F811
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import json
 import psycopg
 from psycopg.rows import dict_row
@@ -249,7 +250,15 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     field.fill('v7缓存升级前的合成草稿')
     wait_saved(page)
     page.evaluate('navigator.serviceWorker.ready')
-    page.wait_for_function('navigator.serviceWorker.controller !== null')
+    try:
+        page.wait_for_function('navigator.serviceWorker.controller !== null', timeout=20000)
+    except PlaywrightTimeoutError:
+        # A page opened before its worker became active is controlled from its next load (normal service-worker lifecycle):
+        # reload once, then carry on with the same question and draft.
+        page.reload()
+        page.wait_for_function('navigator.serviceWorker.controller !== null', timeout=40000)
+        open_question(page, q['id'])
+        field = page.locator('#questions textarea:visible')
     # the new cache is created when the worker starts to install and filled when it finishes: wait for the content itself
     page.wait_for_function("""async () => {
       const keys = await caches.keys();

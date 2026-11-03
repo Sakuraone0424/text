@@ -10,6 +10,7 @@ const ASSETS = [
   "/static/training.css",
   "/static/views.css",
   "/static/data.js",
+  "/static/live.js",
   "/static/progress.js",
   "/static/model.js",
   "/static/charts.js",

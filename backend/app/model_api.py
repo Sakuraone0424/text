@@ -421,18 +421,78 @@ def benchmark_approval(data: BenchmarkApproval, request: Request, name=Depends(r
     return operation(name, lambda c, u: approve_benchmark(c, data.model_id, data.approved, data.note))
 
 
+STREAM_SECONDS = 8      # short on purpose: the browser reconnects at once, and a restart is never held up for long
 _PROGRESS = StaleCache(ttl=30)
+_BANK_CARD = StaleCache(ttl=30)
 
 
 @router.get("/progress")
 def progress_report(fresh: bool = Query(False), name=Depends(require_auth)):
     """Question-writing progress: counts, codes and times only (no question or textbook text).
 
-    Built by many queries, so a copy up to 30 s old is returned at once (and rebuilt in the background when older);
+    Served from a shared copy (a page polling every 5 s, or several open pages, share one build: see StaleCache). The copy
+    is rebuilt as soon as the database says something changed (progress_events), so it is also never stale for long;
     `?fresh=1` rebuilds now (used after cancelling a task)."""
     from app.progress import report
 
     return _PROGRESS.get(name, lambda: operation(name, report), fresh=fresh)
+
+
+@router.get("/progress/bank")
+def progress_bank_card(name=Depends(require_auth)):
+    """Just the 'is tomorrow's paper stocked, and when will it be' block of the home progress card (cached the same way)."""
+    from app.learning_stats import tomorrow_ready
+
+    return _BANK_CARD.get(name, lambda: operation(name, tomorrow_ready))
+
+
+def _rebuild_progress_pages():
+    _PROGRESS.rebuild_all()
+    _BANK_CARD.rebuild_all()
+
+
+from app import progress_events  # noqa: E402
+
+progress_events.on_change(_rebuild_progress_pages)
+
+
+@router.get("/progress/events")
+async def progress_events_stream(request: Request, name=Depends(require_auth)):
+    """Server-sent events: `event: update` whenever the progress may have changed (the page then fetches /progress), and a
+    comment line every 20 s to keep the connection open. The page falls back to polling if this stream ends."""
+    import asyncio
+    import json
+    import time
+
+    from fastapi.responses import StreamingResponse
+
+    hub = progress_events.HUB
+    entry = hub.subscribe()
+
+    async def stream():
+        # A stream never lives longer than STREAM_SECONDS: the browser reconnects by itself (retry:), and a deploy or restart is
+        # never held up by pages that are still open (uvicorn waits for open responses before it shuts down).
+        began = time.monotonic()
+        last_ping = began
+        try:
+            yield "retry: 1000\n"
+            yield f"event: hello\ndata: {json.dumps({'version': hub.version})}\n\n"
+            while not hub.closing and time.monotonic() - began < STREAM_SECONDS and not await request.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(entry[1].get(), timeout=1.0)
+                    yield f"event: update\ndata: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    if time.monotonic() - last_ping >= 15:
+                        last_ping = time.monotonic()
+                        yield ": ping\n\n"
+        finally:
+            hub.unsubscribe(entry)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
 
 
 @router.post("/prices/refresh")

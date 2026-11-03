@@ -645,33 +645,66 @@ function showError(message, hadCache) {
   }
 }
 
+const drawn = {};
 function render(report, meta) {
   $("pv-skeleton").hidden = true;
   $("pv-error").hidden = true;
   $("pv-content").hidden = false;
-  batch(report);
+  // Each section is redrawn only when ITS numbers changed (it reads the fields listed here). A page refreshed every 5 s would
+  // otherwise close the details you opened and replace the buttons under your finger. The sections that show the time
+  // (the next paper's estimate, the worker's "x minutes ago") are cheap and always redrawn.
+  const same = (name, ...fields) => {
+    const key = JSON.stringify(fields.map((f) => report[f]));
+    if (drawn[name] === key) return true;
+    drawn[name] = key;
+    return false;
+  };
+  if (!same("batch", "totals", "target_kind", "review_today")) batch(report);
   paper(report);
   status(report);
-  bank(report);
-  funnel(report);
-  spend(report);
-  waste(report);
-  jobs(report);
-  $("updated").textContent = (meta && meta.stale ? "上次的内容，正在更新… · " : "") + "每 30 秒自动刷新 · 更新于 " + fmtTime(report.generated_at);
+  if (!same("bank", "buckets", "legacy", "target_kind")) bank(report);
+  if (!same("funnel", "funnel")) funnel(report);
+  if (!same("spend", "spend", "ledger")) spend(report);
+  if (!same("waste", "waste")) waste(report);
+  if (!same("jobs", "recent_jobs")) jobs(report);
+  paintStamp(meta && meta.stale);
+}
+let lastShown = null;
+// "更新于 HH:MM:SS" is when this page last got numbers from the server; it also says how the page is being kept fresh
+function paintStamp(stale) {
+  if (!lastShown) {
+    if (stale) $("updated").textContent = "上次的内容，正在更新…";
+    return;
+  }
+  const how = window.Live?.state().connected ? "实时推送中" : "每 5 秒刷新";
+  $("updated").textContent = (stale ? "上次的内容，正在更新… · " : "") + "更新于 " + window.Live.stamp(lastShown) + " · " + how;
 }
 
 let loading = false;
+let again = false;
 async function load(fresh = false) {
-  if (loading) return;
+  if (loading) {
+    if (fresh) again = true; // a forced refresh (after cancelling a task, a pull down) is never lost behind a background poll
+    return;
+  }
   loading = true;
   try {
     await Data.swr("/v2/model/progress", {
       render,
-      fetcher: () => Data.fetchJSON("/v2/model/progress" + (fresh ? "?fresh=1" : "")),
+      fetcher: async () => {
+        const report = await Data.fetchJSON("/v2/model/progress" + (fresh ? "?fresh=1" : ""));
+        lastShown = new Date(); // every successful read moves the time, even when the numbers did not change
+        paintStamp(false);
+        return report;
+      },
       error: (error, meta) => showError(error.message, meta.hadCache),
     });
   } finally {
     loading = false;
+    if (again) {
+      again = false;
+      load(true);
+    }
   }
 }
 
@@ -681,11 +714,10 @@ $("pv-retry").onclick = () => {
   $("pv-skeleton").hidden = !Data.peek("/v2/model/progress");
   load(true);
 };
-setInterval(() => {
-  if (visible()) load(true);
-}, 30000);
-document.addEventListener("visibilitychange", () => {
-  if (visible()) load(true);
-});
-window.ProgressView = { show: () => load(), reload: () => load(true) };
+// The page keeps itself fresh (live.js): pushed updates, a 5 s poll when the stream is down, nothing while hidden.
+// A refresh reads the shared server copy; only "cancel a task" asks for a rebuild (?fresh=1).
+window.Live.register("progress", { visible, load: () => load(false) });
+window.Live.pullToRefresh($("progress-view"), () => load(false));
+setInterval(() => paintStamp(false), 1000);
+window.ProgressView = { show: () => { window.Live.touch("progress"); return load(); }, reload: () => { window.Live.touch("progress"); return load(true); } };
 })();

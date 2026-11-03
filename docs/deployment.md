@@ -52,7 +52,7 @@ worker 真正开始调用模型，需要同时满足：
 
 | 服务 | Dockerfile | 启动 / 其他 |
 |---|---|---|
-| `training-api-qa`（网站） | `backend/Dockerfile` | 启动命令 `python migrate.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT`；健康检查 `/health` |
+| `training-api-qa`（网站） | `backend/Dockerfile` | 启动命令 `python migrate.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT --timeout-graceful-shutdown 5`；健康检查 `/health` |
 | `training-worker-qa` | `deploy/railway-automation/Dockerfile` | 启动 `python -m app.auto_worker`；cron `*/5 * * * *`；重启策略 `NEVER` |
 
 `deploy/railway-automation/worker.railway.json` 只作为上述设置的参考，不会被任何服务读取。正式站（`xiao-ustc-quiz`）运行 `main`，不受此变更影响；第 10 步切换时需在其服务级设置里同样写明。
@@ -177,7 +177,7 @@ QA：项目 `0ff7ff18-e746-42db-8eb2-b515306fa473`，环境 `qa`（`246e3b1c-811
 构建与启动（Settings）：
 - Source：仓库 `Sakuraone0424/text`，分支 **`feat/60q-v2-spec`**（合并提交 `33ccbc3`；不再固定在 `d2b6a01`）。
 - Builder：由 RAILPACK 改为 **Dockerfile**，路径 `backend/Dockerfile`（服务级设置，见「部署设置的来源」）。
-- Start Command：保持 `python migrate.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT`（Dockerfile 的 CMD 只启 uvicorn，迁移靠这条）。
+- Start Command：保持 `python migrate.py && uvicorn app.main:app --host 0.0.0.0 --port $PORT --timeout-graceful-shutdown 5`（Dockerfile 的 CMD 只启 uvicorn，迁移靠这条）。**新增 `--timeout-graceful-shutdown 5`**：出题进度页用服务端推送（SSE）保持长连接，重启/部署时最多等 5 秒就结束这些连接；Railway 上的 Start Command 是手工设置的，需要你把这个参数加进去（事件流本身也限定了 8 秒的最长存活，浏览器会自动重连，所以不加也不会卡住部署，只是最多多等 8 秒）。
 - Healthcheck Path：`/health`（服务级设置）。
 
 变量：

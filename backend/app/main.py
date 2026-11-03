@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 from contextlib import asynccontextmanager, suppress
 
 from pathlib import Path
@@ -59,7 +60,16 @@ async def lifespan(app):
         if enabled
         else []
     )
+    stop_listening = threading.Event()
+    if os.environ.get("DATABASE_URL") and os.environ.get("QUIZ_PROGRESS_PUSH", "1") == "1":
+        from app import progress_events
+
+        progress_events.start(stop_listening)     # database changes -> open progress pages (server-sent events)
     yield
+    stop_listening.set()
+    from app import progress_events as _events
+
+    _events.HUB.closing = True
     for task in tasks:
         task.cancel()
     for task in tasks:
