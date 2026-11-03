@@ -47,11 +47,13 @@ SHORT_BANK = {
 }
 
 
-def open_page(engine, mode, base, path="/training", logged_in=True, overview=None, scheme="light"):
+def open_page(engine, mode, base, path="/training", logged_in=True, overview=None, scheme="light", init_script=None):
     name, browser, device = engine
     context = browser.new_context(**{**device, "viewport": {"width": 393, "height": 852}, "color_scheme": scheme})
     if mode == "standalone":
         context.add_init_script(STANDALONE)
+    if init_script:
+        context.add_init_script(init_script)       # runs before the page's own scripts (every engine)
     page = context.new_page()
     if overview is not None:
         # The live fixture already prepared a paper for today; this is a learner without one.

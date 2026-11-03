@@ -59,24 +59,20 @@ def probe_text(page):
     return f"timer ticks={len(marks)} worst gap={worst}ms live={page.evaluate('JSON.stringify(window.Live.state())')}"
 
 
-def no_stream(page):
-    page.route("**/v2/model/progress/events", lambda route: route.abort())
+NO_STREAM = "window.EventSource = undefined;"   # the page then has no server push and polls every 5 s instead
 
 
 def test_it_polls_every_five_seconds_when_the_stream_is_down_and_shows_the_stamp(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, "safari", base, path="/training#/progress")
-    page.close()
-    page, errors = open_page(engine, "safari", base, path="/training")
-    no_stream(page)
+    page, errors = open_page(engine, "safari", base, path="/training", init_script=NO_STREAM)
     seen = watch(page, "/v2/model/progress")
     tick_probe(page)
     page.evaluate("location.hash = '#/progress'")
     page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)
     page.wait_for_timeout(16000)
     gaps = [b - a for a, b in zip(seen, seen[1:])]
-    slowest = 11.0 if engine[0] == "webkit" else 6.5               # (headless WebKit on a busy CI machine runs page timers late)
+    slowest = 6.5
     assert len(seen) >= 3, (seen, probe_text(page))                # the first read and at least two polls in ~16 s
     assert all(4.0 <= g <= slowest for g in gaps), (gaps, probe_text(page))   # ~5 s apart; no double read
     text = page.inner_text("#updated")
@@ -87,8 +83,7 @@ def test_it_polls_every_five_seconds_when_the_stream_is_down_and_shows_the_stamp
 def test_nothing_runs_while_hidden_and_coming_back_refreshes_at_once(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, "safari", base, path="/training")
-    no_stream(page)
+    page, errors = open_page(engine, "safari", base, path="/training", init_script=NO_STREAM)
     seen = watch(page, "/v2/model/progress")
     page.evaluate("location.hash = '#/progress'")
     page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)
@@ -129,8 +124,7 @@ def test_a_database_change_updates_the_page_at_once_through_the_stream(engine, l
 def test_pulling_down_at_the_top_refreshes(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, "safari", base, path="/training")
-    no_stream(page)
+    page, errors = open_page(engine, "safari", base, path="/training", init_script=NO_STREAM)
     if not page.evaluate("""() => { try { new Touch({identifier: 1, target: document.body, clientX: 0, clientY: 0}); return true; } catch { return false; } }"""):
         pytest.skip("synthetic touch events cannot be built in this engine (WebKit on the desktop)")
     seen = watch(page, "/v2/model/progress")
@@ -151,14 +145,13 @@ def test_pulling_down_at_the_top_refreshes(engine, live_app):
 def test_the_home_card_keeps_itself_fresh_and_shows_the_stamp(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, "safari", base, path="/training", overview=SHORT_BANK)
-    no_stream(page)
+    page, errors = open_page(engine, "safari", base, path="/training", init_script=NO_STREAM, overview=SHORT_BANK)
     seen = watch(page, "/v2/model/progress/bank")
     tick_probe(page)
     page.wait_for_selector("#bank-block:not([hidden])", timeout=15000)
     assert STAMP.search(page.inner_text("#bank-updated"))
     page.wait_for_timeout(18000)
-    slowest = 11.0 if engine[0] == "webkit" else 6.5
+    slowest = 6.5
     assert len(seen) >= 2, (seen, probe_text(page))               # polled every ~5 s on the home page
     gaps = [b - a for a, b in zip(seen, seen[1:])]
     assert all(4.0 <= g <= slowest for g in gaps), (gaps, probe_text(page))
@@ -174,8 +167,7 @@ def test_the_home_card_keeps_itself_fresh_and_shows_the_stamp(engine, live_app):
 def test_a_poll_that_finds_the_same_numbers_does_not_redraw_the_page(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, "safari", base, path="/training")
-    no_stream(page)
+    page, errors = open_page(engine, "safari", base, path="/training", init_script=NO_STREAM)
     page.evaluate("location.hash = '#/progress'")
     page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)
     page.evaluate("""() => { document.querySelector('#jobs li').dataset.mark = 'kept'; window.__reads = 0;
@@ -190,8 +182,7 @@ def test_a_poll_that_finds_the_same_numbers_does_not_redraw_the_page(engine, liv
 def test_a_forced_refresh_is_not_lost_behind_a_poll_that_is_already_running(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, errors = open_page(engine, "safari", base, path="/training")
-    no_stream(page)
+    page, errors = open_page(engine, "safari", base, path="/training", init_script=NO_STREAM)
     page.evaluate("location.hash = '#/progress'")
     page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)
     # the next read of the report is slow, and a forced refresh arrives while it is out
