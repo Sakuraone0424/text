@@ -452,7 +452,8 @@ def bucket_gaps(conn, uid):
     past = _count_by_bucket(
         conn,
         "SELECT subject AS s,question_type AS t,count(*) AS n FROM past_exam_items "
-        "WHERE status IN ('imported','queued') AND question_type IN ('term','short_answer','essay') GROUP BY 1,2",
+        "WHERE (status='queued' AND question_type='term') "  # imported term items are throttled: they no longer hold back new ones
+        "OR (status IN ('imported','queued') AND question_type IN ('short_answer','essay')) GROUP BY 1,2",
     )
     gaps = []
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
