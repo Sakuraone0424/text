@@ -133,7 +133,9 @@ def test_reclassify_retires_misfiled_items_once_and_reports_the_counts(db, misre
     assert summary["before"]["term"] == summary["after"]["term"] + 1
     assert db.execute("SELECT count(*) AS n FROM past_exam_items WHERE blocked_reason='reclassified'").fetchone()["n"] == 1
     assert pei.reclassify_once(db) is None                                           # once per version
-    assert waste_report.past_exam_route(db, 24)["items_by_state"]["term"]["blocked:reclassified"] == 1
+    route = waste_report.past_exam_route(db, 24)
+    assert route["items_by_state"]["term"]["blocked:reclassified"] == 1
+    assert route["reclassification"]["retired_by_old_type"] == {"term": 1} and route["reclassification"]["after"]["fill_blank"] >= 3
 
 
 # ---- 四: term retrieval --------------------------------------------------------------------------------------------

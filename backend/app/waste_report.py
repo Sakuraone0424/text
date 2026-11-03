@@ -343,7 +343,10 @@ def past_exam_route(conn, hours=24, sample_limit=150):
     skipped = {f"{r['t']}:{r['why']}": r["n"] for r in conn.execute(
         "SELECT question_type AS t, blocked_reason AS why, count(*) AS n FROM past_exam_items WHERE status='blocked' "
         "AND blocked_reason IN ('term_not_in_textbook','no_textbook_evidence') AND updated_at>" + _since(hours) + " GROUP BY 1,2", (hours,)).fetchall()}
-    return dict(skipped_before_model=dict(hours=hours, by_type_and_reason=skipped,
+    from app import legacy_reuse
+    state = legacy_reuse._state(conn, "past_exam_classification")
+    return dict(reclassification=state,   # {version, before, after, retired_by_old_type, new_items, blocked}: item counts per type
+                skipped_before_model=dict(hours=hours, by_type_and_reason=skipped,
                                           term_not_in_textbook=sum(v for k, v in skipped.items() if k.endswith("term_not_in_textbook"))),
                 model_calls_ended={k: dict(v.most_common()) for k, v in ended.items()}, insufficient_textbook_evidence=insufficient,
                 review_by_type=review["by_type"], review_failure_kinds=review["categories"], items_by_state=dict(status),
