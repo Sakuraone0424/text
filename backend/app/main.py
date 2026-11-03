@@ -146,7 +146,7 @@ def health():
         os.environ.get("DATABASE_URL")
         or os.environ.get("QUIZ_REQUIRE_RAILWAY_IDENTITY") == "1"
     ):
-        db_health()
+        _database_status(business=False)   # the platform's check: schema yes, bank size never
     return {"status": "healthy"}
 
 
@@ -186,6 +186,10 @@ def business_gaps():
 
 @app.get("/db/health")
 def db_health():
+    return _database_status(business=True)
+
+
+def _database_status(business):
     try:
         with get_db() as conn:
             applied = {
@@ -198,7 +202,7 @@ def db_health():
         from app.automation import selected_daily_blueprint
         from app import training_spec_v4 as current, training_spec_v2 as retired_spec
 
-        missing = business_gaps()
+        missing = business_gaps() if business else []
         if missing:
             # /health (the platform's check) stays green; this one says what the business still lacks
             raise HTTPException(503, detail={"code": "not_ready_for_training", "missing": missing})

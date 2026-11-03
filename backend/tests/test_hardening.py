@@ -241,3 +241,9 @@ def test_a_started_paper_is_graded_by_the_question_as_it_was_when_the_paper_was_
     ).json()
     graded = next(a for a in result["answers"] if a["question_id"] == item["question_id"])
     assert graded["points"] == item["snapshot"]["max_points"]    # judged by the snapshot, whatever happened to the live row
+
+
+def test_the_platform_health_check_never_depends_on_the_bank(client, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://unused")
+    assert client.get("/health").status_code == 200           # empty bank, schema complete
+    assert client.get("/db/health?business=false").status_code == 503   # a query string cannot switch the check off
