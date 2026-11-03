@@ -19,6 +19,27 @@ SUBS = [
 ]
 
 
+# Playwright's route() does not see requests a service worker makes in every engine (WebKit), so the two tests that need to
+# hold or alter one patch fetch inside the page instead: the same in every browser.
+HOLD_FETCH = """(part) => {
+  const real = window.fetch.bind(window);
+  window.__held = [];
+  window.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (!url.includes(part)) return real(input, init);
+    return new Promise((resolve) => window.__held.push(() => resolve(new Response('{"configured": false, "message": "late"}', {status: 200, headers: {'Content-Type': 'application/json'}}))));
+  };
+}"""
+MERGE_FETCH = """([part, merge]) => {
+  const real = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (!url.includes(part)) return real(input, init);
+    return real(input, init).then(async (r) => new Response(JSON.stringify({...(await r.json()), ...merge}), {status: 200, headers: {'Content-Type': 'application/json'}}));
+  };
+}"""
+
+
 def go(page, route):
     page.evaluate("(r) => { location.hash = r }", route)
     page.wait_for_timeout(500)
@@ -67,18 +88,13 @@ def test_a_sub_page_that_finishes_loading_after_you_left_does_not_draw_itself(en
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base)
-    held = []
-    page.route("**/v2/archive/status", lambda route: held.append(route))
     expect(page.locator("#login")).to_be_hidden()
+    page.evaluate(HOLD_FETCH, "/v2/archive/status")
     go(page, "#/profile")
     go(page, "#/profile/archive")
-    for _ in range(50):                      # (WebKit needs a moment longer to send it)
-        if held:
-            break
-        page.wait_for_timeout(100)
-    assert held, "the archive request is waiting"
+    page.wait_for_function("window.__held.length > 0")
     go(page, "#/mistakes")                   # leave before the answer arrives
-    held[0].fulfill(json={"configured": False, "message": "late"})
+    page.evaluate("window.__held.forEach((release) => release())")
     page.wait_for_timeout(500)
     assert learning_children(page) == 0
     assert "Notion归档状态" not in visible_page_text(page)
@@ -216,16 +232,16 @@ def test_the_pass_rate_ring_turns_orange_below_half(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base, "/training#/progress")
-    page.route("**/v2/model/progress*", lambda route: route.fulfill(json={**route.fetch().json(), "review_today": {"reviewed": 10, "passed": 3, "rate": 0.3}}))
     expect(page.locator("#pv-content")).to_be_visible()
+    page.evaluate(MERGE_FETCH, ["/v2/model/progress", {"review_today": {"reviewed": 10, "passed": 3, "rate": 0.3}}])
     page.evaluate("window.ProgressView.reload()")
     expect(page.locator("#rate-ring")).to_have_class(re.compile(r"\blow\b"))
     expect(page.locator("#review-rate")).to_have_text("30%")
     colour = page.locator("#review-rate").evaluate("(n) => getComputedStyle(n).color")
     assert colour in ("rgb(234, 88, 12)", "rgb(251, 146, 60)"), colour
-    page.unroute("**/v2/model/progress*")
-    page.route("**/v2/model/progress*", lambda route: route.fulfill(json={**route.fetch().json(), "review_today": {"reviewed": 10, "passed": 6, "rate": 0.6}}))
+    page.evaluate(MERGE_FETCH, ["/v2/model/progress", {"review_today": {"reviewed": 10, "passed": 6, "rate": 0.6}}])
     page.evaluate("window.ProgressView.reload()")
+    expect(page.locator("#review-rate")).to_have_text("60%")
     expect(page.locator("#rate-ring")).not_to_have_class(re.compile(r"\blow\b"))
     assert not errors, errors
 
