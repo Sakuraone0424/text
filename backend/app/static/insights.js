@@ -223,6 +223,7 @@
     if (o.subjective_rate !== null) $("stat-subjective-note").textContent = "AI 判分";
     weak($("weak-chapters"), o.weak_chapters);
     $("weak-practice").hidden = !o.weak_chapters.length;
+    $("weak-all").hidden = !o.weak_chapters.length;       // nothing to list yet: no link to an empty section
     const due = o.reviews.due_now;
     $("metric-due").textContent = String(due);
     $("quick-review-line").textContent = due ? `今日到期 ${due} 道` : "今日没有到期";
@@ -314,7 +315,21 @@
     // g) reviews
     const g = card();
     reviews(g, data.reviews);
+    scrollToChaptersIfAsked();
   }
+  /* 「查看全部 →」 on the home card opens 我的 and scrolls to 章节掌握情况. The page may draw twice (kept copy, then fresh
+     numbers) and the router restores the page's own scroll position first, so the scroll is repeated for a few seconds. */
+  let chapterScrollUntil = 0;
+  function scrollToChaptersIfAsked() {
+    if (Date.now() > chapterScrollUntil) return;
+    const target = $("profile-chapters");
+    if (target) requestAnimationFrame(() => target.scrollIntoView({ block: "start", behavior: "instant" }));
+  }
+  $("weak-all").onclick = () => {
+    chapterScrollUntil = Date.now() + 4000;
+    location.hash = "#/profile";          // the router remembers where the home page was left and restores it on the way back
+    setTimeout(scrollToChaptersIfAsked, 0);
+  };
   const hoursShort = (seconds) => {
     const h = seconds / 3600;
     return h >= 1 ? (Math.round(h * 10) / 10) + "h" : Math.round(seconds / 60) + "m";
@@ -369,6 +384,7 @@
   }
   function chapters(card, rows) {
     const head = el("div", undefined, card, "head-line");
+    head.id = "profile-chapters";         // 「查看全部 →」 on the home card scrolls here
     el("h2", "章节掌握情况", head);
     const subjects = Object.keys(SUBJECT).filter((k) => rows.some((r) => r.subject === k));
     const box = el("div", undefined, card, "chapter-list");

@@ -273,3 +273,29 @@ def test_the_time_spent_in_a_draft_grows_never_shrinks_and_is_stored_at_submit(d
     assert "seconds" not in ts.valid_value(db, made["paper_id"], qid, {"text": "A"})  # nothing recorded, nothing stored
     db.execute("INSERT INTO answer_drafts VALUES (%s,%s,%s)", (made["paper_id"], qid, Jsonb({"text": "A", "seconds": 90})))
     assert ts.valid_value(db, made["paper_id"], qid, {"text": "A", "seconds": 20})["seconds"] == 90  # a stale tab cannot erase it
+
+
+def test_the_home_card_lists_up_to_five_weak_chapters_lowest_first(db, uid):
+    t = today(db)
+    chapters = [("A章", 0), ("B章", 4), ("C章", 2), ("D章", 1), ("E章", 3), ("F章", 4), ("G章", 0)]
+    paper(db, uid, t, [item(chapter=name, got=got) for name, got in chapters for _ in range(3)], when=at(t))
+    weak = stats.overview(db, uid)["weak_chapters"]
+    assert len(weak) == 5 == stats.WEAK_CHAPTERS_SHOWN
+    rates = [w["rate"] for w in weak]
+    assert rates == sorted(rates) and rates[0] == 0.0
+    assert {w["chapter"] for w in weak[:2]} == {"A章", "G章"}
+    assert {w["chapter"] for w in weak}.isdisjoint({"B章", "F章"})       # the two best chapters are left out
+    assert all(w["answers"] >= stats.MIN_CHAPTER_ANSWERS for w in weak)
+
+
+def test_fewer_than_five_chapters_show_as_many_as_there_are(db, uid):
+    t = today(db)
+    paper(db, uid, t, [item(chapter="A章", got=0)] * 3 + [item(chapter="B章", got=2)] * 3 + [item(chapter="C章", got=4)] * 2, when=at(t))
+    assert [w["chapter"] for w in stats.overview(db, uid)["weak_chapters"]] == ["A章", "B章"]      # C章 has only 2 graded answers
+    assert stats.overview(db, uid)["weak_chapters"][0]["rate"] == 0.0
+
+
+def test_chapters_with_fewer_than_three_graded_answers_never_count_even_with_five_chapters_available(db, uid):
+    t = today(db)
+    paper(db, uid, t, [item(chapter=f"{n}章", got=0) for n in "ABCDE" for _ in range(2)], when=at(t))
+    assert stats.overview(db, uid)["weak_chapters"] == []

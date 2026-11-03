@@ -182,7 +182,7 @@ def test_seeded_pages(engine, live_app, mode, scheme):
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, mode, base, scheme=scheme)
     expect(page.locator("#stat-avg")).not_to_have_text("—")
-    expect(page.locator("#weak-chapters .progress-line")).to_have_count(3)
+    expect(page.locator("#weak-chapters .progress-line")).to_have_count(5)
     clear_of_the_top_inset(page, mode)
     fits(page)
     snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "data", "home")
