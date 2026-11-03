@@ -40,7 +40,7 @@ class StaleCache:
         with gate:
             with self._lock:
                 item = self._items.get(key)
-            if item and item[0] >= asked_at:       # somebody finished a build after we asked: use it
+            if item and item[0] > asked_at:        # somebody finished a build after we asked: use it
                 return item[1]
             value = build()
             with self._lock:
