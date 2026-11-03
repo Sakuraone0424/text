@@ -657,7 +657,17 @@ function render(report, meta) {
   spend(report);
   waste(report);
   jobs(report);
-  $("updated").textContent = (meta && meta.stale ? "上次的内容，正在更新… · " : "") + "每 30 秒自动刷新 · 更新于 " + fmtTime(report.generated_at);
+  paintStamp(meta && meta.stale);
+}
+let lastShown = null;
+// "更新于 HH:MM:SS" is when this page last got numbers from the server; it also says how the page is being kept fresh
+function paintStamp(stale) {
+  if (!lastShown) {
+    if (stale) $("updated").textContent = "上次的内容，正在更新…";
+    return;
+  }
+  const how = window.Live?.state().connected ? "实时推送中" : "每 5 秒刷新";
+  $("updated").textContent = (stale ? "上次的内容，正在更新… · " : "") + "更新于 " + window.Live.stamp(lastShown) + " · " + how;
 }
 
 let loading = false;
@@ -667,7 +677,12 @@ async function load(fresh = false) {
   try {
     await Data.swr("/v2/model/progress", {
       render,
-      fetcher: () => Data.fetchJSON("/v2/model/progress" + (fresh ? "?fresh=1" : "")),
+      fetcher: async () => {
+        const report = await Data.fetchJSON("/v2/model/progress" + (fresh ? "?fresh=1" : ""));
+        lastShown = new Date(); // every successful read moves the time, even when the numbers did not change
+        paintStamp(false);
+        return report;
+      },
       error: (error, meta) => showError(error.message, meta.hadCache),
     });
   } finally {
@@ -681,11 +696,10 @@ $("pv-retry").onclick = () => {
   $("pv-skeleton").hidden = !Data.peek("/v2/model/progress");
   load(true);
 };
-setInterval(() => {
-  if (visible()) load(true);
-}, 30000);
-document.addEventListener("visibilitychange", () => {
-  if (visible()) load(true);
-});
+// The page keeps itself fresh (live.js): pushed updates, a 5 s poll when the stream is down, nothing while hidden.
+// A refresh reads the shared server copy; only "cancel a task" asks for a rebuild (?fresh=1).
+window.Live.register("progress", { visible, load: () => load(false) });
+window.Live.pullToRefresh($("progress-view"), () => load(false));
+setInterval(() => paintStamp(false), 1000);
 window.ProgressView = { show: () => load(), reload: () => load(true) };
 })();

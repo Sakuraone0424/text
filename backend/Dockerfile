@@ -17,4 +17,4 @@ COPY backend/harness ./harness
 COPY backend/sql ./sql
 COPY backend/migrate.py ./migrate.py
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --timeout-graceful-shutdown 5"]

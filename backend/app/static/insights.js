@@ -119,6 +119,29 @@
     const hours = bank.eta_hours < 1 ? "不到 1 小时" : `约 ${Math.round(bank.eta_hours)} 小时`;
     return `${paused}预计${hours}，${clock(bank.eta_at)} 前可开始`;
   }
+  /* The "is tomorrow's paper stocked" card; painted from the home overview and then kept fresh by live.js. */
+  let homeToday = null;
+  let bankStamp = null;
+  function paintBank(bank, todayState) {
+    const showBank = todayState === "none";
+    $("bank-block").hidden = !showBank;
+    $("bank-ready").textContent = String(bank.ready);
+    $("bank-needed").textContent = String(bank.needed);
+    $("bank-bar").style.width = Math.min(100, bank.needed ? (bank.ready / bank.needed) * 100 : 0) + "%";
+    $("bank-eta").textContent = etaText(bank);
+    lock = todayState === "none" ? bank : null;
+    applyLock();
+  }
+  function paintBankStamp() {
+    if (bankStamp && $("bank-updated")) $("bank-updated").textContent = "更新于 " + window.Live.stamp(bankStamp);
+  }
+  async function refreshBank() {
+    if (homeToday !== "none") return; // no card is shown once today's paper exists
+    const bank = await Data.fetchJSON("/v2/model/progress/bank");
+    bankStamp = new Date();
+    paintBank(bank, homeToday);
+    paintBankStamp();
+  }
   /* While the bank is short and no paper is prepared the start button is grey and says why. */
   let lock = null;
   function applyLock() {
@@ -174,14 +197,10 @@
       result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分` : "今日已交卷，等待判分完成";
     // bank readiness: tag, progress line and the start button
     const bank = o.tomorrow;
-    const showBank = today.state === "none";
-    $("bank-block").hidden = !showBank;
-    $("bank-ready").textContent = String(bank.ready);
-    $("bank-needed").textContent = String(bank.needed);
-    $("bank-bar").style.width = Math.min(100, bank.needed ? (bank.ready / bank.needed) * 100 : 0) + "%";
-    $("bank-eta").textContent = etaText(bank);
-    lock = today.state === "none" ? bank : null;
-    applyLock();
+    homeToday = today.state;
+    paintBank(bank, today.state);
+    bankStamp = new Date();
+    paintBankStamp();
     const none = (id, value, noteId, empty, shown) => {
       $(id).textContent = value === null || value === undefined ? "—" : shown;
       $(id).classList.toggle("none", value === null || value === undefined);
@@ -738,6 +757,9 @@
       loadDue();
     }
   }
+
+  window.Live.register("home", { visible: () => !$("home-view").hidden, load: refreshBank });
+  window.Live.pullToRefresh($("home-view"), () => Promise.all([loadHome(), refreshBank().catch(() => {})]));
 
   window.Insights = { applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
 })();
