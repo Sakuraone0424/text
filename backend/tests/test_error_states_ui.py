@@ -32,10 +32,12 @@ def test_a_failed_load_shows_the_reason_and_a_retry_button_on_the_same_page(engi
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base, path="/training")
+    page.evaluate("localStorage.clear(); sessionStorage.clear()")   # a first visit: nothing cached to fall back on
     page.add_init_script("(" + FAIL_DATA + ")(" + repr(mode).replace("'", '"') + ")")
     page.goto(base + "/training" + route)
     page.wait_for_timeout(1800)
     assert page.evaluate("getComputedStyle(document.getElementById('login')).display") == "none" or page.evaluate("document.getElementById('login').hidden"), route
     assert page.evaluate("location.hash") == route
     assert page.evaluate(VISIBLE_RETRY) >= 1, f"{route}: no visible retry button"
+    print("PROBE", route, mode, "|", page.evaluate("[...document.querySelectorAll('[data-page]')].filter(n=>!n.hidden).map(n=>n.innerText).join(' / ').replace(/\\s+/g,' ').slice(0,260)"))
     assert not errors, errors
