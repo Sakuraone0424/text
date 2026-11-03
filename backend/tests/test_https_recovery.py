@@ -248,16 +248,14 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     wait_saved(page)
     page.evaluate('navigator.serviceWorker.ready')
     page.wait_for_function('navigator.serviceWorker.controller !== null')
+    # the new cache is created when the worker starts to install and filled when it finishes: wait for the content itself
     page.wait_for_function("""async () => {
       const keys = await caches.keys();
-      return keys.includes('xiaohan-training-shell-v19-one-shell') &&
-             !keys.includes('xiaohan-training-shell-v7-offline-recovery');
-    }""")
-    assert page.evaluate("""async () => {
+      if (!keys.includes('xiaohan-training-shell-v19-one-shell') || keys.includes('xiaohan-training-shell-v7-offline-recovery')) return false;
       const cache = await caches.open('xiaohan-training-shell-v19-one-shell');
       const asset = await cache.match('/static/training.js');
       return !!asset && (await asset.text()).includes('cachedPaper(username, paper.paper_id)');
-    }""")
+    }""", timeout=60000)
     context.set_offline(True)
     field.fill('v8升级后离线刷新保留的草稿')
     page.reload()
