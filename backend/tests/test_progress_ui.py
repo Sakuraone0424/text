@@ -78,7 +78,7 @@ def test_history_is_folded_reasons_are_chinese_and_codes_hide_in_details(live_ap
     expect(term.locator("details.reasons-detail")).to_have_count(1)
     expect(page.locator("#batch-progress")).to_contain_text("已入库")
     expect(page.locator("#review-rate")).to_have_text("—")
-    expect(page.locator("#bank .row .count").first).to_contain_text("两天储备")
+    expect(page.locator("#bank-label")).to_contain_text("两天储备")
     # a task row: Chinese inline, the code only inside 详情
     row = page.locator("#jobs li", has_text="出题 · 生化名词解释").first
     expect(row).to_contain_text("模型输出不符合题目格式")

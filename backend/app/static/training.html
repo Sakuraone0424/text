@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="/static/tokens.css" />
     <link rel="stylesheet" href="/static/app.css" />
     <link rel="stylesheet" href="/static/training.css" />
+    <link rel="stylesheet" href="/static/views.css" />
   </head>
   <body class="training-app">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -241,20 +242,22 @@
           <div id="pv-error" class="error-card" role="alert" hidden><p id="pv-error-text"></p><button id="pv-retry" class="secondary" type="button">重试</button></div>
           <div id="pv-content" class="stack" hidden>
         <section class="card key" aria-labelledby="h-batch">
-          <div class="key-head">
-            <h2 id="h-batch" class="label">首批目标已入库</h2>
-            <p class="rate"><span class="label">今日审核通过率</span> <b id="review-rate"></b></p>
+          <div class="hero">
+            <div id="rate-ring" class="ring" role="img" aria-label="今日审核通过率"><svg viewBox="0 0 80 80" aria-hidden="true"><circle class="ring-track" cx="40" cy="40" r="34"/><circle id="ring-arc" class="ring-arc" cx="40" cy="40" r="34" pathLength="100"/></svg><span class="ring-text"><b id="review-rate"></b><small>今日通过率</small></span></div>
+            <div class="hero-main">
+              <h2 id="h-batch" class="label">首批目标已入库</h2>
+              <p class="big"><b id="batch-number"></b><span id="batch-target" class="unit"></span></p>
+              <div id="batch-progress"></div>
+              <p id="admitted-today" class="note" hidden></p>
+            </div>
           </div>
-          <p class="big"><b id="batch-number"></b><span id="batch-target" class="unit"></span></p>
-          <div id="batch-progress"></div>
-          <div class="cells">
-            <div><span class="label">当前时段</span><b id="period"></b></div>
-            <div><span class="label">后台服务</span><b id="worker"></b></div>
-            <div><span class="label">凑齐一张卷</span><b id="paper-main"></b></div>
+          <div class="tiles">
+            <div class="tile"><span class="label">当前时段</span><b id="period"></b></div>
+            <div class="tile"><span class="label">后台服务</span><b id="worker"></b></div>
+            <div class="tile"><span class="label">凑齐一张卷</span><b id="paper-main"></b></div>
           </div>
           <p id="paper-note" class="note"></p>
           <p id="worker-note" class="note"></p>
-          <p id="admitted-today" class="note" hidden></p>
         </section>
         <section class="card" aria-labelledby="h-bank">
           <div class="card-head">
@@ -264,33 +267,17 @@
               <button type="button" data-subject="cell_biology" aria-pressed="false">细胞</button>
             </div>
           </div>
-          <p class="note">已入库 / 目标</p>
+          <p id="bank-label" class="note">已入库 / 目标</p>
           <div id="bank"></div>
           <details id="legacy" class="legacy" hidden>
             <summary id="legacy-summary"></summary>
             <ul id="legacy-list" class="legacy-list"></ul>
           </details>
         </section>
-        <section class="card" aria-labelledby="h-spend">
-          <div class="card-head">
-            <h2 id="h-spend">本月花费</h2>
-            <p class="quota"><b id="spend-month"></b></p>
-          </div>
-          <div id="spend-chart"></div>
-          <div class="cells four">
-            <div><span class="label">今日</span><b id="spend-today"></b></div>
-            <div><span class="label">每入库一题</span><b id="spend-per"></b></div>
-            <div><span class="label">今日剩余</span><b id="spend-daily-left"></b></div>
-            <div><span class="label">本月出题剩余</span><b id="spend-left"></b></div>
-          </div>
-          <div class="cells" id="ledger">
-            <div><span class="label">实际已花</span><b id="ledger-actual"></b></div>
-            <div><span class="label">预留中</span><b id="ledger-reserved"></b></div>
-            <div><span class="label">上次对账</span><b id="ledger-checked"></b></div>
-          </div>
-          <p id="ledger-note" class="note"></p>
-          <p class="note">判分预留剩余 <span id="spend-grading"></span></p>
-          <p id="spend-note" class="note"></p>
+        <section class="card" aria-labelledby="h-funnel">
+          <div class="card-head"><h2 id="h-funnel">今日出题漏斗</h2></div>
+          <div id="funnel-types" class="segmented wrap" role="group" aria-label="题型"></div>
+          <div id="funnel"></div>
         </section>
         <section class="card" aria-labelledby="h-waste">
           <h2 id="h-waste">近 24 小时被挡原因</h2>
@@ -299,6 +286,31 @@
         <section class="card" aria-labelledby="h-jobs">
           <h2 id="h-jobs">最近任务</h2>
           <ol id="jobs" class="jobs"></ol>
+        </section>
+        <section class="card" aria-labelledby="h-spend">
+          <div class="card-head">
+            <h2 id="h-spend">费用</h2>
+            <p class="quota"><b id="spend-month"></b></p>
+          </div>
+          <div id="spend-split"></div>
+          <div class="tiles four">
+            <div class="tile"><span class="label">今日</span><b id="spend-today"></b></div>
+            <div class="tile"><span class="label">每入库一题</span><b id="spend-per"></b></div>
+            <div class="tile"><span class="label">今日剩余</span><b id="spend-daily-left"></b></div>
+            <div class="tile"><span class="label">本月出题剩余</span><b id="spend-left"></b></div>
+          </div>
+          <div id="spend-chart"></div>
+          <details id="ledger" class="fold">
+            <summary>对账信息</summary>
+            <div class="tiles">
+              <div class="tile"><span class="label">实际已花</span><b id="ledger-actual"></b></div>
+              <div class="tile"><span class="label">预留中</span><b id="ledger-reserved"></b></div>
+              <div class="tile"><span class="label">上次对账</span><b id="ledger-checked"></b></div>
+            </div>
+            <p id="ledger-note" class="note"></p>
+            <p class="note">判分预留剩余 <span id="spend-grading"></span></p>
+          </details>
+          <p id="spend-note" class="note"></p>
         </section>
         <p id="updated" class="note center">正在读取…</p>
       </div>
@@ -321,6 +333,26 @@
           </details>
         </section>
 
+        <section class="card" aria-labelledby="h-ledger">
+          <h2 id="h-ledger">费用账本</h2>
+          <div class="usage">
+            <div><div class="limit-head"><span class="label">今日已用</span><span class="used" id="usage-day-text"></span></div><div id="usage-day"></div></div>
+            <div><div class="limit-head"><span class="label">本月已用</span><span class="used" id="usage-month-text"></span></div><div id="usage-month"></div></div>
+          </div>
+          <div class="tiles">
+            <div class="tile"><span class="label">今日剩余</span><b id="bl-day"></b></div>
+            <div class="tile"><span class="label">本月剩余</span><b id="bl-month"></b></div>
+            <div class="tile"><span class="label">累计预留</span><b id="bl-reserved"></b></div>
+            <div class="tile"><span class="label">待对账预留</span><b id="bl-unknown"></b></div>
+            <div class="tile"><span class="label">调用次数</span><b id="bl-calls"></b></div>
+            <div class="tile"><span class="label">官方账单</span><b id="bl-invoice"></b></div>
+          </div>
+          <p id="bl-period" class="note"></p>
+          <details class="fold"><summary>说明</summary>
+            <p class="note">这些是应用记录的估算和预留，不是官方账单；官方账单对账后会修正。预留是每次调用前按最坏情况先留出的额度，调用结束后按实际用量结算。</p>
+          </details>
+        </section>
+
         <section class="card" aria-labelledby="h-limits">
           <h2 id="h-limits">费用上限</h2>
           <div class="limit">
@@ -336,7 +368,6 @@
             <div class="limit-input"><label class="mini-switch"><input id="task-limit-enabled" type="checkbox" role="switch" aria-label="启用单任务上限" /><span>启用</span></label><span class="yen">¥</span><input id="task-budget" type="number" inputmode="decimal" min="0" max="1000" step="0.01" aria-label="单任务上限（元）" /></div>
           </div>
           <details><summary>说明与累计试验上限</summary>
-            <p id="billing" class="note" role="status"></p>
             <p class="note">应用侧预算不是平台硬性扣费限额。关闭某项上限后，仍受已授权任务、并发、超时和异常停止保护。</p>
             <label class="row switch"><span><b>累计试验上限</b><small>关闭不会删除历史预留</small></span><input id="trial-active" type="checkbox" role="switch" /></label>
             <div class="limit-input"><span class="yen">¥</span><input id="trial-budget" type="number" inputmode="decimal" min="0" max="10000" step="0.01" aria-label="累计试验上限（元）" /></div>

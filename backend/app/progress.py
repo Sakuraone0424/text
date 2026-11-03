@@ -78,6 +78,28 @@ def review_pass_rate_today(conn):
     return dict(reviewed=row["reviewed"], passed=row["passed"], rate=round(row["passed"] / row["reviewed"], 4) if row["reviewed"] else None)
 
 
+def funnel_today(conn):
+    """Today's funnel per question type (both subjects together): written -> format passed -> review passed -> in the bank.
+    Each count is a number of distinct things that reached that step today."""
+    steps = defaultdict(lambda: dict(written=0, format_passed=0, review_passed=0, in_bank=0))
+    for r in conn.execute(
+        "SELECT payload->>'question_type' AS t, count(*) AS n FROM ai_jobs WHERE kind='generation' AND state IN ('succeeded','blocked') "
+        f"AND COALESCE(finished_at,started_at,created_at)>={cost_control.DAY_START} GROUP BY 1"
+    ).fetchall():
+        steps[r["t"]]["written"] += r["n"]
+    for r in conn.execute(
+        "SELECT q.content->>'question_type' AS t, ev.phase, count(DISTINCT ev.question_id) AS n FROM auto_quality_events ev "
+        "JOIN reviewed_questions q ON q.id=ev.question_id "
+        f"WHERE ev.passed AND ev.phase IN ('identity','review') AND ev.created_at>={cost_control.DAY_START} GROUP BY 1,2"
+    ).fetchall():
+        steps[r["t"]]["format_passed" if r["phase"] == "identity" else "review_passed"] += r["n"]
+    for (_, kind), n in admitted_today(conn).items():
+        steps[kind]["in_bank"] += n
+    out = {k: v for k, v in steps.items() if k}
+    out["all"] = {key: sum(v[key] for v in out.values()) for key in ("written", "format_passed", "review_passed", "in_bank")}
+    return out
+
+
 def buckets(conn, uid):
     states = conn.execute(
         "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,"
@@ -391,7 +413,8 @@ def _waste(conn):
     stats = waste_report.blocked_stats(conn, 24)
     recurring = [i for i in stats["blocked"] if not i.get("one_time")]
     once = [i for i in stats["blocked"] if i.get("one_time")]
-    return dict(hours=24, blocked=recurring[:8], one_time=once, auto_fixed=stats["auto_fixed"], evidence_layers=stats["evidence_layers"])
+    return dict(hours=24, blocked=recurring[:12], total=sum(i["count"] for i in recurring), one_time=once,
+                auto_fixed=stats["auto_fixed"], evidence_layers=stats["evidence_layers"])
 
 
 def report(conn, uid):
@@ -404,6 +427,7 @@ def report(conn, uid):
         totals={k: sum(b[k] for b in rows) for k in ("required", "target", "stocked", "queued", "generating", "reviewing", "blocked", "admitted_today")},
         target_kind=rows[0]["target_kind"],
         review_today=review_pass_rate_today(conn),
+        funnel=funnel_today(conn),
         legacy=legacy_summary(conn),
         recent_jobs=recent_jobs(conn),
         waste=_waste(conn),

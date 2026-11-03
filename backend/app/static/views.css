@@ -1,5 +1,14 @@
 /* Sub-views (出题进度, 模型与费用) inside the one application shell. Colours come from tokens.css; buttons, inputs, cards and
    the top bar are the main app's. Only what is particular to these two views is here, each scoped to its own view. */
+.training-app {
+  /* semantic names this file uses, mapped onto the shared tokens (light and dark follow tokens.css) */
+  --ok: var(--up); --ok-soft: var(--up-soft); --warn-ink: var(--accent-ink); --warn-soft: var(--accent-soft);
+  --primary-ink: var(--primary-soft-ink);
+}
+/* every <details> in the app: no browser triangle, one chevron, 44px tap target */
+.training-app details > summary { cursor: pointer; list-style: none; }
+.training-app details > summary::-webkit-details-marker { display: none; }
+.training-app details > summary::marker { content: ""; }
 .training-app .view { display: flex; flex-direction: column; gap: 14px; }
 .training-app .view .stack { display: flex; flex-direction: column; gap: 14px; }
 .training-app .view .card { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -136,3 +145,81 @@
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 .training-app .error-card { background: var(--accent-faint); border: 1px solid var(--accent-line); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 12px; color: var(--accent-ink); }
 .training-app .error-card p { margin: 0; }
+
+/* ---------- 出题进度: hero, tiles, tags, bars ---------- */
+.training-app .view-progress .hero { display: flex; align-items: center; gap: 16px; }
+.training-app .view-progress .hero-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.training-app .view-progress .hero-main .big { margin: 0; }
+.training-app .ring { position: relative; flex: none; width: 88px; height: 88px; --ring: var(--up); }
+.training-app .ring.low { --ring: var(--accent); }
+.training-app .ring.none { --ring: var(--muted); }
+.training-app .ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.training-app .ring circle { fill: none; stroke-width: 8; }
+.training-app .ring-track { stroke: var(--divider); }
+.training-app .ring-arc { stroke: var(--ring); stroke-linecap: round; stroke-dasharray: 0 100; transition: stroke-dasharray 0.4s; }
+.training-app .ring-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; }
+.training-app .ring-text b { font-size: 20px; font-variant-numeric: tabular-nums; color: var(--ring); }
+.training-app .ring-text small { font-size: 10px; color: var(--muted); }
+.training-app .view-progress .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
+.training-app .view-progress .tiles.four { grid-template-columns: repeat(2, 1fr); }
+.training-app .view-progress .tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.training-app .view-progress .card.key .tile { background: var(--card); border-color: var(--key-line); }
+.training-app .view-progress .tile b { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.training-app .view-progress .tile b.warn { color: var(--warn-ink); }
+.training-app .view-progress .tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.training-app .tag { display: inline-flex; align-items: center; min-height: 22px; padding: 1px 8px; border-radius: 999px; background: var(--tag); color: var(--tag-ink); font-size: 11px; white-space: nowrap; }
+.training-app .tag.good { background: var(--ok-soft); color: var(--ok); }
+.training-app .tag.attn { background: var(--warn-soft); color: var(--warn-ink); font-weight: 700; }
+.training-app .view-progress .row .head { align-items: center; }
+.training-app .view-progress .row .bar { margin: 6px 0; }
+.training-app .view-progress .row .tags { margin-top: 2px; }
+.training-app .view-progress .row { display: flex; flex-direction: column; }
+.training-app .segmented.wrap { flex-wrap: wrap; border-radius: 16px; gap: 2px; }
+/* funnel: one horizontal bar per step */
+.training-app .view-progress .funnel-row { display: grid; grid-template-columns: 76px 1fr 64px; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; }
+.training-app .view-progress .funnel-row .track { height: 14px; border-radius: 999px; background: var(--tag); overflow: hidden; }
+.training-app .view-progress .funnel-row .track > i { display: block; height: 100%; border-radius: 999px; background: var(--primary); }
+.training-app .view-progress .funnel-row:last-child .track > i { background: var(--ok); }
+.training-app .view-progress .funnel-row b { font-variant-numeric: tabular-nums; min-width: 2ch; text-align: right; }
+.training-app .view-progress .funnel-row small { color: var(--muted); font-size: 11px; margin-left: 4px; }
+/* blocked reasons: ranked horizontal bars, each opens its detail */
+.training-app .view-progress .waste-row > summary { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; padding: 10px 0 6px; min-height: 44px; }
+.training-app .view-progress .waste-row .wbar { grid-column: 1 / -1; height: 8px; border-radius: 999px; background: var(--tag); overflow: hidden; }
+.training-app .view-progress .waste-row .wbar > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+.training-app .view-progress .waste-row.other .wbar > i { background: var(--muted); }
+.training-app .view-progress .waste-name { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.training-app .view-progress .waste-count b { color: var(--ink); }
+/* recent tasks: status dot | two lines | tag */
+.training-app .view-progress .jobs li { display: grid; grid-template-columns: 10px 1fr auto; column-gap: 10px; row-gap: 2px; align-items: start; }
+.training-app .view-progress .jobs li.empty { display: block; }
+.training-app .view-progress .jobs .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--disabled-ink); margin-top: 5px; }
+.training-app .view-progress .jobs .dot.succeeded { background: var(--ok); }
+.training-app .view-progress .jobs .dot.blocked, .training-app .view-progress .jobs .dot.failed { background: var(--accent); }
+.training-app .view-progress .jobs .dot.running { background: var(--primary); }
+.training-app .view-progress .jobs .kind { grid-column: 2; overflow-wrap: anywhere; }
+.training-app .view-progress .jobs .state { grid-column: 3; grid-row: 1; }
+.training-app .view-progress .jobs .meta { grid-column: 2 / -1; }
+.training-app .view-progress .jobs .state.pending { background: var(--tag); color: var(--tag-ink); }
+/* spend: one segmented bar */
+.training-app .view-progress .split { display: flex; height: 14px; border-radius: 999px; overflow: hidden; background: var(--tag); }
+.training-app .view-progress .split > i { display: block; height: 100%; }
+.training-app .view-progress .split .actual { background: var(--primary); }
+.training-app .view-progress .split .reserved { background: var(--accent); }
+.training-app .view-progress .split .estimated { background: var(--muted); }
+.training-app .view-progress .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin: 6px 0 0; padding: 0; list-style: none; }
+.training-app .view-progress .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: baseline; }
+.training-app .view-progress .legend b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.training-app .fold { border-top: 1px solid var(--divider); }
+.training-app .fold > summary { min-height: 44px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 13px; }
+.training-app .fold > summary::after { content: "›"; font-size: 16px; transform: rotate(90deg); }
+.training-app .fold[open] > summary::after { transform: rotate(-90deg); }
+.training-app .fold > :not(summary) { margin-top: 8px; }
+
+/* model page: the ledger as cards */
+.training-app .view-model .usage { display: flex; flex-direction: column; gap: 12px; }
+.training-app .view-model .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.training-app .view-model .tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.training-app .view-model .tile b { font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.training-app .view-model .fold { border-top: 1px solid var(--divider); }
+
+.training-app .ring.none .ring-arc, .training-app .ring.empty .ring-arc { opacity: 0; }

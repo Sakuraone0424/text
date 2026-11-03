@@ -76,6 +76,123 @@ const REASON = {
   rubric_item_count_out_of_range: "评分要点数量不在规定范围",
   rubric_missing: "缺少评分要点",
   repair_unfixed: "修复的版本仍有同样的问题",
+  // review and pipeline reasons (kept in sync by tests/test_progress_view.py: every code the backend can raise has a line here)
+  term_not_in_textbook: "教材中未找到该名词",
+  insufficient_textbook_evidence: "教材里没有足够依据，模型判定无法作答",
+  invented_quote: "审核引用的原文在教材段落里找不到",
+  invented_or_unmatched_quote: "引用的原文与教材段落对不上",
+  unrequested_source: "引用了没有提供的教材段落",
+  past_exam_item_changed: "真题条目在出题期间被改动",
+  past_exam_stem_changed: "真题题干被改动",
+  past_exam_source_not_locked: "真题来源文件没有锁定",
+  evidence_exceeds_hard_cap: "引用的教材超过 4 段的上限，审核无法发出",
+  evidence_payload_too_large: "请求内容太大，装不下教材段落",
+  bounded_input_exceeded: "请求内容超过大小上限",
+  payload_exceeds_hard_cap: "请求内容超过 24000 字节上限",
+  no_textbook_evidence: "教材中找不到相关段落",
+  textbook_or_exam_source_unavailable: "教材或真题来源文件暂不可用",
+  model_call_failed: "模型调用失败，没有拿到结果",
+  invalid_repair_result: "修复的结果无效",
+  invalid_response_json: "模型回应不是有效的 JSON",
+  lease_expired: "任务超时被收回，已重新排队",
+  stale_lease: "任务已被收回",
+  oversized_result: "模型回答超过大小上限",
+  unsupported_dispatch_kind: "不支持的任务类型",
+  unsupported_automatic_job_kind: "不支持的自动任务类型",
+  unknown_ai_task: "未知的 AI 任务",
+  unknown_execution_scope: "未知的执行范围",
+  unknown_review_output_contract: "未知的审核格式版本",
+  review_answer_format: "审核答案的格式不对",
+  option_checks_incomplete: "审核没有逐项检查 A–D 四个选项",
+  review_failed: "审核失败",
+  review_job_phase_mismatch: "审核任务阶段对不上",
+  stored_review_job_required: "找不到已保存的审核任务",
+  not_in_complete_checking_state: "题目不在可审核的状态",
+  not_a_past_exam_job: "不是真题答案任务",
+  answer_key_not_confirmed_correct: "审核没能确认标准答案正确",
+  independent_answer_conflict: "独立作答与标准答案不一致",
+  second_correct_option: "发现第二个正确选项",
+  option_verdicts_inconsistent: "选项判定前后矛盾",
+  answer_leaked_in_stem: "题干泄露了答案",
+  duplicate_ready_question: "与已入库的题重复",
+  missing_question_image: "题干引用了看不到的图",
+  unresolved_source_risk: "教材 OCR 风险没有说明",
+  calculation_trace_required: "计算题缺计算过程",
+  deterministic_calculation_failed: "计算结果不对",
+  invalid_criterion_identity: "评分要点编号无效",
+  knowledge_mapping_not_evidenced: "知识点缺少教材依据",
+  uniqueness: "题目有歧义",
+  scientific_correctness: "科学性问题（事实或答案错误）",
+  exam_style: "不符合考试风格",
+  type_fit: "题型不符",
+  duplication: "与已有题目重复",
+  question_not_found: "找不到这道题",
+  candidate_packet_required: "缺少候选题资料",
+  superseded_candidate: "候选题已被新版本取代",
+  source_or_candidate_superseded: "教材或候选题已被新版本取代",
+  unlocated_or_empty_evidence: "引用没有定位到教材原文",
+  ocr_locator_mismatch_no_pdf_claims_allowed: "OCR 页码对不上，不能引用 PDF 页",
+  synthetic_source_cannot_be_ready: "合成来源的题不能入库",
+  source_file_integrity_failed: "来源文件校验不通过",
+  unresolvable_ocr_or_image_dependency: "依赖无法识别的 OCR 或图片",
+  transcription_style_mismatch: "真题风格依据与题目不符",
+  style_evidence_required: "缺少真题风格依据",
+  repair_limit: "修复次数已用完",
+  repair_did_not_change_content: "修复没有改动内容",
+  repair_must_preserve_spec_and_explain_changes: "修复必须保持规格并说明改动",
+  repair_must_preserve_past_exam_stem: "修复不能改动真题题干",
+  repair_source_job_missing: "找不到被修复的出题任务",
+  automatic_new_revision: "自动生成了新版本",
+  answer_changed: "答案被改动",
+  actual_generation_call_required: "没有真实完成的出题调用",
+  actual_grading_call_required: "没有真实完成的判分调用",
+  actual_advice_call_required: "没有真实完成的建议调用",
+  actual_knowledge_call_required: "没有真实完成的知识提取调用",
+  actual_transcript_call_required: "没有真实完成的转写调用",
+  generated_quota_mismatch: "出的题数与配额不符",
+  generation_source_not_in_locked_six_file_collection: "出题来源不在锁定的六份文件里",
+  historical_score_must_not_be_overwritten: "不能覆盖历史成绩",
+  historical_single_choice_options_incomplete_or_spliced: "历史单选题的选项不完整",
+  incomplete_concept_review: "概念审核不完整",
+  incomplete_or_stale_rounds: "审核轮次不完整或已过期",
+  distractor_checks_must_cover_every_wrong_option: "干扰项检查没有覆盖每个错误选项",
+  distractor_checks_required: "缺少干扰项检查",
+  invalid_generation_points: "出题分值无效",
+  invalid_rubric_scores: "评分要点分值无效",
+  unsupported_generation_type: "不支持的出题题型",
+  invented_bibliography: "教材出处是编造的",
+  invented_confirmation_quote: "确认引用是编造的",
+  invented_learning_history_or_mapping: "学习记录或映射是编造的",
+  invented_or_stale_advice_evidence: "建议的依据是编造的或已过期",
+  invented_transcription_text: "转写文字是编造的",
+  stale_knowledge_source: "知识来源已过期",
+  uncertain_knowledge: "知识点不确定",
+  unfounded_grading_knowledge_mapping: "判分的知识点映射没有依据",
+  unfounded_knowledge_relation: "知识点关系没有依据",
+  uncertain_score_requires_independent_reassessment: "分数不确定，需要独立复评",
+  cny_model_price_required: "该模型没有核实过的人民币价格",
+  cny_price_expired_or_not_effective: "价格已过期或尚未生效",
+  cny_reservation_required: "缺少费用预留",
+  conflicting_cny_price_versions: "人民币价格版本冲突",
+  invalid_cny_amount: "金额无效",
+  invalid_paid_tool_usage: "付费工具用量无效",
+  invoice_evidence_required: "缺少账单凭证",
+  invoice_reservation_not_found: "找不到账单对应的预留",
+  official_cny_price_required: "需要官方人民币价格",
+  price_not_found: "找不到价格",
+  price_observation_time_invalid: "价格观察时间无效",
+  price_resolution_evidence_required: "缺少价格核实凭证",
+  price_version_identity_conflict: "价格版本标识冲突",
+  unknown_tool_billing_mode: "未知的工具计费方式",
+  verified_tool_price_required: "工具价格未核实",
+  leased_automatic_attempt_required: "缺少任务租约",
+  model_effort_not_compatibility_verified: "该思考强度还没有通过兼容性探测",
+  idempotency_conflict: "任务重复提交且内容不同",
+  unapproved_automatic_parameters: "模型参数不在批准范围",
+  unapproved_compatibility_input: "探测输入不在批准范围",
+  payload_required: "缺少任务内容",
+  timezone_required: "缺少时区",
+  transcription_provenance_not_official: "转写来源不是正式来源",
 };
 
 function el(tag, text, parent, cls) {
@@ -105,7 +222,8 @@ const VALUE_ERROR = {
 const reasonText = (code) =>
   String(code).startsWith("ValueError:")
     ? "内部检查没通过：" + (VALUE_ERROR[String(code).slice(11)] || String(code).slice(11))
-    : REASON[code] || REASON[String(code).split(":")[0]] || "原因未归类";
+    : REASON[code] || REASON[String(code).split(":")[0]] || String(code);
+const knownReason = (code) => !!(REASON[code] || REASON[String(code).split(":")[0]] || String(code).startsWith("ValueError:"));
 
 function duration(hours) {
   if (hours < 1) return "不到 1 小时";
@@ -175,9 +293,15 @@ function batch(report) {
   const today = $("admitted-today");
   today.hidden = false;
   today.textContent = "今日入库 " + t.admitted_today + " 道";
+  // today's review pass rate as a ring: orange below 50%, grey while nothing has been reviewed yet
   const r = report.review_today;
+  const ring = $("rate-ring");
+  const share = r.rate === null ? 0 : r.rate;
   $("review-rate").textContent = r.rate === null ? "—" : `${Math.round(r.rate * 100)}%`;
   $("review-rate").title = r.rate === null ? "今天还没有审核" : `${r.passed}/${r.reviewed}`;
+  ring.className = "ring" + (r.rate === null ? " none" : r.rate < 0.5 ? " low" : "") + (share === 0 ? " empty" : "");
+  ring.setAttribute("aria-label", r.rate === null ? "今日审核通过率：今天还没有审核" : `今日审核通过率 ${Math.round(r.rate * 100)}%（${r.passed}/${r.reviewed}）${r.rate < 0.5 ? "，低于 50%" : ""}`);
+  $("ring-arc").style.strokeDasharray = `${Math.round(share * 100)} 100`;
 }
 const C = () => window.Charts;
 
@@ -200,36 +324,42 @@ document.querySelectorAll("[data-subject]").forEach((button) => {
   };
 });
 
+function chip(list, text, cls) {
+  const li = el("li", text, list, "tag" + (cls ? " " + cls : ""));
+  return li;
+}
+// blocked work is "a lot" when it is at least 5 items, or as many as everything stocked: those tags turn orange
+const manyBlocked = (b) => b.blocked >= 5 || (b.blocked > 0 && b.blocked >= b.stocked);
+
 function bank(report) {
   lastReport = report;
   document.querySelectorAll("[data-subject]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.subject === subject)));
   const root = $("bank");
   root.replaceChildren();
   const label = report.target_kind === "first_batch" ? "首批目标" : "两天储备";
+  $("bank-label").textContent = `已入库 / 目标（${label}）`;
   for (const key of Object.keys(SUBJECT)) {
     const group = el("div", undefined, root, "group");
     group.hidden = key !== subject;
-    el("p", SUBJECT[key], group, "subject");
-    group.querySelector(".subject").hidden = true; // the segmented switch already names the subject
     for (const b of report.buckets.filter((x) => x.subject === key)) {
       const reached = b.stocked >= b.target;
       const row = el("div", undefined, group, "row");
       const head = el("div", undefined, row, "head");
       el("span", TYPE[b.question_type], head, "name");
       const count = el("span", undefined, head, "count");
-      count.append(el("b", String(b.stocked)), ` / ${b.target} ${label}`);
-      if (reached) el("span", "已达" + label, count, "reached");
+      count.append(el("b", String(b.stocked)), ` / ${b.target}`);
+      if (reached) el("span", "已达标", count, "reached");
+      count.title = label;
       const bar = el("div", undefined, row, "bar" + (reached ? " full" : ""));
       bar.setAttribute("role", "img");
       bar.setAttribute("aria-label", SUBJECT[key] + TYPE[b.question_type] + "已入库 " + b.stocked + "，" + label + " " + b.target);
       el("i", undefined, bar).style.width = Math.min(100, b.target ? (b.stocked / b.target) * 100 : 0) + "%";
-      const notes = el("p", undefined, row, "notes");
-      const bits = [`今日入库 ${b.admitted_today} 道`];
-      if (b.generating) bits.push(`出题中 ${b.generating}`);
-      if (b.reviewing) bits.push(`审核中 ${b.reviewing}`);
-      if (b.queued) bits.push(`排队 ${b.queued}`);
-      notes.append(bits.join(" · "));
-      if (b.blocked) el("span", ` · 被挡住 ${b.blocked}`, notes, "attn");
+      const tags = el("ul", undefined, row, "tags notes");
+      chip(tags, `今日 +${b.admitted_today}`, b.admitted_today ? "good" : "");
+      if (b.generating) chip(tags, `出题中 ${b.generating}`);
+      if (b.reviewing) chip(tags, `审核中 ${b.reviewing}`);
+      if (b.queued) chip(tags, `排队 ${b.queued}`);
+      if (b.blocked) chip(tags, `被挡住 ${b.blocked}`, manyBlocked(b) ? "attn" : "");
       if (Object.keys(b.blocked_reasons).length) reasonList(row, b.blocked_reasons);
     }
   }
@@ -247,6 +377,38 @@ function bank(report) {
   }
 }
 
+let funnelType = "all";
+function funnel(report) {
+  const data = report.funnel || {};
+  $("funnel-types").replaceChildren();
+  const names = [["all", "全部"], ...Object.keys(TYPE).map((k) => [k, TYPE[k]])];
+  for (const [key, name] of names) {
+    const button = el("button", name, $("funnel-types"));
+    button.type = "button";
+    button.dataset.type = key;
+    button.setAttribute("aria-pressed", String(key === funnelType));
+    button.onclick = () => {
+      funnelType = key;
+      funnel(report);
+    };
+  }
+  const root = $("funnel");
+  root.replaceChildren();
+  const d = data[funnelType] || { written: 0, format_passed: 0, review_passed: 0, in_bank: 0 };
+  const steps = [["出题", d.written], ["格式通过", d.format_passed], ["审核通过", d.review_passed], ["入库", d.in_bank]];
+  const top = Math.max(1, ...steps.map((x) => x[1]));
+  steps.forEach(([name, value], i) => {
+    const row = el("div", undefined, root, "funnel-row");
+    el("span", name, row);
+    const track = el("div", undefined, row, "track");
+    el("i", undefined, track).style.width = (value / top) * 100 + "%";
+    const num = el("b", String(value), row);
+    if (i > 0 && steps[i - 1][1]) el("small", Math.round((value / steps[i - 1][1]) * 100) + "%", num);
+  });
+  if (!d.written) el("p", "今天还没有出题", root, "note");
+  else el("p", "百分比是相对上一步。一道题被修复后重新审核，会在审核通过一栏里只算一次。", root, "note");
+}
+
 function waste(report) {
   const root = $("waste");
   root.replaceChildren();
@@ -255,18 +417,38 @@ function waste(report) {
     el("p", "近 24 小时没有被挡的任务", root, "note");
     return;
   }
-  for (const item of w.blocked) {
-    const row = el("details", undefined, root, "waste-row");
+  // known reasons keep their own bar; reasons we cannot translate are merged into "其他" (raw codes inside)
+  const known = w.blocked.filter((i) => knownReason(i.code));
+  const unknown = w.blocked.filter((i) => !knownReason(i.code));
+  const total = w.total || w.blocked.reduce((n, i) => n + i.count, 0) || 1;
+  const top = Math.max(1, ...w.blocked.map((i) => i.count));
+  const bar = (item, name, other) => {
+    const row = el("details", undefined, root, "waste-row" + (other ? " other" : ""));
     const head = el("summary", undefined, row);
-    el("span", reasonText(item.code), head, "waste-name");
-    el("span", item.count + " 次", head, "waste-count");
+    el("span", name, head, "waste-name");
+    const count = el("span", undefined, head, "waste-count");
+    count.append(el("b", item.count + " 次"), ` · ${Math.round((item.count / total) * 100)}%`);
+    el("div", undefined, head, "wbar").append(Object.assign(el("i"), { style: `width:${(item.count / top) * 100}%` }));
+    return row;
+  };
+  for (const item of known) {
+    const row = bar(item, reasonText(item.code));
     el("p", item.stage + " · " + item.handling, row, "reason-line");
-    item.fields.forEach((f) => el("p", f.field + " ×" + f.count, row, "reason-line"));
+    item.fields.forEach((f) => el("p", reasonText(f.field.split(":").pop()) + " ×" + f.count, row, "reason-line"));
     el("code", item.code, el("p", undefined, row, "reason-line"));
+  }
+  if (unknown.length) {
+    const merged = { count: unknown.reduce((n, i) => n + i.count, 0) };
+    const row = bar(merged, "其他", true);
+    unknown.forEach((item) => {
+      const line = el("p", undefined, row, "reason-line");
+      line.append(`${item.stage} · ×${item.count} `);
+      el("code", item.code, line);
+    });
   }
   if ((w.one_time || []).length) {
     // one-off reasons (a rule change retired the work, a restart): kept apart and folded
-    const once = el("details", undefined, root, "waste-row");
+    const once = el("details", undefined, root, "waste-row once");
     el("summary", `一次性原因（不会再出现）· ${w.one_time.reduce((n, i) => n + i.count, 0)} 次`, once);
     w.one_time.forEach((item) => el("p", `${reasonText(item.code)} ×${item.count}`, once, "reason-line"));
   }
@@ -294,6 +476,29 @@ function spend(report) {
   $("spend-grading").textContent = yuan(s.remaining_grading_cny);
   $("spend-note").textContent = s.message || "";
   const ledger = report.ledger || {};
+  const today = (ledger.breakdown || {}).today;
+  const split = $("spend-split");
+  split.replaceChildren();
+  if (today) {
+    const parts = [
+      ["actual", "实际", Number(today.settled.counted_cny) + Number(today.reconciled.counted_cny)],
+      ["reserved", "预留", Number(today.running.counted_cny)],
+      ["estimated", "估算", Number(today.estimated.counted_cny)],
+    ];
+    const sum = parts.reduce((n, p) => n + p[2], 0);
+    const bar = el("div", undefined, split, "split");
+    bar.setAttribute("role", "img");
+    bar.setAttribute("aria-label", "今日费用 " + yuan(sum) + "：" + parts.map((p) => p[1] + " " + yuan(p[2])).join("，"));
+    parts.forEach(([cls, , value]) => {
+      if (value > 0) el("i", undefined, bar, cls).style.width = (value / sum) * 100 + "%";
+    });
+    const legend = el("ul", undefined, split, "legend");
+    parts.forEach(([cls, name, value]) => {
+      const li = el("li", undefined, legend);
+      el("i", undefined, li, "swatch").style.background = `var(--${cls === "actual" ? "primary" : cls === "reserved" ? "accent" : "muted"})`;
+      li.append(`今日${name} `, el("b", yuan(value)));
+    });
+  }
   const month = (ledger.breakdown || {}).month;
   if (month) {
     const actual = Number(month.settled.counted_cny) + Number(month.reconciled.counted_cny);
@@ -343,9 +548,10 @@ function jobs(report) {
   }
   for (const job of report.recent_jobs) {
     const li = el("li", undefined, root);
+    const [tagText, tagClass] = jobTag(job);
+    el("span", undefined, li, "dot " + tagClass).setAttribute("aria-hidden", "true");
     const title = job.label || (KIND[job.kind] || job.kind) + (job.question_type ? " · " + (SUBJECT[job.subject] || "") + (TYPE[job.question_type] || "") : "");
     el("span", title, li, "kind");
-    const [tagText, tagClass] = jobTag(job);
     el("span", tagText, li, "state " + tagClass);
     const bits = [fmtTime(job.at)];
     if (job.state === "retrying" && job.next_retry) bits.push("下次重试 " + fmtTime(job.next_retry));
@@ -417,6 +623,7 @@ function render(report, meta) {
   paper(report);
   status(report);
   bank(report);
+  funnel(report);
   spend(report);
   waste(report);
   jobs(report);

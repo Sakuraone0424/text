@@ -154,7 +154,25 @@ function drawUsage() {
   $("used-day").textContent = `今日已用 ${yuan(bill.usage_estimate_cny.day)} / ${s.daily_limit_enabled === false ? "不限" : yuan(s.daily_cny)}`;
   $("used-month").textContent = `本月已用 ${yuan(bill.usage_estimate_cny.month)} / ${s.monthly_limit_enabled === false ? "不限" : yuan(s.monthly_cny)}`;
   $("used-task").textContent = s.task_limit_enabled === false ? "不限" : "每个任务最多 " + yuan(s.task_cny);
-  $("billing").textContent = `今日剩余预算 ${bill.remaining_daily_cny === null ? "未设上限" : yuan(bill.remaining_daily_cny)} · 本月剩余预算 ${bill.remaining_monthly_cny === null ? "未设上限" : yuan(bill.remaining_monthly_cny)} · 累计预留 ${yuan(bill.reserved_cny.trial)} · 未知待对账预留 ${yuan(bill.unknown_reserved_cny)} · 调用尝试 ${bill.call_attempts} · 当前时段 ${bill.period} · 官方账单 ${bill.invoice_status}`;
+  const tile = (id, text) => ($(id).textContent = text);
+  const left = (v) => (v === null || v === undefined ? "未设上限" : yuan(v));
+  tile("bl-day", left(bill.remaining_daily_cny));
+  tile("bl-month", left(bill.remaining_monthly_cny));
+  tile("bl-reserved", yuan(bill.reserved_cny.trial));
+  tile("bl-unknown", yuan(bill.unknown_reserved_cny));
+  tile("bl-calls", String(bill.call_attempts));
+  tile("bl-invoice", bill.invoice_status === "has_invoice_events" ? "已对账" : "未对账");
+  $("bl-period").textContent = "当前时段：" + (bill.period === "peak" ? "高峰（价格较高，出题暂缓）" : "低峰");
+  // used / limit as two small bars (the limit is the full width; no limit = no bar)
+  [["day", bill.usage_estimate_cny.day, s.daily_limit_enabled === false ? null : s.daily_cny],
+   ["month", bill.usage_estimate_cny.month, s.monthly_limit_enabled === false ? null : s.monthly_cny]].forEach(([id, used, cap]) => {
+    $("usage-" + id + "-text").textContent = `${yuan(used)} / ${cap === null ? "不限" : yuan(cap)}`;
+    const root = $("usage-" + id);
+    root.replaceChildren();
+    if (cap === null || !Number(cap)) return;
+    window.Charts.progress(root, { label: id === "day" ? "今日已用" : "本月已用", text: `${yuan(used)} / ${yuan(cap)}`, value: Number(used), max: Number(cap), warnBelowHalf: false,
+      color: Number(used) >= Number(cap) * 0.9 ? "var(--accent)" : "var(--primary)" });
+  });
   $("billing-history").textContent = JSON.stringify({ price: bill.price, events: bill.events, by_task: bill.by_task, model_changes: bill.settings_history }, null, 2);
 }
 function drawStop() {
