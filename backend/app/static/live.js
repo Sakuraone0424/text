@@ -10,6 +10,7 @@
   const views = new Map(); // name -> {visible(), load(), last}
   let source = null;
   let connected = false;
+  let nextOpenAt = 0;       // after a failed stream, wait before trying again (the poll covers the gap)
   let timer = null;
   let pending = null;
 
@@ -37,7 +38,7 @@
   }
 
   function open() {
-    if (source || typeof EventSource === "undefined") return;
+    if (source || typeof EventSource === "undefined" || Date.now() < nextOpenAt) return;
     try {
       source = new EventSource("/v2/model/progress/events");
     } catch {
@@ -55,7 +56,10 @@
     source.addEventListener("update", onUpdate);
     source.onerror = () => {
       connected = false; // the browser retries by itself; until then the 5 s poll covers it
-      if (source && source.readyState === 2) close();
+      if (source && source.readyState === 2) {
+        close(); // some browsers give up for good on the first failure: try again in 15 s, not on every tick
+        nextOpenAt = Date.now() + 15000;
+      }
     };
   }
   function close() {

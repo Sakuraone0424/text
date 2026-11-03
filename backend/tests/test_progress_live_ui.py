@@ -140,3 +140,27 @@ def test_a_poll_that_finds_the_same_numbers_does_not_redraw_the_page(engine, liv
     assert page.evaluate("document.querySelector('#jobs li').dataset.mark") == "kept"   # the list was not rebuilt
     assert STAMP.search(page.inner_text("#updated"))
     assert not errors, errors
+
+
+def test_a_forced_refresh_is_not_lost_behind_a_poll_that_is_already_running(engine, live_app):
+    client, dsn, _ = live_app
+    base = str(client.base_url).rstrip("/")
+    page, errors = open_page(engine, "safari", base, path="/training")
+    no_stream(page)
+    page.evaluate("location.hash = '#/progress'")
+    page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)
+    # the next read of the report is slow, and a forced refresh arrives while it is out
+    page.evaluate("""() => { window.__fresh = 0; window.__slow = true;
+      const real = window.fetch.bind(window);
+      window.fetch = async (input, init) => {
+        const url = String(input.url || input);
+        if (url.includes('/v2/model/progress') && !url.includes('events')) {
+          if (url.includes('fresh=1')) window.__fresh++;
+          if (window.__slow) { window.__slow = false; await new Promise((r) => setTimeout(r, 800)); }
+        }
+        return real(input, init);
+      }; }""")
+    page.evaluate("window.ProgressView.show()")            # a normal load (not forced) starts and is slow ...
+    page.evaluate("window.ProgressView.reload()")          # ... and a forced refresh comes in behind it
+    page.wait_for_function("window.__fresh >= 1", timeout=8000)
+    assert not errors, errors

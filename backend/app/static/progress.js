@@ -681,8 +681,12 @@ function paintStamp(stale) {
 }
 
 let loading = false;
+let again = false;
 async function load(fresh = false) {
-  if (loading) return;
+  if (loading) {
+    if (fresh) again = true; // a forced refresh (after cancelling a task, a pull down) is never lost behind a background poll
+    return;
+  }
   loading = true;
   try {
     await Data.swr("/v2/model/progress", {
@@ -697,6 +701,10 @@ async function load(fresh = false) {
     });
   } finally {
     loading = false;
+    if (again) {
+      again = false;
+      load(true);
+    }
   }
 }
 
