@@ -81,9 +81,13 @@
       stats: "stats-content",
       profile: "profile-content",
     };
-    if (roots[view]) byId(roots[view]).append(byId("learning"));
-    else byId("learning").hidden = true;
-    if (roots[view]) byId("learning").hidden = false;
+    // `#learning` holds the content of ONE sub-page (weekly, history, insights, archive, source check, due review). It
+    // belongs to the route that opened it: any other route finds it empty, so a sub-page's cards can never show up
+    // at the bottom of a main page.
+    const learning = byId("learning");
+    if (learning.dataset.owner !== currentKey) learning.replaceChildren();
+    if (roots[view]) byId(roots[view]).append(learning);
+    learning.hidden = !roots[view] || !learning.hasChildNodes();
     window.Insights?.onView(view);
     if (view === "progress") window.ProgressView?.show();
     if (view === "model") window.ModelView?.show();
@@ -111,6 +115,7 @@
     window.Data?.setUser(account);
     renderView(next, key);
     if (sub && SUBS.includes(sub)) {
+      byId("learning").dataset.owner = key;
       if (alreadyLoaded === key) alreadyLoaded = null;
       else {
         suppressRoute = true;
@@ -503,6 +508,12 @@
       dialog.addEventListener("close", () => resolve(accepted), { once: true });
     });
   }
+  // a sub-page that finishes loading after the user already left its route must not draw itself on the new page
+  new MutationObserver(() => {
+    const learning = byId("learning");
+    if (learning.hasChildNodes() && learning.dataset.owner !== currentKey) learning.replaceChildren();
+    learning.hidden = !learning.hasChildNodes();
+  }).observe(byId("learning"), { childList: true });
   document.querySelectorAll("button[data-view]").forEach((button) => {
     button.onclick = () => go(button.dataset.view);
   });
@@ -517,8 +528,12 @@
   ["memory", "weekly", "history", "insights", "archive", "source-status"].forEach((id) =>
     byId(id).addEventListener("click", () => {
       if (suppressRoute) return; // a back/forward navigation re-opening this page: the URL is already right
-      if (id === "memory") return go("mistakes");
+      if (id === "memory") {
+        byId("learning").dataset.owner = "#/mistakes";
+        return go("mistakes");
+      }
       alreadyLoaded = id === "archive" ? "#/profile/archive" : "#/stats/" + id;
+      byId("learning").dataset.owner = alreadyLoaded;
       if (id === "archive") go("profile", "archive");
       else go("stats", id);
     }),
