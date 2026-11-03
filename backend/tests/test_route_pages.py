@@ -72,7 +72,10 @@ def test_a_sub_page_that_finishes_loading_after_you_left_does_not_draw_itself(en
     expect(page.locator("#login")).to_be_hidden()
     go(page, "#/profile")
     go(page, "#/profile/archive")
-    page.wait_for_timeout(300)
+    for _ in range(50):                      # (WebKit needs a moment longer to send it)
+        if held:
+            break
+        page.wait_for_timeout(100)
     assert held, "the archive request is waiting"
     go(page, "#/mistakes")                   # leave before the answer arrives
     held[0].fulfill(json={"configured": False, "message": "late"})
@@ -214,13 +217,15 @@ def test_the_pass_rate_ring_turns_orange_below_half(engine, live_app):
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base, "/training#/progress")
     page.route("**/v2/model/progress*", lambda route: route.fulfill(json={**route.fetch().json(), "review_today": {"reviewed": 10, "passed": 3, "rate": 0.3}}))
-    page.reload()
+    expect(page.locator("#pv-content")).to_be_visible()
+    page.evaluate("window.ProgressView.reload()")
     expect(page.locator("#rate-ring")).to_have_class(re.compile(r"\blow\b"))
     expect(page.locator("#review-rate")).to_have_text("30%")
     colour = page.locator("#review-rate").evaluate("(n) => getComputedStyle(n).color")
     assert colour in ("rgb(234, 88, 12)", "rgb(251, 146, 60)"), colour
+    page.unroute("**/v2/model/progress*")
     page.route("**/v2/model/progress*", lambda route: route.fulfill(json={**route.fetch().json(), "review_today": {"reviewed": 10, "passed": 6, "rate": 0.6}}))
-    page.reload()
+    page.evaluate("window.ProgressView.reload()")
     expect(page.locator("#rate-ring")).not_to_have_class(re.compile(r"\blow\b"))
     assert not errors, errors
 
