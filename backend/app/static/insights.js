@@ -19,19 +19,44 @@
   };
   const pct = (v) => (v === null || v === undefined ? "—" : Math.round(v * 100) + "%");
   const sign = (v) => (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(Math.round(v * 10) / 10);
+  // Reads go through the shared data layer: a 401 means "sign in" (never a different page) and every successful
+  // read is kept, so a page seen before can be drawn from the kept copy while a fresh one is on its way.
+  let cachedOnly = false;
   async function read(path) {
-    const response = await fetch(path, { credentials: "same-origin", cache: "no-store" });
-    if (!response.ok) throw new Error("读取失败（" + response.status + "）");
-    return response.json();
-  }
-  async function send(path, body) {
-    const response = await fetch(path, {
-      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "请求失败（" + response.status + "）");
+    if (cachedOnly) {
+      const kept = Data.peek(path);
+      if (!kept) throw new Error("no kept copy");
+      return kept.data;
+    }
+    const data = await Data.fetchJSON(path);
+    Data.store(path, data);
     return data;
   }
+  /* Draw from what was seen before at once (if every read has a kept copy), then draw again from the fresh reads. */
+  /* A failed read says what happened in plain words and offers a retry button (never a blank page or a bare code). */
+  function retryCard(root, message, retry) {
+    root.replaceChildren();
+    const card = el("div", undefined, root, "error-card");
+    card.setAttribute("role", "alert");
+    el("p", message, card);
+    const button = el("button", "重试", card, "secondary");
+    button.type = "button";
+    button.onclick = retry;
+  }
+  async function swrLoad(loader, paths) {
+    if (paths.every((path) => Data.peek(path))) {
+      cachedOnly = true;
+      try {
+        await loader();
+      } catch {
+        /* the fresh load below will report */
+      } finally {
+        cachedOnly = false;
+      }
+    }
+    await loader();
+  }
+  const send = (path, body) => Data.fetchJSON(path, { method: "POST", body: JSON.stringify(body) });
   const dateLabel = (iso) => {
     const d = new Date(iso + "T00:00:00");
     return d.getMonth() + 1 + "/" + d.getDate();
@@ -105,7 +130,7 @@
     $("paper-state").classList.toggle("green-pill", lock.complete);
     $("prepare-note").hidden = !lock.complete;
   }
-  async function loadHome() {
+  async function loadHomeNow() {
     a2hsHint();
     const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", {
       timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", weekday: "short",
@@ -119,8 +144,19 @@
     } else banner.hidden = true;
     if (overview.status !== "fulfilled") {
       $("stat-avg-note").textContent = "统计暂时读取失败，未将未知数据当作0。";
+      let retry = $("home-retry");
+      if (!retry) {
+        retry = el("button", "重试", $("stat-avg-note").parentElement, "secondary");
+        retry.id = "home-retry";
+        retry.type = "button";
+        retry.onclick = () => {
+          retry.remove();
+          loadHome();
+        };
+      }
       return;
     }
+    $("home-retry")?.remove();
     const o = overview.value;
     $("days-left").textContent = o.days_left > 0 ? String(o.days_left) : "0";
     $("exam-label").textContent = o.days_left > 0 ? "距 12 月 19 日初试" : "12 月 19 日初试已到";
@@ -186,14 +222,13 @@
 
   /* ---------------- my learning data ---------------- */
   let trendMode = "rate";
-  async function loadProfile() {
+  async function loadProfileNow() {
     const root = $("profile-data");
     let data;
     try {
       data = await read("/v2/stats/profile");
     } catch (error) {
-      root.replaceChildren();
-      el("p", error.message + "。未将未知数据当作0。", root, "notice");
+      if (error.name !== "AuthRequired") retryCard(root, error.message + "。未将未知数据当作0。", loadProfile);
       return;
     }
     root.replaceChildren();
@@ -395,9 +430,20 @@
     try {
       data = await read("/v2/mistakes?" + query);
     } catch (error) {
+      if (error.name === "AuthRequired") return;
       $("mistake-count").textContent = error.message;
+      if (!$("mistake-retry")) {
+        const retry = el("button", "重试", $("mistake-count").parentElement, "secondary");
+        retry.id = "mistake-retry";
+        retry.type = "button";
+        retry.onclick = () => {
+          retry.remove();
+          loadMistakes();
+        };
+      }
       return;
     }
+    $("mistake-retry")?.remove();
     if (!facetsLoaded) {
       facetsLoaded = true;
       facets = data.facets;
@@ -677,10 +723,12 @@
     }
   }
 
+  const loadHome = () => swrLoad(loadHomeNow, ["/v2/stats/overview"]);
+  const loadProfile = () => swrLoad(loadProfileNow, ["/v2/stats/profile"]);
   function onView(view) {
     if (view === "profile") loadProfile();
     if (view === "mistakes") {
-      facets = null;
+      facetsLoaded = false; // counts refresh; the chosen filters stay as they were
       loadMistakes();
       loadDue();
     }

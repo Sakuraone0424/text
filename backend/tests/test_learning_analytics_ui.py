@@ -247,7 +247,7 @@ def test_prestart_cache_and_injected_questions_cannot_be_used(live_app, browser)
     assert client.get(f"/v2/papers/{pid}").json()["timing"]["status"] == "not_started"
     expect(page.locator("#questions")).to_be_hidden()
     page.unroute("**/start")
-    page.reload(); page.locator("#prepare").click()
+    page.reload(); page.evaluate("location.hash = '#/home'"); page.locator("#prepare").click()
     expect(page.locator("#start")).to_be_visible()
     assert page.locator("#questions article").count() == 0
     page.locator("#start").click()
@@ -297,7 +297,7 @@ def test_remote_start_does_not_replay_unstarted_local_answers(live_app, browser)
       stored.pending = {[qid]: {text:'B'}}; stored.localDrafts = stored.pending;
       localStorage.setItem(key(), JSON.stringify(stored));
     }""", qid)
-    page.reload(); page.locator("#prepare").click()
+    page.reload(); page.evaluate("location.hash = '#/home'"); page.locator("#prepare").click()
     expect(page.locator("#questions article:visible")).to_have_count(1)
     assert page.evaluate("Object.keys(localDrafts).length") == 0
     assert client.get(f"/v2/papers/{pid}").json()["timing"]["drafts"] == {}

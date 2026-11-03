@@ -14,7 +14,7 @@ def test_the_model_page_has_a_price_button_and_shows_the_task_limits_without_err
     page = browser.new_context(**PHONE).new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.goto(base + "/static/model.html")
+    page.goto(base + "/training#/model")
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
     expect(page.locator("#controls")).to_be_visible()
@@ -67,7 +67,7 @@ def test_the_progress_page_can_cancel_a_waiting_task(live_app, browser):
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("dialog", lambda d: d.accept())
     login(page, base)
-    page.goto(base + "/progress")
+    page.goto(base + "/training#/progress")
     page.locator("#jobs details summary").first.click()  # the cancel button lives in the opened details
     button = page.locator("#jobs .cancel")
     expect(button).to_have_count(1)

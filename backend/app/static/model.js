@@ -1,32 +1,13 @@
 "use strict";
+(() => {
 const $ = (id) => document.getElementById(id);
 let data = null; // last /v2/model reply
 let bill = null; // last /v2/model/billing reply
 let saved = null; // the form as last saved or loaded: what "unsaved" is measured against
 
-class NeedLogin extends Error {}
+const AuthRequired = Data.AuthRequired;
 
-async function api(path, body) {
-  const response = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
-    credentials: "same-origin",
-    headers: { "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-    cache: "no-store",
-  });
-  if (response.status === 401) throw new NeedLogin();
-  let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    /* not JSON: report the status below */
-  }
-  if (!response.ok) {
-    const detail = payload && payload.detail;
-    throw new Error(typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : "请求失败（" + response.status + "）");
-  }
-  return payload;
-}
+const api = (path, body) => Data.fetchJSON(path, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) });
 
 let toastTimer = null;
 function say(text, ms = 3000) {
@@ -183,18 +164,15 @@ function drawStop() {
 }
 
 /* ---- loading and saving ---- */
-async function load(keepForm = false) {
-  data = await api("/v2/model");
-  try {
-    bill = await api("/v2/model/billing");
-  } catch (e) {
-    if (e instanceof NeedLogin) throw e;
-    bill = { usage_estimate_cny: { day: null, month: null }, remaining_daily_cny: null, remaining_monthly_cny: null, reserved_cny: { trial: null }, unknown_reserved_cny: null, call_attempts: "—", period: "—", invoice_status: "—", events: [], by_task: [], settings_history: [] };
-    say("费用账本暂时读不出来：" + e.message);
-  }
+const BILL_FALLBACK = { usage_estimate_cny: { day: null, month: null }, remaining_daily_cny: null, remaining_monthly_cny: null, reserved_cny: { trial: null }, unknown_reserved_cny: null, call_attempts: "—", period: "—", invoice_status: "—", events: [], by_task: [], settings_history: [] };
+
+function paint(d, b, keepForm) {
+  data = d;
+  bill = b;
+  $("mv-skeleton").hidden = true;
+  $("mv-error").hidden = true;
   $("controls").hidden = false;
   $("savebar").hidden = false;
-  $("notice").hidden = true;
   if (!keepForm) {
     $("model").replaceChildren();
     for (const m of data.catalog.models) {
@@ -205,16 +183,58 @@ async function load(keepForm = false) {
     }
     if (data.catalog.models.some((m) => m.id === data.settings.model_id)) $("model").value = data.settings.model_id;
     fill(data.settings);
+    drawModel();
+  } else {
+    // unsaved typing is never overwritten by a refresh: only the read-only parts are redrawn
+    drawPrice(modelRow());
+    drawProbes(modelRow());
   }
-  drawModel();
   drawUsage();
   drawStop();
-  saved = form();
+  if (!keepForm) saved = form();
   refreshDirty();
 }
 
+function showError(message, hadCache) {
+  $("mv-error-text").textContent = message + (hadCache ? "（先显示上次的内容）" : "");
+  $("mv-error").hidden = false;
+  if (!hadCache) {
+    $("mv-skeleton").hidden = true;
+    $("controls").hidden = true;
+    $("savebar").hidden = true;
+  }
+}
+
+let loading = false;
+async function load(keepForm = false) {
+  if (loading) return;
+  loading = true;
+  try {
+    const cachedData = Data.peek("/v2/model");
+    if (cachedData && !data) {
+      const cachedBill = Data.peek("/v2/model/billing");
+      paint(cachedData.data, cachedBill ? cachedBill.data : BILL_FALLBACK, false);  // what was seen before, at once
+    }
+    const [d, b] = await Promise.all([
+      api("/v2/model"),
+      api("/v2/model/billing").catch((e) => {
+        if (e instanceof AuthRequired) throw e;
+        say("费用账本暂时读不出来：" + e.message);
+        return BILL_FALLBACK;
+      }),
+    ]);
+    Data.store("/v2/model", d);
+    if (b !== BILL_FALLBACK) Data.store("/v2/model/billing", b);
+    paint(d, b, keepForm || (!!data && dirty()));
+  } catch (e) {
+    if (!(e instanceof AuthRequired)) showError(e.message, !!data);
+  } finally {
+    loading = false;
+  }
+}
+
 function failed(error) {
-  if (error instanceof NeedLogin) return start();
+  if (error instanceof AuthRequired) return;
   say(error.message, 5000);
 }
 
@@ -228,6 +248,8 @@ $("save").onclick = async () => {
     const mismatch = ["max_concurrency", "token_limit", "retry_limit", "daily_cny", "monthly_cny", "task_cny"].filter((k) => String(Number(s[k])) !== String(Number(body[k])));
     if (mismatch.length) throw new Error("保存后读到的值和提交的不一致：" + mismatch.join("、"));
     data.settings = s;
+    saved = form(); // what is on screen is what the server now has: nothing is unsaved any more
+    refreshDirty();
     await load();
     say("已保存");
   } catch (e) {
@@ -245,11 +267,6 @@ document.querySelectorAll("#controls input, #controls select").forEach((node) =>
   node.addEventListener("change", refreshDirty);
 });
 $("effort").addEventListener("change", refreshDirty);
-$("back").onclick = () => {
-  if (dirty() && !confirm("有未保存的改动，确定离开吗？")) return;
-  if (history.length > 1 && document.referrer.startsWith(location.origin)) history.back();
-  else location.href = "/training";
-};
 $("price-refresh").onclick = async () => {
   try {
     await api("/v2/model/prices/refresh", {});
@@ -311,14 +328,10 @@ $("backup").onclick = async () => {
   }
 };
 
-async function start() {
-  try {
-    await Session.ensure($("login-slot"));
-    await load();
-  } catch (e) {
-    if (e instanceof NeedLogin) return start();
-    $("notice").hidden = false;
-    $("notice").textContent = e.message + "。请稍后重试，或下拉刷新。";
-  }
-}
-start();
+$("mv-retry").onclick = () => {
+  $("mv-error").hidden = true;
+  $("mv-skeleton").hidden = !!data;
+  load(!!data);
+};
+window.ModelView = { show: () => load(!!data), dirty, leave: () => !dirty() || confirm("有未保存的改动，确定离开吗？") };
+})();

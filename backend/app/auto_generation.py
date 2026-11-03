@@ -43,16 +43,17 @@ class ChoiceDraft(StrictModel):
     distractor_checks: dict[str, DistractorCheck]
 
 
-def eligible_verified_reserve(conn, rows):
+def eligible_verified_reserve(conn, rows, cached=False):
     """Count only actual accepted six-source science, not stale ready flags.
 
     A ready status cannot make an unpinned question count toward the two-day
     120-question reserve. Keep this identical to the new-paper source gate.
     """
-    from app.auto_quality import ready
+    from app.auto_quality import ready, ready_cached
 
+    check = ready_cached if cached else ready
     return sum(
-        bool(pinned_science_evidence(row["content"]) and ready(conn, row["id"]))
+        bool(pinned_science_evidence(row["content"]) and check(conn, row["id"]))
         for row in rows
     )
 
@@ -297,7 +298,7 @@ def generation_attempts(conn, uid):
     }
 
 
-def eligible_reserve_count(conn, uid, subject, kind):
+def eligible_reserve_count(conn, uid, subject, kind, cached=False):
     # A merely "ready" state does not prove current science/answer
     # review, publication or v2 scoring compatibility.
     eligible = conn.execute(
@@ -312,7 +313,7 @@ def eligible_reserve_count(conn, uid, subject, kind):
         "AND f.user_id=%s AND f.due<=clock_timestamp()))",
         (subject, kind, str(POINTS[kind]), uid, uid),
     ).fetchall()
-    return eligible_verified_reserve(conn, eligible)
+    return eligible_verified_reserve(conn, eligible, cached=cached)
 
 
 def assemble_payload(conn, subject, kind, primary, anchor_quote, style_concept):

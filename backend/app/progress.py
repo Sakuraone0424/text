@@ -128,7 +128,7 @@ def buckets(conn, uid):
                 subject=subject, question_type=kind, required=required,
                 target=cost_control.reserve_target(required, STARTUP_RESERVE_DAYS),
                 target_kind="first_batch" if first_batch else "two_day_reserve",
-                stocked=eligible_reserve_count(conn, uid, subject, kind), admitted_today=today.get((subject, kind), 0),
+                stocked=eligible_reserve_count(conn, uid, subject, kind, cached=True), admitted_today=today.get((subject, kind), 0),
                 queued=c["queued"], generating=c["generating"], reviewing=c["reviewing"], blocked=c["blocked"],
                 blocked_reasons=dict(sorted(reasons[(subject, kind)].items(), key=lambda kv: -kv[1])),
             ))

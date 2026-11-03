@@ -74,7 +74,7 @@ def test_each_stage_is_counted_in_the_right_bucket_with_block_reasons(db, setup_
 
 
 def test_stocked_comes_from_the_verified_eligible_count(db, setup_ai, monkeypatch):
-    monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind: 3 if kind == "term" else 0)
+    monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind, cached=False: 3 if kind == "term" else 0)
     report = progress.report(db, setup_ai)
     assert bucket(report, "biochemistry", "term")["stocked"] == 3 and report["totals"]["stocked"] == 6
     assert report["next_paper"]["missing_questions"] == 60 - 2 * 3 + 0  # both term buckets hold 3 of 4
@@ -136,7 +136,7 @@ def test_the_report_carries_the_estimate_state(db, setup_ai, monkeypatch):
     monkeypatch.setattr(progress, "approved_recently", lambda conn, hours=None: 0)
     p = progress.report(db, setup_ai)["next_paper"]
     assert p["eta_state"] == "estimating" and p["eta_hours"] is None and p["eta_at"] is None
-    monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind: 99)
+    monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind, cached=False: 99)
     done = progress.report(db, setup_ai)["next_paper"]
     assert done["complete"] is True and done["missing_questions"] == 0 and done["eta_state"] == "complete"
 
@@ -147,7 +147,7 @@ def test_ready_counts_each_cell_only_up_to_one_papers_need(db, setup_ai, monkeyp
 
     need = {"single_choice": 10, "fill_blank": 14, "term": 4, "short_answer": 1, "essay": 1}
     stock = {(s, k): (30 if k == "single_choice" else 0) for s in ("biochemistry", "cell_biology") for k in need}
-    monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind: stock[(subject, kind)])
+    monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind, cached=False: stock[(subject, kind)])
     t = learning_stats.tomorrow_ready(db, setup_ai)
     assert t["needed"] == 60 and t["ready"] == 20 and t["missing"] == 40 and t["complete"] is False  # not 60
     stock.update({(s, k): need[k] + 5 for s in ("biochemistry", "cell_biology") for k in need})
@@ -224,12 +224,14 @@ def test_the_endpoint_needs_login_and_returns_only_numbers(client, db, monkeypat
     # the same "today's remaining budget" the model page's ledger shows (daily budget minus today's usage)
     assert body["spend"]["remaining_daily_cny"] == "0"  # no daily budget set yet
     db.execute("UPDATE ai_settings SET daily_cny=15")
-    again = client.get("/v2/model/progress", headers=LEARNER).json()
+    again = client.get("/v2/model/progress?fresh=1", headers=LEARNER).json()  # (the first copy is cached for 30 s)
     assert Decimal(again["spend"]["remaining_daily_cny"]) == Decimal("15")
-    page = client.get("/progress")
-    assert page.status_code == 200 and "出题进度" in page.text and page.headers["cache-control"] == "no-store"
+    # the old address redirects into the one application shell, where the page is a view
+    old = client.get("/progress", follow_redirects=False)
+    assert old.status_code == 302 and old.headers["location"] == "/training#/progress"
+    assert client.get("/static/model.html", follow_redirects=False).headers["location"] == "/training#/model"
     home = client.get("/training").text
-    assert 'href="/progress"' in home
+    assert 'id="progress-view"' in home and "出题进度" in home and 'href="#/progress"' in home
 
 
 # ---- only the current specification counts in the stages --------------------------------------------------

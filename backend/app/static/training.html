@@ -109,7 +109,7 @@
             <button class="card quick-card" data-action="memory" id="quick-review" type="button">
               <span class="quick-title">错题复习</span><span class="quick-line" id="quick-review-line">今日没有到期</span><b id="metric-due" hidden>0</b>
             </button>
-            <a class="card quick-card" href="/progress" id="open-progress">
+            <a class="card quick-card" href="#/progress" id="open-progress">
               <span class="quick-title">出题进度</span><span class="quick-line" id="quick-progress-line">已入库 <b id="tomorrow-ready">—</b></span>
             </a>
           </section>
@@ -215,10 +215,10 @@
             ><button data-action="insights">
               <span>学习建议<small>仅显示已有真实报告</small></span
               ><span aria-hidden="true">→</span></button
-            ><a href="/progress"
+            ><a href="#/progress"
               ><span>出题进度<small>库存、被挡住的原因、费用、出题程序状态</small></span
               ><span aria-hidden="true">→</span></a
-            ><a href="/static/model.html"
+            ><a href="#/model"
               ><span
                 >模型与费用<small
                   >模型、费用上限、并发与价格</small
@@ -234,6 +234,172 @@
             </button>
           </section>
           <div id="profile-content"></div>
+        </section>
+        <section data-page="progress" id="progress-view" class="view view-progress" hidden>
+          <header class="subbar"><button class="icon-button" type="button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>出题进度</h1><span></span></header>
+          <div id="pv-skeleton" class="skeleton-stack" aria-hidden="true"><div class="skeleton card-sk tall"></div><div class="skeleton card-sk"></div><div class="skeleton card-sk"></div></div>
+          <div id="pv-error" class="error-card" role="alert" hidden><p id="pv-error-text"></p><button id="pv-retry" class="secondary" type="button">重试</button></div>
+          <div id="pv-content" class="stack" hidden>
+        <section class="card key" aria-labelledby="h-batch">
+          <div class="key-head">
+            <h2 id="h-batch" class="label">首批目标已入库</h2>
+            <p class="rate"><span class="label">今日审核通过率</span> <b id="review-rate"></b></p>
+          </div>
+          <p class="big"><b id="batch-number"></b><span id="batch-target" class="unit"></span></p>
+          <div id="batch-progress"></div>
+          <div class="cells">
+            <div><span class="label">当前时段</span><b id="period"></b></div>
+            <div><span class="label">后台服务</span><b id="worker"></b></div>
+            <div><span class="label">凑齐一张卷</span><b id="paper-main"></b></div>
+          </div>
+          <p id="paper-note" class="note"></p>
+          <p id="worker-note" class="note"></p>
+          <p id="admitted-today" class="note" hidden></p>
+        </section>
+        <section class="card" aria-labelledby="h-bank">
+          <div class="card-head">
+            <h2 id="h-bank">题库库存</h2>
+            <div class="segmented" role="group" aria-label="科目">
+              <button type="button" data-subject="biochemistry" aria-pressed="true">生化</button>
+              <button type="button" data-subject="cell_biology" aria-pressed="false">细胞</button>
+            </div>
+          </div>
+          <p class="note">已入库 / 目标</p>
+          <div id="bank"></div>
+          <details id="legacy" class="legacy" hidden>
+            <summary id="legacy-summary"></summary>
+            <ul id="legacy-list" class="legacy-list"></ul>
+          </details>
+        </section>
+        <section class="card" aria-labelledby="h-spend">
+          <div class="card-head">
+            <h2 id="h-spend">本月花费</h2>
+            <p class="quota"><b id="spend-month"></b></p>
+          </div>
+          <div id="spend-chart"></div>
+          <div class="cells four">
+            <div><span class="label">今日</span><b id="spend-today"></b></div>
+            <div><span class="label">每入库一题</span><b id="spend-per"></b></div>
+            <div><span class="label">今日剩余</span><b id="spend-daily-left"></b></div>
+            <div><span class="label">本月出题剩余</span><b id="spend-left"></b></div>
+          </div>
+          <div class="cells" id="ledger">
+            <div><span class="label">实际已花</span><b id="ledger-actual"></b></div>
+            <div><span class="label">预留中</span><b id="ledger-reserved"></b></div>
+            <div><span class="label">上次对账</span><b id="ledger-checked"></b></div>
+          </div>
+          <p id="ledger-note" class="note"></p>
+          <p class="note">判分预留剩余 <span id="spend-grading"></span></p>
+          <p id="spend-note" class="note"></p>
+        </section>
+        <section class="card" aria-labelledby="h-waste">
+          <h2 id="h-waste">近 24 小时被挡原因</h2>
+          <div id="waste"></div>
+        </section>
+        <section class="card" aria-labelledby="h-jobs">
+          <h2 id="h-jobs">最近任务</h2>
+          <ol id="jobs" class="jobs"></ol>
+        </section>
+        <p id="updated" class="note center">正在读取…</p>
+      </div>
+        </section>
+        <section data-page="model" id="model-view" class="view view-model" hidden>
+          <header class="subbar"><button class="icon-button" type="button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>模型与费用</h1><span></span></header>
+          <div id="mv-skeleton" class="skeleton-stack" aria-hidden="true"><div class="skeleton card-sk tall"></div><div class="skeleton card-sk"></div><div class="skeleton card-sk"></div></div>
+          <div id="mv-error" class="error-card" role="alert" hidden><p id="mv-error-text"></p><button id="mv-retry" class="secondary" type="button">重试</button></div>
+          <div id="controls" class="stack" hidden>
+        <section class="card" aria-labelledby="h-model">
+          <h2 id="h-model">当前模型</h2>
+          <label class="field"><span class="label">模型</span><select id="model"></select></label>
+          <label class="field"><span class="label">思考强度</span><select id="effort"></select></label>
+          <label class="row switch"><span><b>自动发现</b><small>定期读取官方模型目录</small></span><input id="discover" type="checkbox" role="switch" /></label>
+          <label class="row switch"><span><b>允许升级</b><small>质量对比通过后才会切换</small></span><input id="upgrade" type="checkbox" role="switch" /></label>
+          <p class="note">只影响新任务，已经在运行的任务保持原设置。</p>
+          <details><summary>说明</summary>
+            <p id="capabilities" class="note"></p>
+            <p class="note">AI 自动核验不保证 100% 科学正确。本地费用是估算，不代表官方账单。</p>
+          </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-limits">
+          <h2 id="h-limits">费用上限</h2>
+          <div class="limit">
+            <div class="limit-head"><span class="label">每日上限</span><span class="used" id="used-day"></span></div>
+            <div class="limit-input"><label class="mini-switch"><input id="daily-limit-enabled" type="checkbox" role="switch" aria-label="启用每日上限" /><span>启用</span></label><span class="yen">¥</span><input id="daily" type="number" inputmode="decimal" min="0" max="1000" step="0.01" aria-label="每日上限（元）" /></div>
+          </div>
+          <div class="limit">
+            <div class="limit-head"><span class="label">每月上限</span><span class="used" id="used-month"></span></div>
+            <div class="limit-input"><label class="mini-switch"><input id="monthly-limit-enabled" type="checkbox" role="switch" aria-label="启用每月上限" /><span>启用</span></label><span class="yen">¥</span><input id="monthly" type="number" inputmode="decimal" min="0" max="10000" step="0.01" aria-label="每月上限（元）" /></div>
+          </div>
+          <div class="limit">
+            <div class="limit-head"><span class="label">单任务上限（含重试）</span><span class="used" id="used-task"></span></div>
+            <div class="limit-input"><label class="mini-switch"><input id="task-limit-enabled" type="checkbox" role="switch" aria-label="启用单任务上限" /><span>启用</span></label><span class="yen">¥</span><input id="task-budget" type="number" inputmode="decimal" min="0" max="1000" step="0.01" aria-label="单任务上限（元）" /></div>
+          </div>
+          <details><summary>说明与累计试验上限</summary>
+            <p id="billing" class="note" role="status"></p>
+            <p class="note">应用侧预算不是平台硬性扣费限额。关闭某项上限后，仍受已授权任务、并发、超时和异常停止保护。</p>
+            <label class="row switch"><span><b>累计试验上限</b><small>关闭不会删除历史预留</small></span><input id="trial-active" type="checkbox" role="switch" /></label>
+            <div class="limit-input"><span class="yen">¥</span><input id="trial-budget" type="number" inputmode="decimal" min="0" max="10000" step="0.01" aria-label="累计试验上限（元）" /></div>
+          </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-run">
+          <h2 id="h-run">运行设置</h2>
+          <label class="field"><span class="label">最大并发（同时进行的请求数）</span>
+            <select id="max-concurrency"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+          <label class="field"><span class="label">输出长度上限（Token）</span><input id="token-limit" type="number" inputmode="numeric" min="128" max="32768" step="1" /></label>
+          <label class="field"><span class="label">失败重试次数</span><input id="retry-limit" type="number" inputmode="numeric" min="0" max="5" step="1" /></label>
+          <details><summary>说明</summary>
+            <p class="note">并发越高，一次运行完成得越快，但临近额度时更早被挡住。建议 2–3。</p>
+            <p class="note">每次尝试只发一次官方请求；超时或结果不确定时，按预留额度计入并暂停，不会重复扣费。</p>
+          </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-price">
+          <div class="card-head"><h2 id="h-price">价格</h2><button id="price-refresh" class="small-button" type="button">刷新价格</button></div>
+          <div id="price"></div>
+          <p id="price-note" class="note"></p>
+        </section>
+
+        <section class="card" aria-labelledby="h-probe">
+          <h2 id="h-probe">连通测试</h2>
+          <div id="probes"></div>
+          <details><summary>说明</summary>
+            <p class="note">只发送合成算术，不发送教材。需要服务端授权与预算；排队不代表调用成功。</p>
+          </details>
+        </section>
+
+        <details class="card more">
+          <summary>更多</summary>
+          <div class="more-body">
+            <button id="refresh" class="secondary" type="button">刷新官方目录</button>
+            <details><summary>费用与模型历史</summary><pre id="billing-history"></pre></details>
+            <details><summary>私有备份</summary>
+              <p class="note">仅在已授权的非生产环境生成。ZIP 含教材和学习数据，不含登录凭据，请保存到自己的文件位置，不要公开上传。</p>
+              <button id="backup" class="secondary" type="button">生成并准备下载最新备份</button>
+              <p id="backup-info" class="note"></p>
+              <a class="secondary" href="/v2/model/backup/download" download>下载私有 ZIP</a>
+            </details>
+            <form id="command">
+              <label class="field"><span class="label">模型命令</span><input id="text" placeholder="/model help" maxlength="100" /></label>
+              <button class="secondary" type="submit">执行</button>
+            </form>
+            <pre id="help"></pre>
+          </div>
+        </details>
+
+        <section class="card danger" aria-labelledby="h-danger">
+          <h2 id="h-danger">危险操作</h2>
+          <p id="stop-note" class="note"></p>
+          <button id="stop-toggle" class="danger-button" type="button">停止 AI 任务</button>
+          <button id="default" class="danger-button" type="button">恢复默认（并暂停任务）</button>
+        </section>
+      </div>
+          <div id="savebar" class="savebar" hidden>
+      <p id="dirty-note" class="note" role="status">没有未保存的改动</p>
+      <button id="save" class="primary" type="button" disabled>保存</button>
+    </div>
+          <p id="message" class="toast" role="status" aria-live="polite"></p>
         </section>
         <section id="learning" aria-live="polite"></section>
       </main>
@@ -286,9 +452,12 @@
         ><button id="confirm-submit" class="primary">确认统一交卷</button>
       </div>
     </dialog>
+    <script src="/static/data.js" defer></script>
     <script src="/static/charts.js" defer></script>
     <script src="/static/training-ui.js" defer></script>
     <script src="/static/insights.js" defer></script>
+    <script src="/static/progress.js" defer></script>
+    <script src="/static/model.js" defer></script>
     <script src="/static/shell.js" defer></script>
     <script src="/static/training.js" defer></script>
   </body>

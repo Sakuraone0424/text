@@ -229,3 +229,10 @@ def no_real_balance_calls(monkeypatch):
         raise ValueError("balance_disabled_in_tests")
 
     monkeypatch.setattr(cost_reconcile, "fetch_balance", refuse)
+
+def fresh_progress_cache():
+    from app import model_api
+
+    model_api._PROGRESS.invalidate()
+    yield
+    model_api._PROGRESS.invalidate()

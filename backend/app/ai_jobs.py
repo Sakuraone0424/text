@@ -58,7 +58,7 @@ def enqueue(conn, user_id, key, kind, payload):
     s = model_router.snapshot(conn, user_id)
     from app import cost_control
 
-    level = cost_control.effort_for(kind)
+    level = cost_control.effort_for(kind, payload)
     if level and level != s["effort"]:
         if level not in s["capabilities"].get("efforts", []):
             raise ValueError("model_effort_not_compatibility_verified")
@@ -146,7 +146,7 @@ def refreeze_on_current_model(conn, job):
         fresh = model_router.snapshot(conn, job["user_id"])
     except ValueError as exc:
         return job, "replacement_unusable:" + str(exc)
-    level = cost_control.effort_for(job["kind"])
+    level = cost_control.effort_for(job["kind"], job.get("payload"))
     if level and level != fresh["effort"]:
         if level not in fresh["capabilities"].get("efforts", []):
             return job, "replacement_effort_not_probed:" + level

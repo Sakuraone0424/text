@@ -10,6 +10,7 @@ from app.common import ensure_user
 from app.db import get_db
 from app.question_quality import StrictModel
 from app import model_router as models
+from app.server_cache import StaleCache
 
 router = APIRouter(prefix="/v2/model", tags=["models"])
 
@@ -323,7 +324,9 @@ def cancel(job_id: int, request: Request, name=Depends(require_auth)):
             already_sent_request_cannot_be_recalled=True,
         )
 
-    return operation(name, stop)
+    result = operation(name, stop)
+    _PROGRESS.invalidate()
+    return result
 
 
 @router.get("/backup")
@@ -418,12 +421,18 @@ def benchmark_approval(data: BenchmarkApproval, request: Request, name=Depends(r
     return operation(name, lambda c, u: approve_benchmark(c, data.model_id, data.approved, data.note))
 
 
+_PROGRESS = StaleCache(ttl=30)
+
+
 @router.get("/progress")
-def progress_report(name=Depends(require_auth)):
-    """Question-writing progress: counts, codes and times only (no question or textbook text)."""
+def progress_report(fresh: bool = Query(False), name=Depends(require_auth)):
+    """Question-writing progress: counts, codes and times only (no question or textbook text).
+
+    Built by many queries, so a copy up to 30 s old is returned at once (and rebuilt in the background when older);
+    `?fresh=1` rebuilds now (used after cancelling a task)."""
     from app.progress import report
 
-    return operation(name, report)
+    return _PROGRESS.get(name, lambda: operation(name, report), fresh=fresh)
 
 
 @router.post("/prices/refresh")

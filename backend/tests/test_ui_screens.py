@@ -135,7 +135,10 @@ def test_empty_state_pages(engine, live_app, mode, scheme):
     assert page.locator(".stat-card").first.evaluate("(n) => getComputedStyle(n).backgroundColor") == card
     assert page.evaluate("document.querySelector('meta[name=theme-color][media*=dark]').content") == "#0E1014"
     nav = page.locator(".sidebar").bounding_box()
-    assert nav["height"] == 56 and abs(nav["y"] + nav["height"] - page.evaluate("innerHeight")) < 1  # the bar sits at the bottom, nothing below it
+    # Safari: the bar is 56 px; home-screen mode adds a fixed 28-34 px gap below the icons (no viewport-fit=cover)
+    expected = 56 if mode == "safari" else range(56 + 28, 56 + 34 + 1)
+    assert (nav["height"] == expected) if mode == "safari" else (nav["height"] in expected)
+    assert abs(nav["y"] + nav["height"] - page.evaluate("innerHeight")) < 1  # the bar sits at the bottom, nothing below it
     clear_of_the_top_inset(page, mode)
     fits(page)
     snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "home")
@@ -153,12 +156,12 @@ def test_empty_state_pages(engine, live_app, mode, scheme):
             assert heights and all(h == 0 for h in heights), heights
             expect(page.locator(".due-side .stat-label")).to_have_text("未来 7 天")
         snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "empty", name)
-    progress, perrors = open_page(engine, mode, base, "/progress", scheme=scheme)
-    expect(progress.locator("#content")).to_be_visible()
+    progress, perrors = open_page(engine, mode, base, "/training#/progress", scheme=scheme)
+    expect(progress.locator("#pv-content")).to_be_visible()
     fits(progress)
     snap(progress, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "progress")
     # (signed in through the API: WebKit refuses the Secure session cookie from the form over plain http)
-    model, merrors = open_page(engine, mode, base, "/static/model.html", scheme=scheme)
+    model, merrors = open_page(engine, mode, base, "/training#/model", scheme=scheme)
     expect(model.locator("#controls")).to_be_visible()
     fits(model)
     snap(model, engine, mode, ("" if scheme == "light" else "dark-") + "empty", "model")
@@ -204,11 +207,11 @@ def test_seeded_pages(engine, live_app, mode, scheme):
         snap(page, engine, mode, ("" if scheme == "light" else "dark-") + "data", name)
         page.locator('nav.primary-nav [data-view="profile"]').click()
         page.wait_for_timeout(400)
-    progress, perrors = open_page(engine, mode, base, "/progress", scheme=scheme)
-    expect(progress.locator("#content")).to_be_visible()
+    progress, perrors = open_page(engine, mode, base, "/training#/progress", scheme=scheme)
+    expect(progress.locator("#pv-content")).to_be_visible()
     fits(progress)
     snap(progress, engine, mode, ("" if scheme == "light" else "dark-") + "data", "progress")
-    model, merrors = open_page(engine, mode, base, "/static/model.html", scheme=scheme)
+    model, merrors = open_page(engine, mode, base, "/training#/model", scheme=scheme)
     expect(model.locator("#controls")).to_be_visible()
     fits(model)
     snap(model, engine, mode, ("" if scheme == "light" else "dark-") + "data", "model")

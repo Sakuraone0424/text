@@ -297,7 +297,7 @@ class CallPool:
                     self.started -= 1
                     self.active -= 1
                     self.last_claim = dict(ai_jobs.LAST_CLAIM)
-                    self.stopped_because = ai_jobs.LAST_CLAIM.get("outcome") + (
+                    self.stopped_because = (ai_jobs.LAST_CLAIM.get("outcome") or "no_claimable_job") + (
                         ":" + ai_jobs.LAST_CLAIM["scope"] if ai_jobs.LAST_CLAIM.get("scope") else "")
                     self.cond.notify_all()
                     # Nothing to claim right now. While other calls are still running their results may

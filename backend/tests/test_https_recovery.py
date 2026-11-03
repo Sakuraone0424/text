@@ -222,7 +222,7 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     qa = https_app
     context = https_browser
     page = context.new_page()
-    page.goto(qa['origin'] + '/static/model.html')
+    page.goto(qa['origin'] + '/training#/model')
     page.evaluate("""async () => {
       const old = await caches.open('xiaohan-training-shell-v7-offline-recovery');
       await old.put('/static/training.js', new Response(
@@ -249,11 +249,11 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     page.wait_for_function('navigator.serviceWorker.controller !== null')
     page.wait_for_function("""async () => {
       const keys = await caches.keys();
-      return keys.includes('xiaohan-training-shell-v16-fixed-shell') &&
+      return keys.includes('xiaohan-training-shell-v17-one-shell') &&
              !keys.includes('xiaohan-training-shell-v7-offline-recovery');
     }""")
     assert page.evaluate("""async () => {
-      const cache = await caches.open('xiaohan-training-shell-v16-fixed-shell');
+      const cache = await caches.open('xiaohan-training-shell-v17-one-shell');
       const asset = await cache.match('/static/training.js');
       return !!asset && (await asset.text()).includes('cachedPaper(username, paper.paper_id)');
     }""")

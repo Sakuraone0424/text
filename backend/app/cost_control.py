@@ -60,8 +60,16 @@ def held_back_kinds(at=None):
 # ---- thinking level -----------------------------------------------------------------
 
 
-def effort_for(kind):
-    """Configured thinking level for a job kind, or None to keep the model setting."""
+# A single-choice review has to settle the unique answer on its own and refute every wrong option: it thinks harder.
+SINGLE_CHOICE_REVIEW_THINKING = ("AI_REVIEW_THINKING_SINGLE_CHOICE", "high")
+
+
+def effort_for(kind, payload=None):
+    """Configured thinking level for a job kind (a single-choice review has its own), or None to keep the model setting."""
+    if kind == "quality_review" and isinstance(payload, dict) and (payload.get("question") or {}).get("question_type") == "single_choice":
+        env, default = SINGLE_CHOICE_REVIEW_THINKING
+        raw = os.environ.get(env, "").strip().lower()
+        return raw if raw in EFFORTS else default
     raw = os.environ.get(THINKING_ENV.get(kind, ""), "").strip().lower()
     value = raw or THINKING_DEFAULTS.get(kind)
     return value if value in EFFORTS else THINKING_DEFAULTS.get(kind)

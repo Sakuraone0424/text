@@ -436,3 +436,22 @@ Railway 保留上一次部署，可在部署列表中一键回退；数据库变
 **数据**（`/v2/model/waste/stats`）新增：每个「科目 × 题型」近 N 小时的出题次数、格式被挡、转修复、修复失败、审核通过/不通过、修复后入库、入库；审核不通过的问题类型分布（歧义、科学性、第二个正确选项、证据不支持、引用不符、题干泄露答案……），每类 2 个样例（题干前 60 字 + 审核理由前 160 字，不含教材）；单选逐步（出题 → 格式与证据检查 → 审核调用 → 审核结论 → 入库）；出题选段落过滤前后的段落数（太短、图表题注、表格、目录、章节标题、OCR 质量标记）。一次性原因（如 `superseded_scoring`）单独标注、在进度页折叠。
 
 所有 JSON 回复的 `Content-Type` 带 `charset=utf-8`。
+
+## 审核标准 PR（审核契约 10）
+
+- 审核员拿到和出题时同样的**整段教材**（每个被引用的段落一份，最多 4 段）；题目的引用只是引用凭证，审核员的 claims 可以引这些段落里任何一处原文（按同样的 6 层规则匹配）。整段教材加真题风格材料放不进一次请求（24000 字节）时，自动退回旧的「只发被引用的句子」（契约 9）。
+- 知识点映射由程序按引用生成（每个知识点指向本题引用的全部段落），审核员留空 `mapping_evidence`。
+- 风险说明（`risk_resolutions`）只针对教材段落的 OCR 质量标记，真题风格材料不再要求。
+- 单选题的审核用 `high` 思考强度（环境变量 `AI_REVIEW_THINKING_SINGLE_CHOICE` 可改，默认 `high`），其他题型仍是 `low`（`AI_REVIEW_THINKING`）。
+- 查重：只和同科目同题型已发布的题比较，相似度阈值 0.9（原来是和所有已发布的题比、0.85）。
+- 出题提示词：单选的每个错误选项都必须能在所给段落里找到可逐字引用的反驳依据，找不到就换掉这个选项。
+- 兼容：旧契约（9 及更早）的审核记录按它们自己的契约重算与比对，已入库题的审核记录仍然有效。
+- 前后对比：`/v2/model/waste/stats` 的 `review_by_contract` 按审核契约（9=旧、10=新）× 题型 × 思考强度给出近 72 小时的审核数、通过数、通过率和平均每次审核费用；单选在 high 下的通过率和平均费用就在这里和旧契约并排。
+
+## One application shell (hash routes)
+
+All learner pages are views of `/training`: `#/home`, `#/exam`, `#/mistakes`, `#/stats` (+ `/weekly`, `/insights`, `/history`, `/source-status`, `/archive`), `#/profile`, `#/progress` (出题进度), `#/model` (模型与费用). `/progress` and `/static/model.html` redirect into the shell. Moving between pages never reloads the document; the browser's back stack (and the iPhone edge swipe) restores the previous page with its scroll position; the subbar (back + centred title) is the same on every sub page. One login: an unauthenticated visit shows the login page and returns to the page asked for.
+
+Speed: `Data.swr` shows the cached copy of a page at once and refreshes it behind (a visible retry card on network errors); the server keeps a 30 s `StaleCache` for the progress page (`?fresh=1` bypasses it, cancelling a job invalidates it) and memoises the OCR file integrity hash per `(document, sha)`. `GET /v2/perf` (learner key) returns p50/p95/max per route over the last 500 requests; requests over 300 ms are logged as `slow request`. Every response carries `Server-Timing: app;dur=…`.
+
+Home-screen (standalone) mode: the bottom bar and the exam's fixed bar get a fixed 30 px bottom gap through `@media (display-mode: standalone)` (and `html.standalone` for iOS' `navigator.standalone`); `viewport-fit=cover` stays off and Safari is unchanged. The service worker cache is `v17-one-shell`.

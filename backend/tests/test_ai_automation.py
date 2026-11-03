@@ -250,9 +250,11 @@ def test_unsent_source_context_cannot_support_formal_review(db, setup_ai, candid
         return q, [{**u, "text": u["text"] + unsent} for u in refs], style
 
     monkeypatch.setattr(quality, "evidence", with_extra_context)
-    assert not quality.accept_round(db, synthetic_result(job, db, quote=unsent))
-    event = db.execute("SELECT passed,result FROM auto_quality_events WHERE phase='review'").fetchone()
-    assert event["passed"] is False and "invented_quote" in event["result"]["issues"]
+    # the reviewer was sent whole paragraphs (contract 10): text that appeared in the paragraph afterwards was never
+    # sent, so the stored request no longer matches the evidence and the result is refused outright
+    with pytest.raises(ValueError, match="evidence_version_changed"):
+        quality.accept_round(db, synthetic_result(job, db, quote=unsent))
+    assert db.execute("SELECT count(*) AS n FROM auto_quality_events WHERE phase='review'").fetchone()["n"] == 0
     assert quality.ready(db, candidate) is False
 
 

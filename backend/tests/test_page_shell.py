@@ -48,11 +48,11 @@ def test_an_in_page_anchor_scrolls_the_content_area_not_the_document(engine, liv
     client, dsn, _ = live_app
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
-    page, _ = open_page(engine, "safari", base, "/static/model.html")
+    page, _ = open_page(engine, "safari", base, "/training#/model")
     expect(page.locator("#controls")).to_be_visible()
     page.evaluate("document.querySelector('#h-danger').scrollIntoView()")
     page.wait_for_timeout(300)
-    assert scroller_top(page, "main.page") > 200 and page.evaluate("window.scrollY") == 0
+    assert scroller_top(page, ".workspace") > 200 and page.evaluate("window.scrollY") == 0
     box = page.locator("#h-danger").bounding_box()
     nav_top = page.locator("#savebar").bounding_box()["y"]
     assert 16 <= box["y"] and box["y"] + box["height"] <= nav_top + 1   # visible, between the top gap and the save bar
@@ -61,10 +61,10 @@ def test_an_in_page_anchor_scrolls_the_content_area_not_the_document(engine, liv
 def test_a_field_that_gets_focus_is_scrolled_into_the_visible_area(engine, live_app):
     client, dsn, _ = live_app
     base = str(client.base_url).rstrip("/")
-    page, _ = open_page(engine, "safari", base, "/static/model.html")
+    page, _ = open_page(engine, "safari", base, "/training#/model")
     expect(page.locator("#controls")).to_be_visible()
     # the page script brings a focused field to the middle of the content area (the keyboard needs the room)
-    page.evaluate("document.querySelector('main.page').scrollTop = 0")
+    page.evaluate("document.querySelector('.workspace').scrollTop = 0")
     page.evaluate("document.querySelector('#retry-limit').focus()")
     page.wait_for_timeout(900)
     box = page.locator("#retry-limit").bounding_box()
