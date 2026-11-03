@@ -266,7 +266,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     page.on("pageerror", lambda e: errors.append(str(e)))
     login(page, base)
     assert page.locator('a[href="/"]').count() == 0
-    assert page.locator("details").count() == 0
+    assert page.locator("details:visible").count() == 0   # the hidden progress/model views hold some; none is on screen
     assert page.locator("article").count() == 0
     page.locator("#start").click()
     page.locator("#questions article:not([hidden])").wait_for()
@@ -309,6 +309,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     assert camera_response.value.status == 200
     page.wait_for_function("document.querySelector('#status').textContent.includes('图片已保存')")
     page.reload()
+    page.evaluate("location.hash = '#/home'")      # a reload keeps the address (#/exam); go back to the home page first
     page.locator("#prepare").click()
     page.locator("#questions article:not([hidden])").wait_for()
     assert (
