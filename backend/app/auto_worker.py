@@ -495,6 +495,8 @@ def run(report):
             "AND (j.error_code IN ('budget_exceeded','automation_stopped') OR j.error_code LIKE ANY(%s))",
             ([c + "%" for c in ai_jobs.MODEL_GONE_CODES],),
         )
+        # Jobs an earlier run blocked only because DeepSeek was busy or unreachable go back to the queue.
+        report["requeued_busy"] = ai_jobs.requeue_platform_blocked(conn)
         states, held, head = queue_snapshot(conn)
         report["queue"] = ",".join(f"{k}={v}" for k, v in sorted(states.items())) or "empty"
         report["peak_held"] = ",".join(held) or "-"
@@ -507,10 +509,15 @@ def run(report):
         with get_db() as conn:
             report["balance"] = cost_reconcile.reconcile_if_due(conn, users[0]["user_id"])
     limit = calls_per_run()
-    workers = min(report.get("max_concurrency") or 1, limit)
+    configured = min(report.get("max_concurrency") or 1, limit)
+    with get_db() as conn:
+        workers, adaptive = adaptive_concurrency(conn, configured)
+    report["adaptive"] = adaptive
     pool = CallPool(get_db, execute, workers, limit, run_seconds() - (time.monotonic() - run_began)).run()
     report["calls"] = pool.calls
     report["concurrency"] = workers
+    with get_db() as conn:
+        report["http_503"], report["http_429"], report["timeouts"] = platform_trouble(conn, report["since"])
     report["parallel_peak"] = pool.peak
     report["claimed"] = ",".join(str(c) for c in pool.claimed) or "-"
     if pool.overran:
@@ -538,6 +545,41 @@ def run(report):
     integrations_tick()
 
 
+def adaptive_concurrency(conn, configured):
+    """How many calls to run at once this run: the setting, unless the platform has been struggling.
+
+    More than half of the calls of the last run answered 503/429 -> half as many this run (never below 1). After two
+    ordinary runs in a row the number climbs back one at a time to the setting. Only runs that made calls count.
+    Returns (concurrency, state) with state normal | halved | holding | recovering."""
+    rows = conn.execute(
+        "SELECT calls,busy_503,busy_429,effective_concurrency FROM worker_heartbeats WHERE calls>0 ORDER BY id DESC LIMIT 2"
+    ).fetchall()
+    if not rows:
+        return configured, "normal"
+    busy = lambda r: (r["busy_503"] + r["busy_429"]) * 2 > r["calls"]
+    last = min(rows[0]["effective_concurrency"] or configured, configured)
+    if busy(rows[0]):
+        return max(1, last // 2), "halved"
+    if last >= configured:
+        return configured, "normal"
+    if len(rows) >= 2 and not busy(rows[1]):
+        return min(configured, last + 1), "recovering"
+    return last, "holding"
+
+
+def platform_trouble(conn, since):
+    """How many of this run's calls met a busy or unreachable platform: (HTTP 503, HTTP 429, timeouts/broken connections)."""
+    counts = {
+        r["error_code"]: r["n"]
+        for r in conn.execute(
+            "SELECT error_code,count(*) AS n FROM ai_call_events WHERE created_at>=%s AND error_code IS NOT NULL GROUP BY 1",
+            (since,),
+        ).fetchall()
+    }
+    timeouts = sum(n for code, n in counts.items() if code in ai_jobs.PLATFORM_CODES and not code.startswith("provider_http_"))
+    return counts.get("provider_http_503", 0), counts.get("provider_http_429", 0), timeouts
+
+
 def record_heartbeat(report, started, error):
     """One row per run for the progress page (numbers and codes only). Never lets a run fail."""
     from decimal import Decimal
@@ -557,11 +599,14 @@ def record_heartbeat(report, started, error):
         with get_db() as conn:
             conn.execute("DELETE FROM worker_heartbeats WHERE finished_at<clock_timestamp()-interval '14 days'")
             conn.execute(
-                "INSERT INTO worker_heartbeats(started_at,outcome,calls,cost_cny,stopped_because,queue,concurrency,duration_seconds) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                "INSERT INTO worker_heartbeats(started_at,outcome,calls,cost_cny,stopped_because,queue,concurrency,duration_seconds,"
+                "busy_503,busy_429,timeouts,effective_concurrency) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (started, outcome, int(report.get("calls", 0) or 0), Decimal(str(report.get("cost_cny", "0") or "0")),
                  report.get("stopped_because"), ai_jobs.Jsonb(queue),
                  int(report.get("parallel_peak") or 1),
-                 Decimal(str(report.get("duration_s", "0") or "0"))),
+                 Decimal(str(report.get("duration_s", "0") or "0")),
+                 int(report.get("http_503") or 0), int(report.get("http_429") or 0), int(report.get("timeouts") or 0),
+                 int(report.get("concurrency") or 0) or None),
             )
     except Exception:
         pass  # a missing table or database hiccup must not turn a good run into a failed one

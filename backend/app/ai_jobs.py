@@ -35,6 +35,50 @@ class ProviderFailure(RuntimeError):
         super().__init__("provider_request_failed")
 
 
+# ---- platform-side trouble -------------------------------------------------------------------------------------------
+# DeepSeek being busy or unreachable says nothing about the task. Such a failure does not use up one of the job's retries
+# and never blocks it: the job waits (1, 2, 5, 10, then 30 minutes between tries) until the platform answers again.
+PLATFORM_STATUSES = frozenset({429, 500, 502, 503, 504})
+PLATFORM_BACKOFF_MINUTES = (1, 2, 5, 10, 30)
+PLATFORM_CODES = (
+    "provider_http_429", "provider_http_500", "provider_http_502", "provider_http_503", "provider_http_504",
+    "TimeoutExpired", "TimeoutError", "ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout", "ConnectError",
+    "ReadError", "WriteError", "RemoteProtocolError", "ConnectionError", "ConnectionResetError", "ConnectionAbortedError",
+    "BrokenPipeError",
+)
+
+
+def is_platform_error(error):
+    """True for the platform's own temporary trouble: 429/500/502/503/504, a timeout, a connection that broke.
+    Failures the model or our code causes (truncated output, invalid JSON, a size cap, 400/401/402/403/404) are not."""
+    import subprocess
+
+    import httpx
+
+    if error is None:
+        return False
+    if isinstance(error, ProviderFailure):
+        stage = (error.diagnostic or {}).get("failure_stage") if isinstance(error.diagnostic, dict) else None
+        if stage:
+            return False
+        return error.status in PLATFORM_STATUSES   # (a call that never got an HTTP answer is recorded as 502)
+    return isinstance(error, (TimeoutError, subprocess.TimeoutExpired, ConnectionError, httpx.TransportError))
+
+
+def platform_wait_minutes(streak):
+    return PLATFORM_BACKOFF_MINUTES[min(max(streak, 0), len(PLATFORM_BACKOFF_MINUTES) - 1)]
+
+
+def requeue_platform_blocked(conn):
+    """Jobs that earlier runs blocked only because of platform trouble go back to the queue (with a fresh retry budget:
+    their earlier attempts were not their fault). Returns how many."""
+    return conn.execute(
+        "UPDATE ai_jobs SET state='retrying',next_retry=clock_timestamp(),transient_attempts=attempts,platform_streak=0 "
+        "WHERE state='blocked' AND error_code=ANY(%s) AND lease_token IS NULL",
+        (list(PLATFORM_CODES),),
+    ).rowcount
+
+
 def extended_limits(snapshot):
     """Long calls (high-effort reviews) for everything except the frozen 3-question trial."""
     return "limited_trial" not in snapshot
@@ -169,7 +213,7 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     # claims before it, so the budget, the per-task limit, the monthly cap and max_concurrency stay exact.
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (CLAIM_LOCK,))
     expired = conn.execute(
-        "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp()"
+        "UPDATE ai_jobs SET state=CASE WHEN attempts-transient_attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,lease_token=NULL,error_code='lease_expired' WHERE state='running' AND lease_until<clock_timestamp()"
         + scope_filter
         + " RETURNING *",
         (scope_id,) if scope_id else (),
@@ -314,12 +358,14 @@ def finish(conn, job, result=None, error=None):
         error = ProviderFailure(200, usage=result.get("usage"))
     # A ValueError from our own code (a size cap, a guard) fails the same way every time: one retry at most.
     retry_room = locked["settings_snapshot"]["retry_limit"] if not isinstance(error, ValueError) else min(1, locked["settings_snapshot"]["retry_limit"])
+    platform = is_platform_error(error)
+    counted = locked["attempts"] - locked["transient_attempts"]      # attempts that were the task's own
     state = (
         "succeeded"
         if error is None
         else (
             "retrying"
-            if locked["attempts"] <= retry_room
+            if platform or counted <= retry_room
             else "blocked"
         )
     )
@@ -349,8 +395,12 @@ def finish(conn, job, result=None, error=None):
         ),
     )
     conn.execute(
-        "UPDATE ai_jobs SET state=%s,result=%s,error_code=%s,lease_token=NULL,lease_until=NULL,finished_at=clock_timestamp(),next_retry=clock_timestamp()+interval '60 seconds' WHERE id=%s",
-        (state, Jsonb(result) if result is not None else None, code, job["id"]),
+        "UPDATE ai_jobs SET state=%s,result=%s,error_code=%s,lease_token=NULL,lease_until=NULL,finished_at=clock_timestamp(),"
+        "next_retry=clock_timestamp()+%s*interval '1 second',"
+        "transient_attempts=transient_attempts+%s,platform_streak=CASE WHEN %s THEN platform_streak+1 ELSE 0 END WHERE id=%s",
+        (state, Jsonb(result) if result is not None else None, code,
+         60 * platform_wait_minutes(locked["platform_streak"]) if platform else 60,
+         1 if platform else 0, platform, job["id"]),
     )
     conn.execute(
         "UPDATE ai_jobs SET input_tokens=%s,output_tokens=%s,cached_tokens=%s WHERE id=%s",
@@ -385,7 +435,7 @@ def reclaim_orphans(conn, grace_seconds=40):
     """Hand back jobs that a PREVIOUS worker process still holds (it was restarted by a deploy): their leases would
     otherwise keep the concurrency slots busy for minutes. Calls count as unknown (an estimate) until reconciliation."""
     lost = conn.execute(
-        "UPDATE ai_jobs SET state=CASE WHEN attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,"
+        "UPDATE ai_jobs SET state=CASE WHEN attempts-transient_attempts>=(settings_snapshot->>'retry_limit')::int+1 THEN 'blocked' ELSE 'retrying' END,"
         "lease_token=NULL,error_code='worker_restarted' WHERE state='running' AND lease_run IS DISTINCT FROM %s "
         "AND started_at<clock_timestamp()-%s*interval '1 second' RETURNING *",
         (RUN_ID, grace_seconds),

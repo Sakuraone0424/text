@@ -26,6 +26,20 @@ const REASON = {
   provider_invalid_response_json: "模型回应不是有效的 JSON",
   provider_sdk_exception: "调用模型时出现异常",
   WorkerInterrupted: "运行结束时调用还没返回，已重新排队",
+  provider_http_429: "DeepSeek 限流，自动等待重试",
+  provider_http_500: "DeepSeek 繁忙，自动等待重试",
+  provider_http_502: "DeepSeek 繁忙，自动等待重试",
+  provider_http_503: "DeepSeek 繁忙，自动等待重试",
+  provider_http_504: "DeepSeek 繁忙，自动等待重试",
+  TimeoutExpired: "调用超时，自动等待重试",
+  TimeoutError: "调用超时，自动等待重试",
+  ReadTimeout: "调用超时，自动等待重试",
+  ConnectTimeout: "连接超时，自动等待重试",
+  ConnectError: "连接 DeepSeek 失败，自动等待重试",
+  ReadError: "连接中断，自动等待重试",
+  RemoteProtocolError: "连接中断，自动等待重试",
+  ConnectionError: "连接中断，自动等待重试",
+  ConnectionResetError: "连接中断，自动等待重试",
   invalid_or_uncertain_result: "结果无效或不确定",
   unspecified: "未注明",
   model_delisted_or_catalog_changed: "原模型已下架或目录变化",
@@ -255,7 +269,19 @@ function paper(report) {
   }
 }
 
+// "DeepSeek 繁忙，自动等待重试": its own line, apart from real failures, and it goes away by itself when the platform recovers
+function platformLine(report) {
+  const p = report.platform;
+  const line = $("platform-note");
+  line.hidden = !(p && p.busy);
+  if (line.hidden) return;
+  const next = p.next_retry_at ? "，最早 " + fmtTime(p.next_retry_at) + " 再试" : "";
+  const last = p.last_run ? `。上一轮 503 × ${p.last_run.busy_503} · 429 × ${p.last_run.busy_429} · 超时 × ${p.last_run.timeouts}` : "";
+  line.textContent = `DeepSeek 繁忙，自动等待重试：${p.waiting_jobs} 个任务在等待（不算失败，不占重试次数）${next}${last}。`;
+}
+
 function status(report) {
+  platformLine(report);
   const period = report.period;
   $("period").textContent = period.is_peak ? "高峰·暂缓" : "低峰·出题中";
   $("period").title = period.is_peak ? fmtTime(period.next_off_peak_at) + " 起低峰" : "下个高峰 " + fmtTime(period.next_peak_at);
@@ -275,6 +301,8 @@ function status(report) {
   const outcome = w.outcome === "ok" ? "正常" : w.outcome === "disabled" ? "未启用" : "出错（" + w.outcome.replace("error:", "") + "）";
   const parts = ["上次 " + fmtTime(w.last_run_at) + " · " + outcome, "调用 " + w.calls + " 次", "同时最多 " + (w.concurrency || 1) + " 个", "用时 " + Math.round(w.duration_seconds || 0) + " 秒", "费用 " + yuan(w.cost_cny)];
   if (w.stopped_because) parts.push("停止原因：" + stopText(w.stopped_because));
+  if (w.busy_503 || w.busy_429 || w.timeouts) parts.push(`上一轮 503 × ${w.busy_503} · 429 × ${w.busy_429} · 超时 × ${w.timeouts}`);
+  if (w.effective_concurrency && w.effective_concurrency < (w.concurrency || 1)) parts.push(`并发已降到 ${w.effective_concurrency}`);
   note.textContent = parts.join(" · ") + (w.stale ? "。已超过 15 分钟没有运行（正常每 5 分钟一次）。" : "。");
   if (w.stale || w.outcome !== "ok") {
     note.classList.add("warn");
@@ -530,6 +558,8 @@ function spend(report) {
 
 function jobTag(job) {
   if (job.state === "running") return ["进行中", "running"];
+  // DeepSeek busy or unreachable: the task is simply waiting its turn again, which is not a failure and not counted as a try
+  if (job.platform_busy) return ["DeepSeek 繁忙，自动等待重试", "pending"];
   if (job.state === "pending" || job.state === "retrying") return ["排队·第" + (job.attempts + 1) + "次", "pending"];
   if (job.outcome && job.outcome.status === "ready") return ["通过，已入库", "succeeded"];
   if (job.outcome && job.outcome.status === "blocked") return ["未通过", "blocked"];
