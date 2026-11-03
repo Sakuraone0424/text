@@ -665,7 +665,7 @@ def reflect(
                 payload.note,
             ),
         )
-        from app.archiving import enqueue
+        from app.notion_sync import enqueue
 
         enqueue(c, u, paper_id)
         return {"recorded": True, "replayed": False}
