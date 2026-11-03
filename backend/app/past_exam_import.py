@@ -312,7 +312,7 @@ def search_terms(text):
 PAGE_HINT_BOOST = 1.5
 
 
-def ranked_paragraphs(conn, subject, text, page_hints=None):
+def ranked_paragraphs(conn, subject, text, page_hints=None, min_chars=None):
     """Pinned, clean textbook paragraphs of this subject, best match first.
 
     `page_hints` ({file_id: {ocr pages}}) only RAISES the score of paragraphs
@@ -332,7 +332,7 @@ def ranked_paragraphs(conn, subject, text, page_hints=None):
         "AND u.chapter NOT IN ('','unclassified','contents') "
         "AND length(u.text) BETWEEN %s AND %s AND lower(u.text) LIKE ANY(%s) "
         "ORDER BY u.id LIMIT 1500",
-        (subject, MIN_UNIT_CHARS, MAX_UNIT_CHARS, ["%" + t.lower() + "%" for t in strong]),
+        (subject, MIN_UNIT_CHARS if min_chars is None else min_chars, MAX_UNIT_CHARS, ["%" + t.lower() + "%" for t in strong]),
     ).fetchall()
     ranked, seen = [], set()
     for row in rows:
@@ -353,20 +353,70 @@ def ranked_paragraphs(conn, subject, text, page_hints=None):
     return ranked
 
 
-def retrieve_evidence(conn, subject, text, page_hints=None):
-    """The few paragraphs most relevant to ONE question, within the hard caps."""
-    chosen, chars = [], 0
-    for _, uid, printed, _, _ in ranked_paragraphs(conn, subject, text, page_hints):
+# 名词解释 (term) route: a definition is often one short sentence. A paragraph needs only 20 characters; a shorter one is
+# kept only together with its neighbours in the same chapter, when the whole group is long enough to be evidence.
+TERM_MIN_CHARS = 20
+TERM_SHORTEST = 8
+
+
+def _neighbours(conn, unit_id):
+    """The paragraphs right before and after this one (same document and chapter, no quality flags), in reading order."""
+    row = conn.execute("SELECT document_id,ordinal,chapter FROM source_units WHERE id=%s", (unit_id,)).fetchone()
+    if not row:
+        return []
+    return conn.execute(
+        "SELECT id FROM source_units WHERE document_id=%s AND ordinal IN (%s,%s) AND chapter=%s "
+        "AND quality_flags='[]'::jsonb ORDER BY ordinal",
+        (row["document_id"], row["ordinal"] - 1, row["ordinal"] + 1, row["chapter"]),
+    ).fetchall()
+
+
+def retrieve_evidence(conn, subject, text, page_hints=None, term=False):
+    """The few paragraphs most relevant to ONE question, within the hard caps.
+    `term=True` (名词解释): 20 characters are enough, and a shorter paragraph is judged together with its neighbours."""
+    floor = TERM_MIN_CHARS if term else evidence_filter.MIN_CHARS
+    chosen, chars, taken = [], 0, set()
+
+    def take(unit, printed):
+        nonlocal chars
+        chosen.append({**unit, "printed_page": printed})
+        taken.add(unit["unit_id"])
+        chars += len(unit["text"])
+
+    for _, uid, printed, _, _ in ranked_paragraphs(conn, subject, text, page_hints, min_chars=TERM_SHORTEST if term else None):
+        if uid in taken:
+            continue
         try:
             unit = snapshot_unit(conn, uid)
         except ValueError:
             continue
         if len(chosen) >= MAX_EVIDENCE_UNITS or chars + len(unit["text"]) > MAX_EVIDENCE_CHARS:
             continue
-        if not evidence_filter.usable(unit["text"], unit.get("quality_flags") or ()):
-            continue  # too short, a caption, table, contents or heading: it cannot support an answer
-        chosen.append({**unit, "printed_page": printed})
-        chars += len(unit["text"])
+        if len(unit["text"]) >= floor or not term:
+            if not evidence_filter.usable(unit["text"], unit.get("quality_flags") or (), min_chars=floor):
+                continue  # a caption, table, contents, heading or too short: it cannot support an answer
+            take(unit, printed)
+            continue
+        # a very short paragraph (term route): keep it with its neighbours if together they make real evidence
+        group = []
+        for n in _neighbours(conn, uid):
+            try:
+                group.append(snapshot_unit(conn, n["id"]))
+            except ValueError:
+                continue
+        if not any(g["unit_id"] == uid for g in group):
+            group.append(unit)
+        group = [g for g in group if g["unit_id"] not in taken]
+        group.sort(key=lambda g: g["unit_id"])
+        merged = "\n".join(g["text"] for g in group)
+        if (
+            len(chosen) + len(group) > MAX_EVIDENCE_UNITS
+            or chars + len(merged) > MAX_EVIDENCE_CHARS
+            or not evidence_filter.usable(merged, min_chars=evidence_filter.MIN_CHARS)
+        ):
+            continue
+        for g in group:
+            take(g, printed if g["unit_id"] == uid else None)
     return chosen
 
 
@@ -506,9 +556,14 @@ def _enqueue_item(conn, uid, item):
     from app import legacy_reuse  # lazy: legacy_reuse imports this module
 
     text = item["stem"] + " " + " ".join(item["options"].values())
-    units = retrieve_evidence(conn, item["subject"], text, legacy_reuse.page_hints(conn, item["id"]))
+    is_term = item["question_type"] == "term"
+    units = retrieve_evidence(conn, item["subject"], text, legacy_reuse.page_hints(conn, item["id"]), term=is_term)
     if not units:
         _block(conn, item["id"], "no_textbook_evidence")
+        return "blocked"
+    if is_term and not term_in_units(term_of_stem(item["stem"]), units):
+        # the model is never asked to define a term the chosen paragraphs do not even contain
+        _block(conn, item["id"], "term_not_in_textbook")
         return "blocked"
     draft = legacy_reuse.reference_draft(conn, item["id"])
     while True:

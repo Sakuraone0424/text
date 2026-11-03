@@ -36,6 +36,8 @@ HANDLING = {
     "review_reformat_requested": "审核答案格式不对：已重新请求一次审核（不算题目不通过）",
     "review_format_failed": "审核两次格式都不对：判为审核失败（不是题目的问题，不修复也不作废）",
     "invented_quote": "审核里的引用按同样的 6 层规则匹配；仍对不上才算",
+    "term_not_in_textbook": "出题前检查：选给 AI 的段落里没有这个名词，不调用模型（教材中未找到该名词）",
+    "no_textbook_evidence": "出题前检查：教材里找不到相关段落，不调用模型",
     "unresolved_quality_findings": "审核发现问题：修复一次后重新审核",
     "second_correct_option": "审核发现第二个正确选项：修复一次后重新审核",
 }
@@ -309,7 +311,12 @@ def past_exam_route(conn, hours=24, sample_limit=150):
     for r in conn.execute("SELECT question_type AS t, status, coalesce(blocked_reason,'-') AS why, count(*) AS n FROM past_exam_items "
                           "GROUP BY 1,2,3").fetchall():
         status[r["t"]][f"{r['status']}:{r['why']}"] = r["n"]
-    return dict(model_calls_ended={k: dict(v.most_common()) for k, v in ended.items()}, insufficient_textbook_evidence=insufficient,
+    skipped = {f"{r['t']}:{r['why']}": r["n"] for r in conn.execute(
+        "SELECT question_type AS t, blocked_reason AS why, count(*) AS n FROM past_exam_items WHERE status='blocked' "
+        "AND blocked_reason IN ('term_not_in_textbook','no_textbook_evidence') AND updated_at>" + _since(hours) + " GROUP BY 1,2", (hours,)).fetchall()}
+    return dict(skipped_before_model=dict(hours=hours, by_type_and_reason=skipped,
+                                          term_not_in_textbook=sum(v for k, v in skipped.items() if k.endswith("term_not_in_textbook"))),
+                model_calls_ended={k: dict(v.most_common()) for k, v in ended.items()}, insufficient_textbook_evidence=insufficient,
                 review_by_type=review["by_type"], review_failure_kinds=review["categories"], items_by_state=dict(status),
                 term_cap_share=pei.PAST_TERM_MAX_SHARE)
 

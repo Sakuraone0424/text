@@ -72,3 +72,69 @@ def test_review_errors_are_split_before_and_after_the_first_contract_10_review(d
     assert any("evidence_version_changed" in k and "合约10" in k for k in errors["after_pr26"]) and not errors["before_pr26"]
     row = errors["rows"][0]
     assert row["code"] == "evidence_version_changed" and row["after_pr26"] and row["count"] == 1
+
+
+# ---- the 名词解释 route: short definitions, and no model call for a term the paragraphs do not contain ----------
+
+from test_gap_generation import PARAGRAPH  # noqa: E402
+
+
+def add_units(db, texts):
+    row = db.execute("SELECT u.document_id AS d, u.chapter, max(u.ordinal) OVER () AS top FROM source_units u JOIN source_documents doc ON doc.id=u.document_id "
+                     "WHERE doc.metadata->>'source_kind'='textbook' AND u.chapter NOT IN ('','unclassified','contents') LIMIT 1").fetchone()
+    ids = []
+    for i, text in enumerate(texts):
+        ids.append(db.execute("INSERT INTO source_units(document_id,ordinal,chapter,section,text) VALUES (%s,%s,%s,'s',%s) RETURNING id",
+                              (row["d"], 100000 + i, row["chapter"], text)).fetchone()["id"])
+    return ids
+
+
+def test_a_short_definition_is_evidence_on_the_term_route_only(db, corpus):
+    short = "孟德尔试剂甲是指在测试中使用的一类虚构试剂。"          # 22 characters
+    (uid,) = add_units(db, [short])
+    assert 20 <= len(short) < 80
+    assert uid in [u["unit_id"] for u in pei.retrieve_evidence(db, "biochemistry", "孟德尔试剂甲", term=True)]
+    assert uid not in [u["unit_id"] for u in pei.retrieve_evidence(db, "biochemistry", "孟德尔试剂甲")]   # other types keep the 80 floor
+
+
+def test_a_very_short_line_is_kept_with_its_neighbours_when_together_they_are_long_enough(db, corpus):
+    before = "上文：这一节讨论一类在实验中使用的虚构试剂的来源、制备方法和保存条件，供对照使用。"
+    line = "孟德尔试剂乙：虚构物。"                                  # 12 characters: too short alone
+    after = "下文：该试剂只用于说明测试方法，不参与任何真实的代谢反应或者调控过程的讨论。"
+    ids = add_units(db, [before, line, after])
+    assert len(line) < 20 and len(before + line + after) >= 80
+    got = [u["unit_id"] for u in pei.retrieve_evidence(db, "biochemistry", "孟德尔试剂乙", term=True)]
+    assert ids[1] in got and ids[0] in got and ids[2] in got                # the group, in reading order
+    assert got.index(ids[0]) < got.index(ids[1]) < got.index(ids[2])
+
+
+def test_a_very_short_line_with_no_substantial_neighbours_is_dropped(db, corpus):
+    ids = add_units(db, ["丙", "孟德尔试剂丙：虚构物。", "丁"])
+    got = [u["unit_id"] for u in pei.retrieve_evidence(db, "biochemistry", "孟德尔试剂丙", term=True)]
+    assert ids[1] not in got
+
+
+def _term_item(db, stem):
+    doc = db.execute("SELECT d.id AS d, min(u.id) AS u FROM source_documents d JOIN source_units u ON u.document_id=d.id "
+                     "WHERE d.metadata->>'source_kind'='exam_transcription' GROUP BY d.id LIMIT 1").fetchone()
+    db.execute("INSERT INTO past_exam_items(subject,question_type,stem,stem_hash,document_id,unit_id,question_number,year,years) "
+               "VALUES ('biochemistry','term',%s,%s,%s,%s,'1',2024,'[2024]')", (stem, pei.stem_hash("term", stem), doc["d"], doc["u"]))
+    return db.execute("SELECT * FROM past_exam_items WHERE stem=%s", (stem,)).fetchone()
+
+
+def test_no_model_call_for_a_term_that_is_not_in_the_chosen_paragraphs(db, corpus, setup_ai):
+    # "冈崎片段酶" shares words with the paragraph (so paragraphs are found) but the term itself is not in it
+    item = _term_item(db, "冈崎片段酶")
+    before = db.execute("SELECT count(*) AS n FROM ai_jobs").fetchone()["n"]
+    assert pei._enqueue_item(db, setup_ai, item) == "blocked"
+    row = db.execute("SELECT status,blocked_reason FROM past_exam_items WHERE id=%s", (item["id"],)).fetchone()
+    assert (row["status"], row["blocked_reason"]) == ("blocked", "term_not_in_textbook")
+    assert db.execute("SELECT count(*) AS n FROM ai_jobs").fetchone()["n"] == before          # nothing was queued, nothing paid
+    skipped = waste_report.past_exam_route(db, 24)["skipped_before_model"]
+    assert skipped["term_not_in_textbook"] == 1 and skipped["by_type_and_reason"] == {"term:term_not_in_textbook": 1}
+
+
+def test_a_term_that_is_in_the_paragraph_is_still_queued(db, corpus, setup_ai):
+    item = _term_item(db, "冈崎片段")
+    result = pei._enqueue_item(db, setup_ai, item)
+    assert result == "queued", db.execute("SELECT blocked_reason FROM past_exam_items WHERE id=%s", (item["id"],)).fetchone()

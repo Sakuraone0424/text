@@ -77,6 +77,7 @@ const REASON = {
   rubric_missing: "缺少评分要点",
   repair_unfixed: "修复的版本仍有同样的问题",
   // review and pipeline reasons (kept in sync by tests/test_progress_view.py: every code the backend can raise has a line here)
+  term_not_in_textbook: "教材中未找到该名词",
   insufficient_textbook_evidence: "教材里没有足够依据，模型判定无法作答",
   invented_quote: "审核引用的原文在教材段落里找不到",
   invented_or_unmatched_quote: "引用的原文与教材段落对不上",
