@@ -74,7 +74,7 @@ def test_no_repair_when_source_id_not_requested():
 def test_no_repair_if_ocr_risk_flags_present():
     raw = _draft()
     assert repair_source_identity_from_locked_units(
-        raw, [_unit(quality_flags=["formula_unverified"])]
+        raw, [_unit(quality_flags=["corrupt_ocr"])]
     ) is raw
 
 
