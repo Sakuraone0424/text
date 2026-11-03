@@ -28,6 +28,7 @@ FIX_LABELS = {
     "answer_letter_normalized": "答案统一成选项字母",
     "blank_marker_unified": "填空的空格写法统一成 ____",
     "fill_answer_added_to_accepted": "标准答案补进了可接受答案",
+    "fill_rubric_merged": "单空填空题的多条评分要点合并成一条（只保留答案项）",
     "rubric_tags_dropped": "评分要点里不在题目标签中的知识标签已删除",
     "difficulty_mapped": "难度改成了规定的三档之一",
     "max_points_set_to_spec": "满分改成了规格分值（评分要点合计正好等于它）",
@@ -140,6 +141,15 @@ def autofix(raw, spec_points=None, *, evidence_has_rubric_tags=True):
         if _norm(answer) not in {_norm(v) for v in accepted}:
             q["accepted_answers"] = accepted + [answer.strip()]
             note("fill_answer_added_to_accepted")
+
+    # 1b. a single-blank question is graded on the one answer: extra rubric items (a principle, a second answer) are merged
+    rubric = q.get("rubric")
+    if qtype == "fill_blank" and not q.get("blanks") and isinstance(rubric, list) and len(rubric) > 1 \
+            and all(isinstance(c, dict) and type(c.get("points")) is int for c in rubric):
+        keep = next((c for c in rubric if isinstance(answer, str) and answer.strip()
+                     and _norm(answer) in _norm(str(c.get("description", "")))), rubric[0])
+        q["rubric"] = [{**keep, "points": sum(c["points"] for c in rubric)}]
+        note("fill_rubric_merged")
 
     # 7. rubric tags that the question does not list are removed from the rubric item (never added to the question)
     tags, rubric = q.get("knowledge_tags"), q.get("rubric")

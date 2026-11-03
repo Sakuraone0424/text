@@ -8,6 +8,19 @@ or whose OCR carries a quality flag, cannot support an answer: a request built o
 import re
 
 MIN_CHARS = 80
+# OCR quality flags that make a paragraph unusable as evidence (an unreadable character, a figure or table the text
+# depends on, a reported gap). The mild ones only say the paragraph holds Greek letters, ATP/Km or a structure formula:
+# the paragraph stays usable.
+SEVERE_FLAGS = frozenset({
+    "corrupt_ocr", "untranscribed_image", "image_dependent", "docx_table_requires_review",
+    "complex_table", "ocr_uncertain", "transcription_gap_reported",
+})
+MILD_FLAGS = frozenset({"chemical_structure", "scientific_notation_requires_source_review"})
+SEVERE_SQL = "NOT (u.quality_flags ?| ARRAY[" + ",".join(f"'{f}'" for f in sorted(SEVERE_FLAGS)) + "])"
+
+
+def severe(flags):
+    return bool(set(flags or ()) & SEVERE_FLAGS)
 _CAPTION = re.compile(r"^\s*(?:图|表|附图|附表|Figure|Fig\.|Table)\s*[\dA-Za-z一二三四五六七八九十]+[\-．.\d]*", re.I)
 _HEADING = re.compile(r"^\s*(?:第\s*[\d一二三四五六七八九十百]+\s*[章节篇部]|[\d]+(?:\.\d+){0,3}\s+\S{1,30}$|[一二三四五六七八九十]+[、．.]\s*\S{1,30}$)")
 _TOC_LINE = re.compile(r"(?:\.{3,}|…{2,}|·{3,}|\s{3,})\s*\d{1,4}\s*$")
@@ -20,7 +33,7 @@ def _lines(text):
 def reason_unusable(text, quality_flags=(), min_chars=MIN_CHARS):
     """None if the paragraph is usable, else a short code saying why not."""
     body = (text or "").strip()
-    if quality_flags:
+    if severe(quality_flags):
         return "ocr_quality_flag"
     if len(body) < min_chars:
         return "too_short"

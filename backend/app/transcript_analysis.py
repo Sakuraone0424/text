@@ -64,7 +64,7 @@ def section_heading(text):
     if len(text) > 180:
         return None
     value = re.sub(
-        r"^\s*(?:[一二三四五六七八九十百IVX\d]+[、丶.．:：])\s*", "", text
+        r"^\s*(?:[一二三四五六七八九十百IVX\d]+(?:[、丶.．:：]|\s+))\s*", "", text
     ).strip()
     for label in sorted(TYPES, key=len, reverse=True):
         if value.startswith(label) and (
@@ -77,6 +77,15 @@ def section_heading(text):
                 "declared_questions": int(count[1]) if count else None,
             }
     return None
+
+
+_TITLE = re.compile(r"^\s*[一二三四五六七八九十]+(?:\s*[、丶.．:：]\s*|\s+)\S")
+_TITLE_SCORE = re.compile(r"每题\s*\d+(?:\.\d+)?\s*分|共\s*\d+(?:\.\d+)?\s*分|每\s*小?题\s*[Xx×]\s*分|本大题")
+
+
+def is_section_title(text):
+    """A section title such as 「二 填空题：（每题2分）」: never part of the question above it."""
+    return len(text) <= 60 and bool(_TITLE.match(text)) and bool(_TITLE_SCORE.search(text))
 
 
 def _raw_candidates(units, item):

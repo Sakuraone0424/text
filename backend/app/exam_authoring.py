@@ -32,7 +32,9 @@ TYPE_GUIDANCE = {
         "For multiple blanks independently allocate points, include accepted synonyms "
         "and exact scientific nomenclature (case, units, acronyms) where genuinely "
         "equivalent; never let the stem disclose the answer. No artificial multi-blank "
-        "padding. Canonical answer must be included in accepted_answers."
+        "padding. Canonical answer must be included in accepted_answers. A single-blank question has EXACTLY ONE "
+        "rubric item: the answer to that blank, worth the question's whole point value; the rubric must never ask the "
+        "student to explain a principle, give a reason or answer a second question."
     ),
     "term": (
         "Ask for a genuine named biochemical/cell-biological concept. Give a precise "
@@ -71,6 +73,10 @@ _COMMON = (
     "circular definitions, answer leakage, or identical distractors. "
     "Return one complete Question JSON object with exact evidence identities, "
     "knowledge_tags and a criterion-by-criterion rubric. "
+    "Write every scoring criterion ONLY from what the supplied paragraphs say: no knowledge from outside them. "
+    "A criterion may summarise or reword a paragraph (it need not be word for word) but must be supported in meaning "
+    "by it. If a paragraph is cut off (for example it ends in the middle of a list such as '④ 受体鸟'), do not write "
+    "the cut-off part into any scoring criterion. "
     "When evidence is insufficient, decline generation rather than invent an answer. "
     "Independent science and answer reviews will still be required."
 )
