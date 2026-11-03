@@ -44,6 +44,14 @@ EXAMS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def old_planning_order(monkeypatch):
+    """These tests are about the past-exam pipeline itself. The stop-loss (term last, at most 20% of tasks in flight) is
+    covered in test_quality_pr1.py; here the original order applies: term, short answer and essay first, then the rest."""
+    monkeypatch.setattr(pei, "PAST_TERM_MAX_SHARE", 1.0)
+    monkeypatch.setattr(pei, "_PRIORITY_SQL", "CASE question_type WHEN 'term' THEN 0 WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 WHEN 'fill_blank' THEN 2 ELSE 3 END")
+
+
 @pytest.fixture
 def corpus(db, tmp_path, monkeypatch):
     path, meta = material(tmp_path, "biochemistry_lower", content=TEXTBOOK)
