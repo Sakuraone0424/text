@@ -236,7 +236,10 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
         }
       ));
     }""")
-    # (the worker may already be activating and deleting the old cache, so its presence is not asserted here)
+    # The worker may already have activated before the old cache existed (then it would never clean it up). Drop it and
+    # reload, so a fresh install + activation runs with the stale v7 cache present: the same thing a real upgrade does.
+    page.evaluate("async () => { for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); }")
+    page.reload()
     paper = login_start(page, qa)
     q = next(x for x in paper['questions'] if x['question_type'] == 'term')
     open_question(page, q['id'])
