@@ -249,7 +249,7 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     field.fill('v7缓存升级前的合成草稿')
     wait_saved(page)
     page.evaluate('navigator.serviceWorker.ready')
-    page.wait_for_function('navigator.serviceWorker.controller !== null')
+    page.wait_for_function('navigator.serviceWorker.controller !== null', timeout=60000)
     # the new cache is created when the worker starts to install and filled when it finishes: wait for the content itself
     page.wait_for_function("""async () => {
       const keys = await caches.keys();

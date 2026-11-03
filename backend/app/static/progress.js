@@ -719,5 +719,5 @@ $("pv-retry").onclick = () => {
 window.Live.register("progress", { visible, load: () => load(false) });
 window.Live.pullToRefresh($("progress-view"), () => load(false));
 setInterval(() => paintStamp(false), 1000);
-window.ProgressView = { show: () => load(), reload: () => load(true) };
+window.ProgressView = { show: () => { window.Live.touch("progress"); return load(); }, reload: () => { window.Live.touch("progress"); return load(true); } };
 })();

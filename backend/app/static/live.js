@@ -136,5 +136,8 @@
     return hint;
   }
 
-  window.Live = { register, pullToRefresh, stamp, POLL_MS, state: () => ({ connected, streaming: !!source, views: views.size }) };
+  // a view that has just loaded itself by hand counts as refreshed (no second read a tick later)
+  const touch = (name) => { const v = views.get(name); if (v) v.last = Date.now(); };
+
+  window.Live = { register, touch, pullToRefresh, stamp, POLL_MS, state: () => ({ connected, streaming: !!source, views: views.size }) };
 })();
