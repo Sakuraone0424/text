@@ -1,4 +1,7 @@
 name: Backend acceptance
+# A pull request run writes the commit it tested and the base it was tested against into its own name, so a later run can
+# check (see "reuse") that a merge added nothing the run had not seen.
+run-name: ${{ github.event_name == 'pull_request' && format('tests pr#{0} head={1} base={2}', github.event.pull_request.number, github.event.pull_request.head.sha, github.event.pull_request.base.sha) || github.event.head_commit.message || github.workflow }}
 on:
   pull_request:
   push:
@@ -15,21 +18,23 @@ env:
   SHARDS: 6
 
 jobs:
-  # Code that was already tested as a pull request is not tested again after it is merged. Railway ("Wait for CI") waits
-  # for the checks of the merged commit; without this the same 10 minutes would run twice. A pushed commit counts as
-  # "already tested" only when it provably holds the same code as a pull request run that passed:
-  #   - a fast-forwarded branch: the pushed commit IS the pull request head (same SHA), or
-  #   - a merge commit made by GitHub: its second parent is the pull request head AND its first parent is the base the
-  #     passing run was tested against (so merging added nothing the run had not seen).
-  # Anything else (squash, a base that moved, a hand-made commit) runs the full tests.
+  # Code that was already tested as a pull request is not tested again. Railway ("Wait for CI") waits for every check of a
+  # commit; without this the same minutes would run again after each merge, and once more for the long-lived pull request
+  # from feat/** into main, which re-runs on every push to feat/**. The commit under test is the pushed commit (push) or
+  # the pull request head (pull_request). It counts as "already tested" only when it provably holds the same code as a
+  # pull request run that passed:
+  #   - push of a fast-forwarded branch: the pushed commit IS the head of a passed pull request run (same SHA); or
+  #   - a merge commit (made by GitHub's merge button): its second parent is the head of a passed pull request run AND its
+  #     first parent is the base that run was tested against, so merging added nothing the run had not seen.
+  # Anything else (squash, a base that moved, a hand-made commit, an ordinary pull request head) runs the full tests.
   reuse:
     runs-on: ubuntu-latest
     outputs:
       skip: ${{ steps.look.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
-        if: github.event_name == 'push'
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
       - id: look
         env:
@@ -38,21 +43,20 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           skip=false
-          if [ "$EVENT" = "push" ]; then
-            read -r -a commits <<< "$(git rev-list --parents -n 1 HEAD)"
-            base=""; head=""
-            if [ "${#commits[@]}" -eq 2 ]; then head="${commits[0]}"                    # fast-forward / rebase
-            elif [ "${#commits[@]}" -eq 3 ]; then base="${commits[1]}"; head="${commits[2]}"   # merge commit
-            fi
-            if [ -n "$head" ]; then
-              passed=$(gh api "repos/$REPO/actions/workflows/tests.yml/runs?head_sha=$head&event=pull_request&status=completed&per_page=30" 2>/dev/null \
-                | jq --arg base "$base" '[.workflow_runs[] | select(.conclusion=="success")
-                       | select($base == "" or ((.pull_requests // []) | map(.base.sha) | index($base)))] | length' 2>/dev/null \
-                || echo 0)
-              [ "${passed:-0}" -gt 0 ] 2>/dev/null && skip=true
-            fi
+          read -r -a commits <<< "$(git rev-list --parents -n 1 HEAD)"
+          head=""; base=""
+          if [ "${#commits[@]}" -eq 3 ]; then base="${commits[1]}"; head="${commits[2]}"      # a merge commit
+          elif [ "${#commits[@]}" -eq 2 ] && [ "$EVENT" = "push" ]; then head="${commits[0]}"  # fast-forward
+          fi
+          if [ -n "$head" ]; then
+            passed=$(gh api "repos/$REPO/actions/workflows/tests.yml/runs?head_sha=$head&event=pull_request&status=completed&per_page=50" 2>/dev/null \
+              | jq --arg head "$head" --arg base "$base" '[.workflow_runs[] | select(.conclusion=="success")
+                     | select($base == "" or (.display_title | contains("head=" + $head + " base=" + $base)))] | length' 2>/dev/null \
+              || echo 0)
+            [ "${passed:-0}" -gt 0 ] 2>/dev/null && skip=true
           fi
           echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "event=$EVENT commit=$(git rev-parse HEAD) parents=${#commits[@]} head=$head base=$base"
           echo "an identical code state already passed as a pull request: $skip"
 
   tests:
