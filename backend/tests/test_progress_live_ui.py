@@ -90,8 +90,8 @@ def test_pulling_down_at_the_top_refreshes(engine, live_app):
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base, path="/training")
     no_stream(page)
-    if not page.evaluate("typeof Touch !== 'undefined'"):
-        pytest.skip("synthetic touch events are not available in this engine")
+    if not page.evaluate("""() => { try { new Touch({identifier: 1, target: document.body, clientX: 0, clientY: 0}); return true; } catch { return false; } }"""):
+        pytest.skip("synthetic touch events cannot be built in this engine (WebKit on the desktop)")
     seen = watch(page, "/v2/model/progress")
     page.evaluate("location.hash = '#/progress'")
     page.wait_for_selector("#pv-content:not([hidden])", timeout=15000)

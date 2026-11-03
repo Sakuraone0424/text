@@ -46,7 +46,11 @@
     }
     source.addEventListener("hello", () => {
       connected = true;
-      refreshVisible(true); // whatever happened while the stream was down
+      // whatever happened while the stream was down (the stream reconnects every few seconds by design: a view that was
+      // refreshed a moment ago does not need it again)
+      for (const view of views.values()) {
+        if (!document.hidden && view.visible() && Date.now() - (view.last || 0) >= 4000) run(view);
+      }
     });
     source.addEventListener("update", onUpdate);
     source.onerror = () => {

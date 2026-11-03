@@ -71,6 +71,8 @@ def live_app(tmp_path):
                     "127.0.0.1",
                     "--port",
                     str(port),
+                    "--timeout-graceful-shutdown",   # a page that still holds the progress event stream open must not hold the shutdown
+                    "3",
                 ],
                 cwd=Path(__file__).resolve().parents[1],
                 env=env,
@@ -107,7 +109,7 @@ def live_app(tmp_path):
                     process.terminate()
                     process.wait(timeout=15)
                     process = subprocess.Popen(
-                        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
+                        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port), "--timeout-graceful-shutdown", "3"],
                         cwd=Path(__file__).resolve().parents[1],
                         env=env, stdout=log, stderr=log,
                     )

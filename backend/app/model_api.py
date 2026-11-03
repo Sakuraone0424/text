@@ -421,7 +421,7 @@ def benchmark_approval(data: BenchmarkApproval, request: Request, name=Depends(r
     return operation(name, lambda c, u: approve_benchmark(c, data.model_id, data.approved, data.note))
 
 
-STREAM_SECONDS = 20
+STREAM_SECONDS = 8      # short on purpose: the browser reconnects at once, and a restart is never held up for long
 _PROGRESS = StaleCache(ttl=30)
 _BANK_CARD = StaleCache(ttl=30)
 
