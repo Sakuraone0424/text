@@ -482,10 +482,8 @@ def test_learning_views_are_owned_and_archive_configuration_is_truthful(
         ).status_code
         == 200
     )
-    assert (
-        client.get("/v2/archive/status", headers=LEARNER).json()["jobs"][0]["state"]
-        == "pending"
-    )
+    status = client.get("/v2/archive/status", headers=LEARNER).json()
+    assert status["consented"] is True and status["configured"] is False and status["recent"] == []
     monkeypatch.setenv("QUIZ_USERNAME", "stranger")
     assert client.get(f"/v2/memory/{qid}/solution", headers=LEARNER).status_code == 404
     assert client.get("/v2/stats/weekly", headers=LEARNER).json()["chapters"] == []

@@ -460,7 +460,7 @@ function waste(report) {
 const FIXES = {
   json_extracted: "提取 JSON", numbers_to_int: "数值转整数", removed_accepted_answers: "删多余可接受答案", removed_options: "删多余选项",
   empty_accepted_answers_removed: "删空答案", choice_keys_normalized: "选项键统一", choice_prefix_removed: "去选项前缀", answer_letter_normalized: "答案字母统一",
-  blank_marker_unified: "空格写法统一", fill_answer_added_to_accepted: "标准答案补入", rubric_tags_dropped: "删多余标签", difficulty_mapped: "难度映射", max_points_set_to_spec: "满分改规格值",
+  blank_marker_unified: "空格写法统一", fill_rubric_merged: "单空填空评分要点合并", fill_answer_added_to_accepted: "标准答案补入", rubric_tags_dropped: "删多余标签", difficulty_mapped: "难度映射", max_points_set_to_spec: "满分改规格值",
 };
 
 function spend(report) {
@@ -492,7 +492,7 @@ function spend(report) {
     parts.forEach(([cls, , value]) => {
       if (value > 0) el("i", undefined, bar, cls).style.width = (value / sum) * 100 + "%";
     });
-    const legend = el("ul", undefined, split, "legend");
+    const legend = el("ul", undefined, split, "spend-legend");
     parts.forEach(([cls, name, value]) => {
       const li = el("li", undefined, legend);
       el("i", undefined, li, "swatch").style.background = `var(--${cls === "actual" ? "primary" : cls === "reserved" ? "accent" : "muted"})`;

@@ -667,7 +667,7 @@ def grade(
     )
     if points < q["max_points"]:
         schedule_review(conn, row["attempt_id"], question_id)
-    from app.archiving import enqueue
+    from app.notion_sync import enqueue
 
     enqueue(conn, paper["user_id"], paper_id)
     return result(conn, paper["user_id"], paper_id)

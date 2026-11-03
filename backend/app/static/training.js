@@ -1492,52 +1492,126 @@ $("weekly").onclick = async () => {
 };
 $("archive").onclick = async () => {
   try {
-    const result = await api("/v2/archive/status");
-    $("learning").replaceChildren();
-    element("h2", "Notion归档状态", $("learning"));
-    element(
-      "p",
-      result.configured
-        ? "私有归档已配置"
-        : "Notion尚未配置，未向外部发送答题数据",
-      $("learning"),
-    );
-    const label = element("label", undefined, $("learning"));
-    label.className = "check-row";
-    const box = element("input", undefined, label);
-    box.type = "checkbox";
-    element("span", "允许向已配置的私有 Notion 归档", label);
-    box.checked = result.consented;
-    box.onchange = async () => {
-      try {
-        await api("/v2/archive/consent", {
-          method: "PUT",
-          body: JSON.stringify({ enabled: box.checked }),
-        });
-        status(
-          box.checked
-            ? "已记录归档许可，配置启用后自动同步。"
-            : "已停止后续归档任务。",
-        );
-      } catch (e) {
-        status(e.message);
-      }
-    };
-    const states = {
-      pending: "等待同步",
-      synced: "写入成功，等待读回验证",
-      verified: "读回验证成功",
-      failed: "同步失败，将重试",
-    };
-    for (const job of result.jobs)
-      element(
-        "p",
-        `${states[job.state]} · 重试 ${job.attempts} 次`,
-        $("learning"),
-      );
+    renderArchive(await api("/v2/archive/status"));
   } catch (e) {
     status(e.message);
   }
+};
+
+const ARCHIVE_STEPS = [
+  "在 iPhone 的 Safari 里打开 notion.so/my-integrations，登录后点「新集成」（New integration）。",
+  "类型选「内部集成」（Internal），名称随意（如「研习空间」），选你的工作区，点「提交」。",
+  "在集成页面里点「显示」并复制「内部集成密钥」（以 secret_ 或 ntn_ 开头）。别发给任何人。",
+  "在 Notion App 里新建一个空白页面（如「学习档案」）。点右上角「…」→「连接」（Connections）→ 选刚创建的集成并确认。",
+  "还是这个页面：点「分享」→「复制链接」。链接最后面那串 32 位字母数字（问号之前）就是页面 ID；整条链接也可以直接用。",
+  "在 Railway（网页版，Safari 可用）打开本项目的服务 → Variables，新增 NOTION_TOKEN（密钥）和 NOTION_PARENT_PAGE_ID（页面 ID），可选 PUBLIC_BASE_URL（本网站地址，用于成绩页链接）。保存后等它重新部署。",
+  "回到这里：先点「测试连接」，两项都通过后打开上面的开关，再点「立即同步」。第一次同步会在那个页面下自动创建「训练记录」和「错题本」两个数据库。",
+];
+
+function renderArchive(info) {
+  const root = $("learning");
+  root.replaceChildren();
+  element("h2", "Notion归档状态", root);
+  const card = element("section", undefined, root);
+  card.className = "card archive-card";
+  const tiles = element("div", undefined, card);
+  tiles.className = "tiles";
+  const tile = (label, value, warn) => {
+    const box = element("div", undefined, tiles);
+    box.className = "tile";
+    element("span", label, box).className = "label";
+    const b = element("b", value, box);
+    if (warn) b.className = "warn";
+  };
+  const when = (iso) =>
+    iso ? new Date(iso).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }) : "还没有";
+  tile("服务器配置", info.configured ? "已配置" : "未配置", !info.configured);
+  tile("同步开关", info.consented ? "已打开" : "已关闭");
+  tile("上次同步", when(info.last_synced_at));
+  tile("成功", String(info.success));
+  tile("失败", String(info.failed), info.failed > 0);
+  tile("待同步", String(info.pending));
+  const label = element("label", undefined, card);
+  label.className = "check-row";
+  const box = element("input", undefined, label);
+  box.type = "checkbox";
+  box.setAttribute("role", "switch");
+  element("span", info.consented ? "同步已打开：交卷并判完分后自动同步" : "同步已关闭：不会向 Notion 发送任何数据", label);
+  box.checked = info.consented;
+  box.onchange = async () => {
+    box.disabled = true;
+    try {
+      await api("/v2/archive/consent", { method: "PUT", body: JSON.stringify({ enabled: box.checked }) });
+      renderArchive(await api("/v2/archive/status"));
+    } catch (e) {
+      box.checked = !box.checked;
+      box.disabled = false;
+      status(e.message);
+    }
+  };
+  if (!info.configured) {
+    const note = element("p", "服务器还没有设置 NOTION_TOKEN 和 NOTION_PARENT_PAGE_ID。按下面的「设置步骤」完成后，这里会显示「已配置」。", card);
+    note.className = "note warn";
+  }
+  const actions = element("div", undefined, card);
+  actions.className = "button-row";
+  const result = element("p", "", card);
+  result.className = "note";
+  result.setAttribute("role", "status");
+  const test = element("button", "测试连接", actions);
+  test.className = "secondary";
+  test.type = "button";
+  test.onclick = async () => {
+    test.disabled = true;
+    result.textContent = "正在检查密钥和页面权限…（只读，不写任何数据）";
+    try {
+      const r = await api("/v2/archive/test", { method: "POST", body: "{}" });
+      result.textContent = r.ok ? "连接正常：密钥有效，页面已分享给集成。" : "连接失败：" + r.message;
+    } catch (e) {
+      result.textContent = "检查失败：" + e.message;
+    }
+    test.disabled = false;
+  };
+  const sync = element("button", "立即同步", actions);
+  sync.className = "primary";
+  sync.type = "button";
+  sync.disabled = !info.consented || !info.configured;
+  sync.onclick = async () => {
+    sync.disabled = true;
+    result.textContent = "正在同步，最多几十秒…";
+    try {
+      const r = await api("/v2/archive/sync", { method: "POST", body: "{}" });
+      renderArchive(r);
+      $("learning").querySelector("[role=status]").textContent = r.failed ? `这次有 ${r.failed} 项失败，原因见下面的记录。` : r.done ? `已同步 ${r.done} 套试卷。` : "没有需要同步的新内容。";
+    } catch (e) {
+      result.textContent = ARCHIVE_ERRORS[e.message] || "同步没有开始：" + e.message;
+      sync.disabled = false;
+    }
+  };
+  const history = element("section", undefined, root);
+  history.className = "card";
+  element("h3", "最近 10 条同步记录", history);
+  if (!info.recent.length) element("p", "还没有同步记录", history).className = "note";
+  const list = element("ul", undefined, history);
+  list.className = "sync-list";
+  for (const e of info.recent) {
+    const li = element("li", undefined, list);
+    element("span", undefined, li).className = "dot " + (e.ok ? "succeeded" : "blocked");
+    element("span", e.ok ? `同步成功${e.detail && e.detail.mistakes !== undefined ? `（1 套试卷、${e.detail.mistakes} 道错题）` : ""}` : "同步失败：" + e.message, li).className = "kind";
+    element("span", when(e.at), li).className = "meta";
+  }
+  const help = element("details", undefined, root);
+  help.className = "card fold";
+  element("summary", "设置步骤（在 iPhone 的 Safari 上完成）", help);
+  const steps = element("ol", undefined, help);
+  steps.className = "steps";
+  for (const text of ARCHIVE_STEPS) element("li", text, steps);
+  element("p", "隐私：密钥只放在服务器环境变量里，不会显示在这里，也不会写进日志。同步的是你自己的成绩和错题；不发送整段教材原文，只写「依据：教材第 X 章 · 第 Y 页」。", help).className = "note";
+}
+
+const ARCHIVE_ERRORS = {
+  sync_switched_off: "同步开关是关闭的，请先打开开关。",
+  not_configured: "服务器还没有配置 Notion 密钥和页面 ID。",
 };
 
 function renderAnalysis(analysis, parent) {
@@ -1712,3 +1786,8 @@ function addSeconds(id, gained) {
   change(id, { seconds: Math.min(7200, (localDrafts[id]?.seconds || 0) + gained) });
 }
 window.TrainingUI?.actions({ flush, addSeconds });
+
+// Every script of the shell has now hooked up its pages (training.js is the last one loaded): the page the URL names
+// (#/profile/archive, #/stats/weekly, #/progress ...) can draw itself. Sent earlier, the sub-pages of this file had no
+// click handler yet and a deep link or a restored home-screen app showed an empty page.
+window.dispatchEvent(new Event("shell-ready"));

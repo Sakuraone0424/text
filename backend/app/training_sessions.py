@@ -321,7 +321,7 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
         "UPDATE training_sessions SET submitted_at=%s,version=version+1 WHERE paper_id=%s",
         (submitted_at, paper_id),
     )
-    from app.archiving import enqueue
+    from app.notion_sync import enqueue
 
     enqueue(conn, user_id, paper_id)
     if timed_out:
