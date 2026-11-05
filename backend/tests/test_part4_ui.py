@@ -68,7 +68,7 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     assert int(page.locator("#streak-days").inner_text()) >= 10
     expect(page.locator("#stat-avg")).not_to_have_text("—")
     expect(page.locator("#stat-objective")).to_contain_text("%")
-    expect(page.locator("#weak-chapters .progress-line")).to_have_count(3)
+    expect(page.locator("#weak-chapters .progress-line")).to_have_count(5)
     expect(page.locator("#weak-practice")).to_be_visible()
     expect(page.locator("#spec-summary")).to_contain_text("300 分")
     expect(page.locator("nav.primary-nav button")).to_have_text(["首页", "练习", "错题", "我的"])
