@@ -49,13 +49,13 @@ def eligible_verified_reserve(conn, rows, cached=False):
     A ready status cannot make an unpinned question count toward the two-day
     120-question reserve. Keep this identical to the new-paper source gate.
     """
-    from app.auto_quality import ready, ready_cached
+    from app.auto_quality import ready, ready_many
 
-    check = ready_cached if cached else ready
-    return sum(
-        bool(pinned_science_evidence(row["content"]) and check(conn, row["id"]))
-        for row in rows
-    )
+    if cached:
+        pinned = [row for row in rows if pinned_science_evidence(row["content"])]
+        verdict = ready_many(conn, [row["id"] for row in pinned])
+        return sum(1 for row in pinned if verdict.get(row["id"]))
+    return sum(bool(pinned_science_evidence(row["content"]) and ready(conn, row["id"])) for row in rows)
 
 
 def complete_choice_style_unit_ids(rows):
@@ -386,7 +386,7 @@ def plan(conn, uid):
     if existing >= 2:
         return
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
-        count = eligible_reserve_count(conn, uid, subject, kind)
+        count = eligible_reserve_count(conn, uid, subject, kind, cached=True)
         if count >= cost_control.reserve_target(required, STARTUP_RESERVE_DAYS):
             continue
         # Reuse only second-round knowledge, never the 17,128 pending proposals as approved facts.
@@ -475,7 +475,7 @@ def bucket_detail(conn, uid):
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
         key = (subject, kind)
         target = cost_control.reserve_target(required, STARTUP_RESERVE_DAYS)
-        avail = eligible_reserve_count(conn, uid, subject, kind)
+        avail = eligible_reserve_count(conn, uid, subject, kind, cached=True)
         on_way = dict(pipeline=pipeline.get(key, 0), inflight=inflight.get(key, 0), past=min(past.get(key, 0), target // 2))
         out.append(dict(subject=subject, kind=kind, target=target, avail=avail, **on_way,
                         gap=target - avail - sum(on_way.values())))

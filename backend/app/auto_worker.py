@@ -139,12 +139,22 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
         )
 
 
-def plan(conn, uid, target=None):
+def plan(conn, uid, target=None, report=None):
+    lap = time.monotonic()
+
+    def mark(name):
+        nonlocal lap
+        if report is not None:
+            lap = _lap(report, name, lap, "plan_steps")
+        else:
+            lap = time.monotonic()
+
     auto_quality.requeue_past_exam_duplicates(conn)   # before anything can retire them
     auto_quality.retire_stale(conn)
     auto_quality.retire_old_scoring(conn)
     auto_quality.retire_unusable_sources(conn)   # literature-list sources, missing figures, answers written in the stem
     auto_quality.discard_unfixable(conn)
+    mark("retire")
     for row in conn.execute(
         "SELECT p.question_id FROM candidate_review_packets p LEFT JOIN auto_question_states s ON s.question_id=p.question_id WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) AND (s.question_id IS NULL OR s.status='candidate') ORDER BY p.question_id LIMIT 10"
     ).fetchall():
@@ -179,14 +189,18 @@ def plan(conn, uid, target=None):
         auto_grading.schedule(conn, uid, row["id"])
     # Past-exam questions need no corpus-wide sweep: each request carries only
     # the few textbook paragraphs relevant to that one question.
+    mark("checks")
     legacy_reuse.plan(conn, uid)
+    mark("legacy")
     # New questions are planned FIRST: past-exam term requests may take at most 20% of the tasks in flight, and that
     # share is counted against what was just queued
     if target:
         auto_generation.fill_queue(conn, uid, target)
     else:
         auto_generation.plan_gap(conn, uid)
+    mark("fill")
     past_exam_import.plan(conn, uid, batch=max(past_exam_import.MAX_CONCURRENT_JOBS, target or 0))
+    mark("past")
 
 
 # Sizing: about 160 calls a day (60 questions at ~75% review pass rate = ~80 written
@@ -434,6 +448,7 @@ def _fmt(value):
 
 def _plan_queue(conn, report, users, private, first):
     """Fill the queue (so every call of a batch has a job) and put back what should be tried again."""
+    t = time.monotonic()
     for user in users:
         if first:
             upgrade = model_compatibility.auto_upgrade(conn, user["user_id"])
@@ -441,6 +456,7 @@ def _plan_queue(conn, report, users, private, first):
                 ":" + ",".join(f"{c['model']}={c['reason']}" for c in upgrade.get("candidates", []))
                 if upgrade.get("candidates") else ":" + upgrade["model"] if upgrade.get("model") else ""
             )
+            t = _lap(report, "upgrade", t, "plan_detail")
         if (
             not user["stopped"]
             and private
@@ -450,7 +466,8 @@ def _plan_queue(conn, report, users, private, first):
                 with conn.transaction():
                     first_new = conn.execute("SELECT COALESCE(max(id),0) AS m FROM ai_jobs").fetchone()["m"]
                     # queue enough work that every call this batch can make has a job to claim
-                    plan(conn, user["user_id"], target=2 * calls_per_run())
+                    plan(conn, user["user_id"], target=2 * calls_per_run(), report=report)
+                    t = _lap(report, "plan", t, "plan_detail")
                     report["planned"] = report.get("planned", 0) + conn.execute(
                         "SELECT count(*) AS n FROM ai_jobs WHERE id>%s", (first_new,)).fetchone()["n"]
                     if os.environ.get("AI_FULL_CORPUS_ENABLED") == "1":
@@ -462,12 +479,15 @@ def _plan_queue(conn, report, users, private, first):
                 pass  # Not admitted is not a success; job/probe status remains visible.
             # Say in the log WHY nothing was planned (no gap at all, or a gap that no request could be written for).
             try:
+                t = time.monotonic()
                 diagnosis = auto_generation.gap_diagnosis(conn, user["user_id"])
+                t = _lap(report, "gap", t, "plan_detail")
                 report["gap"], report["short_buckets"] = diagnosis["gap"], diagnosis["buckets"]
                 report["avail"], report["gap_detail"] = diagnosis["avail"], diagnosis["gap_detail"]
                 report["on_way"] = diagnosis["on_way"]
                 if diagnosis["gap"]:
-                    report["stuck"] = auto_generation.short_bucket_report(conn, user["user_id"])   # per short bucket: first blocked step + funnel       # queued/running write+review+repair jobs per bucket
+                    report["stuck"] = auto_generation.short_bucket_report(conn, user["user_id"])   # per short bucket: first blocked step + funnel
+                    t = _lap(report, "stuck", t, "plan_detail")       # queued/running write+review+repair jobs per bucket
                 if cost_control.is_peak() and diagnosis["gap"]:
                     # computed in peak hours too; only the calls themselves wait
                     report["plan_note"] = f"高峰暂停，低峰时将规划{diagnosis['gap']}个"
@@ -542,9 +562,18 @@ def run(report):
         _locked_run(report, run_began)
 
 
+def _lap(report, name, began, key="pre_detail"):
+    """Seconds since `began` into report[key] ('tick0.3,queue2.1,...'): where the time before the first call goes."""
+    now = time.monotonic()
+    report[key] = (report.get(key, "") + "," if report.get(key) else "") + f"{name}{now - began:.1f}"
+    return now
+
+
 def _locked_run(report, run_began):
+    lap = time.monotonic()
     tick()
     integrations_tick()  # Prepare at the scheduled tick before any long model task.
+    lap = _lap(report, "tick", lap)
     private = os.environ.get("DEEPSEEK_PRIVATE_DATA_AUTHORIZED") == "1"
     with get_db() as conn:
         report["since"] = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
@@ -581,7 +610,9 @@ def _locked_run(report, run_began):
             and model_router.catalog(conn)["stale"]
         ):
             model_router.refresh(conn)
+        lap = _lap(report, "prices", lap)
         _plan_queue(conn, report, users, private, True)
+        lap = _lap(report, "queue", lap)
         states, held, head = queue_snapshot(conn)
         report["queue"] = ",".join(f"{k}={v}" for k, v in sorted(states.items())) or "empty"
         report["peak_held"] = ",".join(held) or "-"

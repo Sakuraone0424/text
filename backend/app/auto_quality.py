@@ -723,6 +723,42 @@ def ready_cached(conn, qid, max_age=60):
     return value
 
 
+READY_CACHE_OK_HOURS = 6          # a question found ready is trusted this long for counting (its content hash must still match)
+READY_CACHE_NOT_MINUTES = 10      # one found not ready is looked at again sooner (a review may have just passed)
+
+
+def ready_many(conn, ids):
+    """{question id: ready?} for many questions at once, for counting. Two queries answer everything that is not ready or
+    was checked recently (remembered in question_ready_cache, shared by every worker run and web request); only the rest are
+    verified one by one with ready()."""
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        return {}
+    states = {r["question_id"]: r for r in conn.execute(
+        "SELECT question_id,status,content_sha256 FROM auto_question_states WHERE question_id=ANY(%s)", (ids,)).fetchall()}
+    remembered = {r["question_id"]: r for r in conn.execute(
+        "SELECT question_id,content_sha256,ok FROM question_ready_cache WHERE question_id=ANY(%s) AND checked_at>"
+        "clock_timestamp()-CASE WHEN ok THEN make_interval(hours=>%s) ELSE make_interval(mins=>%s) END",
+        (ids, READY_CACHE_OK_HOURS, READY_CACHE_NOT_MINUTES)).fetchall()}
+    out = {}
+    for qid in ids:
+        st = states.get(qid)
+        if not st or st["status"] != "ready":
+            out[qid] = False
+            continue
+        hit = remembered.get(qid)
+        if hit and hit["content_sha256"] == st["content_sha256"]:
+            out[qid] = hit["ok"]
+            continue
+        value = ready(conn, qid)
+        conn.execute(
+            "INSERT INTO question_ready_cache(question_id,content_sha256,ok) VALUES (%s,%s,%s) "
+            "ON CONFLICT (question_id) DO UPDATE SET content_sha256=EXCLUDED.content_sha256,ok=EXCLUDED.ok,checked_at=clock_timestamp()",
+            (qid, st["content_sha256"], value))
+        out[qid] = value
+    return out
+
+
 def ready(conn, qid):
     """Published-quality: the free program checks AND one passed independent review, current content."""
     row = conn.execute(
