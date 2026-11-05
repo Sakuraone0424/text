@@ -337,7 +337,8 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     page.on("dialog", lambda dialog: dialog.accept())
     confirm_submission(page)
     page.locator("#result > h2").wait_for()
-    assert page.get_by_text("本卷命题依据（训练优先级，不是考试概率）").count() == 1
+    assert page.get_by_text("本卷命题依据（训练优先级，不是考试概率）").count() == 0       # audit wording is not on the result page
+    assert page.get_by_text("独立AI双轮复核").count() == 0
     result = client.get(f"/v2/papers/{pid}/result").json()
     assert result["pending"] == 16 and result["graded_points"] == 30
     with psycopg.connect(dsn) as conn:

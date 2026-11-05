@@ -345,7 +345,7 @@ def past_exam_route(conn, hours=24, sample_limit=150):
         "AND blocked_reason IN ('term_not_in_textbook','no_textbook_evidence') AND updated_at>" + _since(hours) + " GROUP BY 1,2", (hours,)).fetchall()}
     from app import legacy_reuse
     state = legacy_reuse._state(conn, "past_exam_classification")
-    return dict(reclassification=state,   # {version, before, after, retired_by_old_type, new_items, blocked}: item counts per type
+    return dict(import_breakdown=pei.import_breakdown(conn), reclassification=state,   # {version, before, after, retired_by_old_type, new_items, blocked}: item counts per type
                 skipped_before_model=dict(hours=hours, by_type_and_reason=skipped,
                                           term_not_in_textbook=sum(v for k, v in skipped.items() if k.endswith("term_not_in_textbook"))),
                 model_calls_ended={k: dict(v.most_common()) for k, v in ended.items()}, insufficient_textbook_evidence=insufficient,

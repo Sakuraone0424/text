@@ -298,6 +298,16 @@ def generation_attempts(conn, uid):
     }
 
 
+REUSE_AFTER_DAYS = 14   # = quiz_v2.REUSE_AFTER_DAYS: a question last on a paper this long ago may be used again
+# "Stock" is a question that can go on the NEXT paper as a fresh one: it has never been on this learner's paper, or its last
+# paper is old enough to reuse it. A question that was on a paper a few days ago is used up: it does not hold back the writing
+# of new ones (and it does not matter that its review is due: a review retest is not a fresh question).
+UNUSED_SQL = (
+    "NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
+    "WHERE i.question_id=q.id AND p.user_id=%s AND p.paper_date > (clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date - %s::int)"
+)
+
+
 def eligible_reserve_count(conn, uid, subject, kind, cached=False):
     # A merely "ready" state does not prove current science/answer
     # review, publication or v2 scoring compatibility.
@@ -306,12 +316,8 @@ def eligible_reserve_count(conn, uid, subject, kind, cached=False):
         "JOIN reviewed_questions q ON q.id=s.question_id "
         "WHERE s.status='ready' AND q.status='published' "
         "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
-        "AND q.content->>'max_points'=%s AND "
-        "(NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
-        "WHERE i.question_id=q.id AND p.user_id=%s) "
-        "OR EXISTS(SELECT 1 FROM fsrs_cards f WHERE f.question_id=q.id "
-        "AND f.user_id=%s AND f.due<=clock_timestamp()))",
-        (subject, kind, str(POINTS[kind]), uid, uid),
+        "AND q.content->>'max_points'=%s AND " + UNUSED_SQL,
+        (subject, kind, str(POINTS[kind]), uid, REUSE_AFTER_DAYS),
     ).fetchall()
     return eligible_verified_reserve(conn, eligible, cached=cached)
 
@@ -399,6 +405,7 @@ def plan(conn, uid):
                 u["unit_sha256"] != concept["unit_sha256"]
                 or u["source_kind"] != "textbook"
                 or evidence_filter.severe(u["quality_flags"])
+                or not evidence_filter.usable(u["text"], min_chars=ANCHOR_PARAGRAPH_MIN_CHARS)   # not a literature list, caption, table...
                 or u["subject"] != subject
                 or not pinned_source_bytes(u["file_id"], u["source_sha256"])
             ):
@@ -453,7 +460,7 @@ def bucket_gaps(conn, uid):
         conn,
         "SELECT subject AS s,question_type AS t,count(*) AS n FROM past_exam_items "
         "WHERE (status='queued' AND question_type='term') "  # imported term items are throttled: they no longer hold back new ones
-        "OR (status IN ('imported','queued') AND question_type IN ('short_answer','essay')) GROUP BY 1,2",
+        "OR (status IN ('imported','queued') AND question_type IN ('short_answer','essay','single_choice')) GROUP BY 1,2",   # real past-exam singles first: the AI writes only what they cannot cover
     )
     gaps = []
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
@@ -466,6 +473,12 @@ def bucket_gaps(conn, uid):
         if gap > 0:
             gaps.append((subject, kind, gap))
     return gaps
+
+
+def gap_diagnosis(conn, uid):
+    """How short the bank is, for the worker log: total missing questions and in how many (subject x type) buckets."""
+    gaps = bucket_gaps(conn, uid)
+    return dict(gap=sum(g for _, _, g in gaps), buckets=len(gaps))
 
 
 def paragraph_pool(conn, subject):

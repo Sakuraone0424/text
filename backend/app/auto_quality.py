@@ -887,6 +887,37 @@ def discard_unfixable(conn):
     return ids
 
 
+def retire_unusable_sources(conn):
+    """Take questions out of the bank whose evidence is a literature-list entry, whose stem points at a figure that is not
+    there, or whose fill-in answer is written in the stem. They were admitted before those checks existed. Papers already
+    made keep their own copy (the snapshot); the question just stops being chosen. Returns how many were retired."""
+    from app import evidence_filter, exam_authoring, legacy_reuse
+
+    if legacy_reuse._state(conn, "unusable_sources_v1"):
+        return 0                       # done once; new questions pass the same checks when they are written
+    bad = []
+    for r in conn.execute(
+        "SELECT q.id,q.content FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
+        "WHERE s.status IN ('ready','candidate','checking','repairing') AND q.status IN ('published','draft')"
+    ).fetchall():
+        c = r["content"]
+        problems = exam_authoring.issues(c)
+        if (
+            any(evidence_filter.is_reference_entry(e.get("excerpt") or "") for e in c.get("evidence") or [])
+            or "unavailable_figure_reference" in problems
+            or "answer_disclosed_in_stem" in problems
+            or "textbook_wording_in_stem" in problems
+        ):
+            bad.append(r["id"])
+    if bad:
+        conn.execute(
+            "UPDATE auto_question_states SET status='retired',reason='unusable_source_or_stem',updated_at=clock_timestamp() "
+            "WHERE question_id=ANY(%s)", (bad,))
+        conn.execute("UPDATE reviewed_questions SET status='withdrawn' WHERE id=ANY(%s) AND status='published'", (bad,))
+    legacy_reuse._set_state(conn, "unusable_sources_v1", dict(retired=len(bad)))
+    return len(bad)
+
+
 def retire_old_scoring(conn):
     """Take questions written under an earlier point scale out of use (never edited in place).
 

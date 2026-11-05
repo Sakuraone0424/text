@@ -65,6 +65,7 @@
     if (currentKey && scroller()) scrollMemory[currentKey] = scroller().scrollTop;
     view = next;
     currentKey = key || "#/" + next;
+    document.body.dataset.view = next; // the install hint belongs to the home page only
     document.querySelectorAll("[data-page]").forEach((node) => {
       node.hidden = node.dataset.page !== view;
     });
@@ -296,7 +297,7 @@
         : latest.pendingCount
           ? `本机暂存 · ${latest.pendingCount}题待同步`
           : timing?.status === "in_progress"
-            ? "已与服务端同步"
+            ? "已保存"
             : "尚未开始";
     const photoPending = active() && next.message?.includes("照片原件仍保留");
     if (active() && next.message?.includes("上传中"))

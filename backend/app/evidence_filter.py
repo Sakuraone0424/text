@@ -26,6 +26,20 @@ _HEADING = re.compile(r"^\s*(?:第\s*[\d一二三四五六七八九十百]+\s*[�
 _TOC_LINE = re.compile(r"(?:\.{3,}|…{2,}|·{3,}|\s{3,})\s*\d{1,4}\s*$")
 
 
+# A bibliography entry ("Izawa D, Pines J. How ... mitosis. Nature Cell Biology, 2011, 13(3): 223-233.") says which paper exists,
+# not what is true: a question written from it asks about authors and titles. Year + volume(issue) + page range, a Chinese
+# 「[J]」 citation, or a 「参考文献」 heading marks one.
+_JOURNAL_REF = re.compile(r"(?:19|20)\d{2}\s*[,;，；.]?\s*\d{1,4}\s*(?:\(\s*\d+\s*\))?\s*[:：]\s*[A-Za-z]?\d+\s*[-–—~]\s*[A-Za-z]?\d+")
+_CN_CITATION = re.compile(r"\[\s*[JMDCRN]\s*(?:/[A-Z]+)?\s*\]")
+_REFERENCES_HEADING = re.compile(r"^\s*(?:参考文献|主要参考文献|References|REFERENCES|Bibliography)\s*[:：]?\s*$", re.M)
+
+
+def is_reference_entry(text):
+    """True for a paragraph that is (or consists of) literature-list entries."""
+    body = (text or "").strip()
+    return bool(_JOURNAL_REF.search(body) or _CN_CITATION.search(body) or _REFERENCES_HEADING.search(body))
+
+
 def _lines(text):
     return [ln for ln in re.split(r"[\r\n]+", text) if ln.strip()]
 
@@ -37,6 +51,8 @@ def reason_unusable(text, quality_flags=(), min_chars=MIN_CHARS):
         return "ocr_quality_flag"
     if len(body) < min_chars:
         return "too_short"
+    if is_reference_entry(body):
+        return "reference_list"
     if re.match(r"^\s*(?:目\s*录|Contents|CONTENTS)\s*$", body.splitlines()[0]):
         return "table_of_contents"
     lines = _lines(body)

@@ -202,10 +202,10 @@ def test_a_call_still_running_at_the_deadline_does_not_hold_the_run(monkeypatch)
 
 
 def test_run_seconds_is_bounded():
-    assert auto_worker.run_seconds({}) == 240
+    assert auto_worker.run_seconds({}) == 270
     assert auto_worker.run_seconds({"AI_RUN_SECONDS": "10"}) == 60
     assert auto_worker.run_seconds({"AI_RUN_SECONDS": "9999"}) == 270
-    assert auto_worker.run_seconds({"AI_RUN_SECONDS": "junk"}) == 240
+    assert auto_worker.run_seconds({"AI_RUN_SECONDS": "junk"}) == 270
 
 
 # ---- the worker log and the heartbeat record concurrency and duration -------------------------------------

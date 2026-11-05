@@ -20,7 +20,7 @@ _SAFE_VALIDATOR_ERRORS = {
 }
 _SAFE_QUALITY_CODES = frozenset((
     "unknown_question_type", "unresolved_placeholder",
-    "unavailable_figure_reference", "unhelpful_all_or_none_distractor",
+    "unavailable_figure_reference", "unhelpful_all_or_none_distractor", "answer_disclosed_in_stem", "textbook_wording_in_stem",
     "missing_unique_answer_rationale", "missing_accepted_answer_set",
     "model_answer_too_terse_for_subjective_marking",
     "insufficient_independent_scoring_criteria",

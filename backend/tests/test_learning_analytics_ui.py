@@ -122,9 +122,9 @@ def test_pending_grade_custom_confirmation_and_truthful_chart(live_app, browser)
     assert result["score"] is None and result["pending"] == 1
     repeated = client.post(f"/v2/papers/{pid}/submit", json={"expected_version": 0}).json()
     assert repeated["attempt_id"] == result["attempt_id"]
-    assert page.locator("#result article details").count() == 28
-    first = page.locator("#result article details").first
-    first.locator("summary").click()
+    assert page.locator("#result article summary.result-question-summary").count() == 28
+    first = page.locator("#result article details:has(> summary.result-question-summary)").first
+    first.locator("> summary").click()
     page.evaluate("showResult()")
     expect(first).to_have_attribute("open", "")
     page.evaluate("TrainingUI.showView('stats')")

@@ -449,7 +449,9 @@ Railway 保留上一次部署，可在部署列表中一键回退；数据库变
 ## 并行出题（PR C）
 
 - 一次 worker 运行里最多同时发起 `max_concurrency` 个模型请求（模型页「并发上限」，1–4；新用户默认 2，**已有用户的值不会被迁移改动，需在模型页自己改成 2**）。总调用数仍受 `AI_CALLS_PER_RUN` 限制。
-- 整次运行不超过 4 分钟（`AI_RUN_SECONDS`，默认 240，范围 60–270）：剩余时间放不下一次典型调用（约 60 秒 + 15 秒余量）就不再发起新调用；到点仍在跑的调用不再等待，它的租约到期后自动重试，费用按预留额度计入。
+- **一次运行可以连续跑多批**（cron 仍是每 5 分钟启动一次）：一批（`AI_CALLS_PER_RUN` 次调用）结束后，如果距本次运行开始不到 3 分 30 秒（`AI_START_CUTOFF_SECONDS`，默认 210，范围 30–240），就立即规划并领取下一批；超过 3 分 30 秒不再发起新调用。已发出的调用最多等到 4 分 30 秒（`AI_RUN_SECONDS`，默认 270，范围 60–270）：到点仍没有结果的，费用按估算计入、任务重新排队，所以一次运行一定在下一次 cron 之前结束。低峰规则、预算、最大并发、按缺口优先、503 退避等规则不变。遇到队列空、高峰、额度用完、停止开关、一批里大多数调用返回 503/429、调用超时未回来时，直接结束本次运行；最多连续 8 批。
+- **同一时间只有一个 worker 在跑**：运行开头用数据库 advisory lock（`pg_try_advisory_xact_lock`，随连接结束自动释放，崩溃/被杀也不会残留）；拿不到锁就立即退出，日志写 `skipped=already_running`，不记录运行心跳。
+- 运行日志 `worker-run` 增加 `batches=N`（本次运行实际调用了几批）和 `exit_reason`：`queue_empty`、`peak_hours`、`budget_exhausted`、`automation_stopped`、`platform_busy`、`time_cutoff`、`overran`、`max_batches`、`shutdown`、`already_running`、`disabled`、`error`。
 - 每次领取任务时先拿一把数据库全局锁：后一个领取一定看到前一个已写入的预留，所以日预算、本月上限、单任务上限、`max_concurrency` 在并行下仍然精确（有多连接竞速测试）。同一道题的出题/审核/修复不会同时被两个请求领取。
 - 运行日志多了 `concurrency=`（本次开的并发数）、`parallel_peak=`（实际同时在跑的最大数）、`duration_s=`（整次运行秒数，含运行前后的准备工作）；`worker_heartbeats` 记录同样的并发数和用时，出题进度页的「后台服务」说明里能看到。
 - 建议起步：`AI_CALLS_PER_RUN=4`、`max_concurrency=2`（约 2 轮，每轮 45 秒左右，一次运行 1.5–2 分钟）。观察几次 `duration_s` 都小于 150、没有 `overran=yes`，再把 `AI_CALLS_PER_RUN` 提到 6。并发不要高于 3：花费上限与限速都是按预留额度计，并发越高，临近额度时越早被挡住。

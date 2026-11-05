@@ -131,6 +131,7 @@
     $("bank-eta").textContent = etaText(bank);
     lock = todayState === "none" ? bank : null;
     applyLock();
+    if (todayState === "submitted") $("prepare-note").hidden = true;      // nothing to prepare once today's paper is handed in
   }
   function paintBankStamp() {
     if (bankStamp && $("bank-updated")) $("bank-updated").textContent = "更新于 " + window.Live.stamp(bankStamp);
@@ -223,6 +224,7 @@
     if (o.subjective_rate !== null) $("stat-subjective-note").textContent = "AI 判分";
     weak($("weak-chapters"), o.weak_chapters);
     $("weak-practice").hidden = !o.weak_chapters.length;
+    $("weak-all").hidden = !o.weak_chapters.length;       // nothing to list yet: no link to an empty section
     const due = o.reviews.due_now;
     $("metric-due").textContent = String(due);
     $("quick-review-line").textContent = due ? `今日到期 ${due} 道` : "今日没有到期";
@@ -314,7 +316,21 @@
     // g) reviews
     const g = card();
     reviews(g, data.reviews);
+    scrollToChaptersIfAsked();
   }
+  /* 「查看全部 →」 on the home card opens 我的 and scrolls to 章节掌握情况. The page may draw twice (kept copy, then fresh
+     numbers) and the router restores the page's own scroll position first, so the scroll is repeated for a few seconds. */
+  let chapterScrollUntil = 0;
+  function scrollToChaptersIfAsked() {
+    if (Date.now() > chapterScrollUntil) return;
+    const target = $("profile-chapters");
+    if (target) requestAnimationFrame(() => target.scrollIntoView({ block: "start", behavior: "instant" }));
+  }
+  $("weak-all").onclick = () => {
+    chapterScrollUntil = Date.now() + 4000;
+    location.hash = "#/profile";          // the router remembers where the home page was left and restores it on the way back
+    setTimeout(scrollToChaptersIfAsked, 0);
+  };
   const hoursShort = (seconds) => {
     const h = seconds / 3600;
     return h >= 1 ? (Math.round(h * 10) / 10) + "h" : Math.round(seconds / 60) + "m";
@@ -369,6 +385,7 @@
   }
   function chapters(card, rows) {
     const head = el("div", undefined, card, "head-line");
+    head.id = "profile-chapters";         // 「查看全部 →」 on the home card scrolls here
     el("h2", "章节掌握情况", head);
     const subjects = Object.keys(SUBJECT).filter((k) => rows.some((r) => r.subject === k));
     const box = el("div", undefined, card, "chapter-list");
@@ -671,16 +688,18 @@
     const total = el("div", undefined, line);
     el("span", "总分", total, "stat-label");
     const big = el("p", undefined, total, "total-score");
-    big.append(data.score === null ? String(data.graded_points) : String(data.score));
-    el("small", data.score === null ? `/ ${data.max_points}（判分中）` : `/ ${data.max_points}`, big);
+    // while the subjective answers are still being graded there is no total yet: not a big 0, but what is known
+    big.append(data.score === null ? "判分中" : String(data.score));
+    if (data.score === null) big.classList.add("grading");
+    el("small", data.score === null ? ` 已确定 ${data.graded_points} 分 / 满分 ${data.max_points}` : `/ ${data.max_points}`, big);
     const compare = el("div", undefined, line, "compare");
     const split = el("div", undefined, key, "score-split");
     Object.keys(SUBJECT).forEach((subject) => {
       const s2 = data.subject_scores?.[subject];
       const box = el("div", undefined, split, subject === "biochemistry" ? "bio" : "cell");
       el("span", SUBJECT[subject], box);
-      const value = el("strong", s2 ? String(s2.score === null ? s2.graded_points : s2.score) : "—", box);
-      if (s2) el("small", ` / ${s2.max_points}`, value);
+      const value = el("strong", s2 ? (s2.score === null ? "—" : String(s2.score)) : "—", box);
+      if (s2) el("small", s2.score === null ? ` 已确定 ${s2.graded_points} / ${s2.max_points}` : ` / ${s2.max_points}`, value);
       const bar = el("div", undefined, box, "thin-bar");
       const fill = el("i", undefined, bar);
       fill.style.width = s2 && s2.max_points ? Math.min(100, ((s2.score === null ? s2.graded_points : s2.score) / s2.max_points) * 100) + "%" : "0%";
@@ -699,7 +718,8 @@
     const typeBox = el("div", undefined, types);
     C.hbars(typeBox, {
       title: "各题型得分率", unit: "本卷", items: rows, format: pct,
-      conclusion: lowest ? `${lowest.label}得分率最低：${lowest.name} ${pct(lowest.value)}。` : "",
+      // no "lowest" while some types are still being graded: it would be a conclusion about half the paper
+      conclusion: lowest && !data.pending ? `${lowest.label}得分率最低：${lowest.name} ${pct(lowest.value)}。` : "",
       empty: "判分完成后显示各题型得分率",
     });
     if (rows.length) {

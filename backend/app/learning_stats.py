@@ -12,6 +12,7 @@ EXAM_DATE = date(2026, 12, 19)
 SUBJECTS = ("biochemistry", "cell_biology")
 TYPES = ("single_choice", "fill_blank", "term", "short_answer", "essay")
 OBJECTIVE = ("single_choice", "fill_blank")
+WEAK_CHAPTERS_SHOWN = 5   # chapters listed on the home card
 MIN_CHAPTER_ANSWERS = 3  # fewer graded answers than this say nothing about a chapter
 
 
@@ -187,7 +188,7 @@ def overview(conn, uid):
             delta_points=round((this_avg - prev_avg) * latest_max, 1) if this_avg is not None and prev_avg is not None else None,
         ),
         objective_rate=rate(*objective), subjective_rate=rate(*subjective),
-        weak_chapters=[c for c in chapter_table(rows, practice) if c["answers"] >= MIN_CHAPTER_ANSWERS][:3],
+        weak_chapters=[c for c in chapter_table(rows, practice) if c["answers"] >= MIN_CHAPTER_ANSWERS][:WEAK_CHAPTERS_SHOWN],
         reviews=due_reviews(conn, uid, today),
         tomorrow=tomorrow_ready(conn, uid),
         has_data=bool(done),

@@ -82,7 +82,7 @@ def test_a_graded_answer_shows_each_criterion_score_with_its_reason_and_pending_
         conn.commit()
     page.locator("#grading-activity button").click()
     row = page.locator(f'#result article[data-qid="{graded["id"]}"]')
-    row.locator("summary").click()
+    row.locator("summary.result-question-summary").click()
     expect(row).to_contain_text("评分点 1")
     expect(row).to_contain_text("理由：要点一答对了。")
     page.wait_for_function("[...document.querySelectorAll('.grading-status')].every(e => e.textContent !== '判分中……')", timeout=15000)

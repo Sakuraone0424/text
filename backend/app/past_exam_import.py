@@ -65,7 +65,7 @@ IMPORT_BLOCK_REASONS = frozenset(
 # order and may hold at most PAST_TERM_MAX_SHARE of the generation tasks in flight (set the variable to 1 to restore).
 PAST_TERM_MAX_SHARE = float(os.environ.get("PAST_TERM_MAX_SHARE", "0.2"))
 _PRIORITY_SQL = (
-    "CASE question_type WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
+    "CASE question_type WHEN 'single_choice' THEN 0 WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
     "WHEN 'fill_blank' THEN 2 WHEN 'term' THEN 4 ELSE 3 END"
 )
 
@@ -86,19 +86,70 @@ def strip_number(text):
     return _NUMBER.sub("", text, count=1).strip()
 
 
-def parse_choice(text):
-    """Split a choice question into (stem, options); None unless exactly A-D."""
-    marks = list(_OPTION.finditer(text))
-    if [m.group(1) for m in marks] != list("ABCD"):
-        return None
-    stem = text[: marks[0].start()].strip()
+_FULLWIDTH_LETTERS = str.maketrans("ＡＢＣＤ", "ABCD")
+_DELIMITER = r"[)）.．、:：]"
+# Option markers, strictest first. Each finds A, B, C, D written as 「A.」「A、」「A．」「A:」「A)」「(A)」「（A）」(full-width letters are
+# read as the same letters; positions do not move because every letter is one character).
+_OPTION_STRICT = _OPTION                                                    # after whitespace / a sentence end
+_OPTION_GLUED = re.compile(r"(?<![A-Za-z0-9])[（(]?([A-D])" + _DELIMITER + r"[ \t\u3000]*")   # glued to the text before it
+_OPTION_BARE = re.compile(r"(?m)^[ \t\u3000]*([A-D])[ \t\u3000]+(?=\S)")           # a line starting 「A 内容」
+
+
+def _option_chain(marks):
+    """The last complete A, B, C, D sequence in order (an earlier 「(A)」 inside the stem is not an option)."""
+    for start in range(len(marks) - 1, -1, -1):
+        if marks[start].group(1) != "A":
+            continue
+        chain, want = [marks[start]], "BCD"
+        for mark in marks[start + 1 :]:
+            if mark.group(1) == want[len(chain) - 1]:
+                chain.append(mark)
+                if len(chain) == 4:
+                    return chain
+    return None
+
+
+def _split_options(text, chain):
+    stem = text[: chain[0].start()].strip()
     options = {}
-    for i, mark in enumerate(marks):
-        end = marks[i + 1].start() if i < 3 else len(text)
+    for i, mark in enumerate(chain):
+        end = chain[i + 1].start() if i < 3 else len(text)
         options[mark.group(1)] = text[mark.end() : end].strip()
     if len(stem) < 5 or any(not value for value in options.values()):
         return None
     return stem, options
+
+
+def parse_choice(text):
+    """Split a choice question into (stem, options); None unless it has exactly the options A-D, in order.
+
+    Options may be on one line or on several, written 「A.」「A．」「A、」「A:」「A)」「(A)」「（A）」 or 「A 内容」, with full-width
+    letters, or glued to the end of the stem. The strictest reading is tried first; a later (looser) one is used only when the
+    stricter finds no complete A-D."""
+    seen = text.translate(_FULLWIDTH_LETTERS)
+    for pattern in (_OPTION_STRICT, _OPTION_GLUED, _OPTION_BARE):
+        chain = _option_chain(list(pattern.finditer(seen)))
+        if chain:
+            parsed = _split_options(text, chain)
+            if parsed:
+                return parsed
+    return None
+
+
+def choice_failure_detail(text):
+    """Why parse_choice gave up, as a short code (for the import report)."""
+    seen = text.translate(_FULLWIDTH_LETTERS)
+    letters = [m.group(1) for p in (_OPTION_STRICT, _OPTION_GLUED, _OPTION_BARE) for m in p.finditer(seen)]
+    if not letters:
+        return "no_option_markers"
+    missing = sorted(set("ABCD") - set(letters))
+    if missing:
+        return "missing_option_" + "".join(missing)
+    for pattern in (_OPTION_STRICT, _OPTION_GLUED, _OPTION_BARE):
+        chain = _option_chain(list(pattern.finditer(seen)))
+        if chain:
+            return "stem_too_short" if len(text[: chain[0].start()].strip()) < 5 else "empty_option_text"
+    return "options_out_of_order"
 
 
 def normalize_blank(stem):
@@ -129,12 +180,125 @@ def infer_type(declared, composite):
     return declared
 
 
-def _classify(row, composite, kind=None):
-    """Return (reason|None, stem, options, normalized) for one question."""
+# ---- tables: layout only, or the question really needs the table -------------------------------------------------------
+# A DOCX paragraph carries the table flag whenever it sits in a table cell, which many exams use just to lay questions out
+# (number | question | score, or options in a 2x2 grid). That text is ordinary text. The question needs the table when its own
+# wording points at one, or the table cells are a grid of data.
+_TABLE_REF = re.compile(r"见表|如下表|下表|上表|附表|表格|表中|表内|所示的?表|表\s*[0-9一二三四五六七八九十]+")
+_PIPE_ROW = re.compile(r"\|[^|\n]{1,40}\|")
+DATA_CELLS_FOR_A_TABLE = 4       # this many short cells holding a number: a data grid, not a layout
+
+
+def table_dependency(composite, kids):
+    """None when the table only laid the question out; otherwise a short code for why the question needs it."""
+    if _TABLE_REF.search(composite):
+        return "text_refers_to_a_table"
+    if _PIPE_ROW.search(composite):
+        return "pipe_delimited_rows"
+    cells = [
+        kid["transcription"].strip() for kid in kids
+        if set(kid["concerns"]) & _TABLE and len(kid["transcription"].strip()) <= 12
+    ]
+    if sum(bool(re.search(r"\d", cell)) for cell in cells) >= DATA_CELLS_FOR_A_TABLE:
+        return "grid_of_data_cells"
+    return None
+
+
+def clean_layout_text(text):
+    """Layout tabs become single spaces; the wording is otherwise untouched."""
+    return re.sub(r"[ \t\u3000]*\t[ \t\u3000]*", " ", text)
+
+
+# ---- fill-in questions with several blanks ----------------------------------------------------------------------------
+_BLANK_ANY = re.compile(r"[_＿]{2,}|[（(][\s\u3000]*[)）]")
+MAX_SPLIT_BLANKS = 5
+_ORDERED = re.compile(r"依次|分别|顺序|依序|先后|从左到右|按.{0,6}顺序")
+_CONNECTORS = re.compile(r"[\s\u3000，,、；;和与及或/、]|以及|或者|还是|同时")
+MIN_GAP_CHARS = 4                # text that must lie between two blanks for them to count as separate questions
+
+
+def blank_spans(stem):
+    return [m.span() for m in _BLANK_ANY.finditer(stem)]
+
+
+def blanks_are_independent(stem, spans):
+    """True when each blank asks for its own fact: not a list written as 「____和____」, not 「依次 / 分别」 (where the answers
+    are tied to each other by order)."""
+    if _ORDERED.search(stem):
+        return False
+    for (_, end), (start, _) in zip(spans, spans[1:]):
+        gap = _CONNECTORS.sub("", stem[end:start])
+        if len(gap) < MIN_GAP_CHARS:
+            return False
+    return True
+
+
+_ANSWER_LINE = re.compile(r"^\s*(?:参考答案|答案)?\s*[:：]?\s*(\d{1,3})\s*[.、．)）:：]\s*(.+?)\s*$")
+_ANSWER_SEPARATORS = (r"[；;]", r"、", r"[，,]", r"[ \t\u3000]+")
+
+
+def split_answers(text, count):
+    """The reference answers of `count` blanks written in one line (separated by ； 、 ， or spaces); None if they do not
+    split into exactly `count` non-empty parts."""
+    for separator in _ANSWER_SEPARATORS:
+        parts = [part.strip() for part in re.split(separator, text.strip()) if part.strip()]
+        if len(parts) == count:
+            return parts
+    return None
+
+
+def answer_index(rows):
+    """{(year segment, question number): answer text} from the exam's own answer sections ("参考答案" ...). A number that is
+    answered twice in a segment is ambiguous and is left out."""
+    found, ambiguous = {}, set()
+    for row in rows:
+        if row["analysis"]["role"] != "answer":
+            continue
+        for line in row["transcription"].splitlines():
+            match = _ANSWER_LINE.match(line)
+            if not match:
+                continue
+            key = (row["analysis"]["year_heading_unit_id"], match.group(1))
+            if key in found:
+                ambiguous.add(key)
+            found[key] = match.group(2)
+    return {k: v for k, v in found.items() if k not in ambiguous}
+
+
+def split_blanks(stem, spans, answers):
+    """One single-blank stem per blank: that blank stays 「____」, the others are filled with their reference answers."""
+    out = []
+    for keep in range(len(spans)):
+        pieces, cursor = [], 0
+        for i, (start, end) in enumerate(spans):
+            pieces.append(stem[cursor:start])
+            pieces.append("____" if i == keep else answers[i])
+            cursor = end
+        pieces.append(stem[cursor:])
+        out.append("".join(pieces))
+    return out
+
+
+def _classify(row, composite, kind=None, kids=(), answers=None):
+    """Return (reason|None, stem, options, normalized, extra) for one question.
+
+    `reason` keeps the old codes; `extra` carries the finer facts: `detail` (why it was skipped), `table_layout` (a table that
+    only laid the question out was let through) and, for a fill-in question with several independent blanks, `split`: the
+    list of (stem, blank index, blank count, reference answer) to import instead, one per blank."""
     kind = kind or row["question_type"]
     concerns = set(row["concerns"])
     stem, options, normalized = composite, {}, False
-    reason = None
+    reason, extra, table_detail = None, {}, None
+    table_flags = concerns & _TABLE
+    if table_flags and not (concerns & (_IMAGE | _BOUNDARY)) and row["year"] is not None and row["question_number"] is not None:
+        why = table_dependency(composite, kids)
+        if why is None:
+            cleaned = clean_layout_text(composite)      # a layout table: ordinary text from here on
+            normalized, composite, stem = cleaned != composite, cleaned, cleaned
+            concerns = concerns - _TABLE
+            extra["table_layout"] = True
+        else:
+            table_detail = why
     if row["year"] is None or row["question_number"] is None:
         reason = "year_or_number_missing"
     elif concerns & _BOUNDARY:
@@ -143,6 +307,7 @@ def _classify(row, composite, kind=None):
         reason = "image_dependent"
     elif concerns & _TABLE:
         reason = "table_requires_review"
+        extra["detail"] = table_detail or "table_not_checked"
     elif concerns & STYLE_SOURCE_BLOCKERS:
         reason = "ocr_incomplete"
     elif len(composite) > 10000:
@@ -155,15 +320,85 @@ def _classify(row, composite, kind=None):
         parsed = parse_choice(composite)
         if parsed is None:
             reason = "choice_options_not_parsed"
+            extra["detail"] = choice_failure_detail(composite)
         else:
             stem, options = parsed
     elif kind == "fill_blank":
         fixed = normalize_blank(composite)
-        if fixed is None:
-            reason = "fill_blank_marker_unsupported"
-        else:
+        if fixed is not None:
             stem, normalized = fixed, fixed != composite
-    return reason, stem, options, normalized
+        else:
+            reason = "fill_blank_marker_unsupported"
+            spans = blank_spans(re.sub(r"[_＿]{2,}", "____", composite))
+            flat = re.sub(r"[_＿]{2,}", "____", composite)
+            if not spans:
+                extra["detail"] = "no_blank_marker"
+            elif len(spans) > MAX_SPLIT_BLANKS:
+                extra["detail"] = "too_many_blanks"
+            elif not blanks_are_independent(flat, spans):
+                extra["detail"] = "blanks_depend_on_each_other"
+            else:
+                number = row["question_number"]
+                parts = split_answers(answers.get(number, ""), len(spans)) if answers else None
+                if parts is None:
+                    extra["detail"] = "reference_answers_missing_or_not_one_per_blank"
+                else:
+                    singles = split_blanks(flat, spans, parts)
+                    if all(normalize_blank(one) == one for one in singles):
+                        reason = None
+                        extra["split"] = [(one, i + 1, len(spans), parts[i]) for i, one in enumerate(singles)]
+                        extra["detail"] = None
+                    else:
+                        extra["detail"] = "split_stem_not_single_blank"
+    return reason, stem, options, normalized, extra
+
+
+def questions_in_document(doc, units):
+    """The questions of ONE exam document, parsed from its units (pure: no database), one dict per importable item."""
+    rows = list(analyse_exam(units, FILES[doc["file_id"]]))
+    answers_by_segment = answer_index(rows)
+    children = defaultdict(list)
+    for row in rows:
+        if row["analysis"]["role"] in ("continuation", "subquestion", "option"):
+            children[row["analysis"]["parent_question_unit_id"]].append(row)
+    for row in rows:
+        if (
+            row["analysis"]["role"] != "question_start"
+            or row["question_type"] not in QUESTION_TYPES
+        ):
+            continue
+        kids = [kid for kid in children[row["unit_id"]] if not is_section_title(kid["transcription"])]
+        parts = [strip_number(row["transcription"])] + [kid["transcription"].strip() for kid in kids]   # a 「二 填空题」 title belongs to no question
+        composite = "\n".join(part for part in parts if part)
+        declared = row["question_type"]
+        kind = infer_type(declared, composite)
+        segment = row["analysis"]["year_heading_unit_id"]
+        answers = {number: text for (seg, number), text in answers_by_segment.items() if seg == segment}
+        if kind == "multiple_choice":     # not a supported type: kept visible, never sent to a model
+            reason, stem, options, normalized, extra = "multiple_choice_unsupported", composite, {}, False, {}
+            kind = declared
+        else:
+            reason, stem, options, normalized, extra = _classify(row, composite, kind, kids, answers)
+        common = dict(
+            subject=doc["subject"],
+            document_id=doc["id"],
+            unit_id=row["unit_id"],
+            year=row["year"],
+            question_number=row["question_number"],
+            question_type=kind,
+            declared_type=declared,
+            blocked_detail=extra.get("detail") if reason else None,
+            table_layout=bool(extra.get("table_layout")),
+            source_blank_index=None, source_blank_count=None, source_stem=None, source_answer=None,
+        )
+        if extra.get("split"):
+            for single, index, total, answer in extra["split"]:
+                yield dict(common, stem=single, options={}, stem_hash=stem_hash(kind, single), stem_normalized=False,
+                           blocked=None, source_blank_index=index, source_blank_count=total, source_stem=composite,
+                           source_answer=answer)
+            continue
+        yield dict(common, stem=stem, options=options, stem_hash=stem_hash(kind, stem, options),
+                   stem_normalized=normalized, blocked=reason)
 
 
 def exam_questions(conn):
@@ -179,43 +414,7 @@ def exam_questions(conn):
             "WHERE document_id=%s ORDER BY ordinal",
             (doc["id"],),
         ).fetchall()
-        rows = list(analyse_exam(units, FILES[doc["file_id"]]))
-        children = defaultdict(list)
-        for row in rows:
-            if row["analysis"]["role"] in ("continuation", "subquestion", "option"):
-                children[row["analysis"]["parent_question_unit_id"]].append(row)
-        for row in rows:
-            if (
-                row["analysis"]["role"] != "question_start"
-                or row["question_type"] not in QUESTION_TYPES
-            ):
-                continue
-            parts = [strip_number(row["transcription"])] + [
-                kid["transcription"].strip() for kid in children[row["unit_id"]]
-                if not is_section_title(kid["transcription"])   # 「二 填空题：（每题2分）」 belongs to no question
-            ]
-            composite = "\n".join(part for part in parts if part)
-            declared = row["question_type"]
-            kind = infer_type(declared, composite)
-            if kind == "multiple_choice":     # not a supported type: kept visible, never sent to a model
-                reason, stem, options, normalized = "multiple_choice_unsupported", composite, {}, False
-                kind = declared
-            else:
-                reason, stem, options, normalized = _classify(row, composite, kind)
-            yield dict(
-                subject=doc["subject"],
-                document_id=doc["id"],
-                unit_id=row["unit_id"],
-                year=row["year"],
-                question_number=row["question_number"],
-                question_type=kind,
-                declared_type=declared,
-                stem=stem,
-                options=options,
-                stem_hash=stem_hash(kind, stem, options),
-                stem_normalized=normalized,
-                blocked=reason,
-            )
+        yield from questions_in_document(doc, units)
 
 
 def _occurrence(q):
@@ -235,7 +434,7 @@ def import_items(conn):
     groups = defaultdict(list)
     for q in exam_questions(conn):
         groups[(q["subject"], q["question_type"], q["stem_hash"])].append(q)
-    summary = dict(created=0, merged=0, duplicates_collapsed=0, blocked=Counter())
+    summary = dict(created=0, merged=0, duplicates_collapsed=0, blocked=Counter(), blocked_detail=Counter(), split_blanks=0)
     for (subject, kind, digest), group in sorted(groups.items()):
         group.sort(key=lambda q: (-(q["year"] or 0), q["unit_id"]))
         usable = [q for q in group if not q["blocked"]]
@@ -251,17 +450,23 @@ def import_items(conn):
             years = sorted({o["year"] for o in found.values() if o["year"]}, reverse=True)
             conn.execute(
                 "INSERT INTO past_exam_items(subject,question_type,stem,options,stem_hash,document_id,unit_id,"
-                "question_number,year,years,occurrences,stem_normalized,status,blocked_reason) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                "question_number,year,years,occurrences,stem_normalized,status,blocked_reason,blocked_detail,table_layout,"
+                "source_blank_index,source_blank_count,source_stem,source_answer) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                 (
                     subject, kind, rep["stem"], Jsonb(rep["options"]), digest,
                     rep["document_id"], rep["unit_id"], rep["question_number"], rep["year"],
                     Jsonb(years), Jsonb(sorted(found.values(), key=_occ_sort)),
                     rep["stem_normalized"], "blocked" if rep["blocked"] else "imported", rep["blocked"],
+                    rep["blocked_detail"], rep["table_layout"], rep["source_blank_index"], rep["source_blank_count"],
+                    rep["source_stem"], rep["source_answer"],
                 ),
             )
             if rep["blocked"]:
                 summary["blocked"][rep["blocked"]] += 1
+                summary["blocked_detail"][f"{rep['blocked']}:{rep['blocked_detail'] or '-'}"] += 1
+            if rep["source_blank_index"]:
+                summary["split_blanks"] += 1
             continue
         for o in existing["occurrences"]:
             found.setdefault(_occ_key(o), o)
@@ -281,6 +486,9 @@ def import_items(conn):
                 unit_id=rep["unit_id"], question_number=rep["question_number"], year=rep["year"],
                 stem_normalized=rep["stem_normalized"],
                 status="blocked" if rep["blocked"] else "imported", blocked_reason=rep["blocked"],
+                blocked_detail=rep["blocked_detail"], table_layout=rep["table_layout"],
+                source_blank_index=rep["source_blank_index"], source_blank_count=rep["source_blank_count"],
+                source_stem=rep["source_stem"], source_answer=rep["source_answer"],
             )
         changed = {k: v for k, v in desired.items() if existing[k] != v}
         if changed:
@@ -303,7 +511,17 @@ def reclassify(conn):
             "SELECT question_type, count(*) AS n FROM past_exam_items WHERE blocked_reason IS DISTINCT FROM 'reclassified' "
             "GROUP BY 1 ORDER BY 1").fetchall()}
 
-    before = counts()
+    def usable():
+        """Items that can be sent to the model: not skipped (imported, queued or already turned into a question)."""
+        return {f"{r['question_type']}": r["n"] for r in conn.execute(
+            "SELECT question_type, count(*) AS n FROM past_exam_items WHERE status<>'blocked' GROUP BY 1 ORDER BY 1").fetchall()}
+
+    def skipped():
+        return {f"{r['question_type']}:{r['blocked_reason']}": r["n"] for r in conn.execute(
+            "SELECT question_type, blocked_reason, count(*) AS n FROM past_exam_items WHERE status='blocked' "
+            "AND blocked_reason=ANY(%s) GROUP BY 1,2 ORDER BY 1,2", (list(IMPORT_BLOCK_REASONS),)).fetchall()}
+
+    before, usable_before, skipped_before = counts(), usable(), skipped()
     seen, docs = set(), set()
     for q in exam_questions(conn):
         seen.add((q["subject"], q["question_type"], q["stem_hash"]))
@@ -318,10 +536,39 @@ def reclassify(conn):
             retired[item["question_type"]] += 1
     created = import_items(conn)
     return dict(before=before, after=counts(), retired_by_old_type=dict(retired), new_items=created["created"],
-                blocked=dict(created["blocked"]))
+                blocked=dict(created["blocked"]), blocked_detail=dict(created["blocked_detail"]),
+                split_blanks=created["split_blanks"],
+                usable_before=usable_before, usable_after=usable(), skipped_before=skipped_before, skipped_after=skipped())
 
 
-CLASSIFICATION_VERSION = "types-by-text/1"
+def import_breakdown(conn, samples_per_group=2, excerpt=70):
+    """What the import produced, per question type: items by status, the skip reasons (with the finer detail), and how many items
+    came from the three widened routes (options parsed by the new rules are not tracked separately: they are plain items).
+    `samples` holds up to `samples_per_group` short excerpts per (type, group) so the owner can eyeball the result."""
+    by_status = defaultdict(dict)
+    for r in conn.execute(
+        "SELECT question_type AS t, CASE WHEN status='blocked' THEN 'blocked:'||blocked_reason||COALESCE(':'||blocked_detail,'') "
+        "ELSE status END AS k, count(*) AS n FROM past_exam_items WHERE blocked_reason IS DISTINCT FROM 'reclassified' "
+        "GROUP BY 1,2 ORDER BY 1,2"
+    ).fetchall():
+        by_status[r["t"]][r["k"]] = r["n"]
+    usable = {r["t"]: r["n"] for r in conn.execute(
+        "SELECT question_type AS t, count(*) AS n FROM past_exam_items WHERE status<>'blocked' GROUP BY 1").fetchall()}
+    groups = {
+        "single_choice": "question_type='single_choice' AND status<>'blocked'",
+        "table_layout_let_through": "table_layout AND status<>'blocked'",
+        "split_blank": "source_blank_index IS NOT NULL AND status<>'blocked'",
+    }
+    samples = {}
+    for name, where in groups.items():
+        rows = conn.execute(
+            f"SELECT question_type AS t, left(stem, %s) AS stem, options, source_blank_index AS blank, source_blank_count AS of, "
+            f"year FROM past_exam_items WHERE {where} ORDER BY id DESC LIMIT %s", (excerpt, samples_per_group)).fetchall()
+        samples[name] = [dict(r) for r in rows]
+    return dict(by_type_and_status={t: dict(v) for t, v in by_status.items()}, usable_by_type=usable, samples=samples)
+
+
+CLASSIFICATION_VERSION = "types-by-text/2"      # 2: wider option parsing, layout tables let through, multi-blank questions split
 
 
 def reclassify_once(conn):
@@ -620,11 +867,20 @@ def _style_unit(conn, item):
     if (
         unit["source_kind"] != "exam_transcription"
         or unit["subject"] != item["subject"]
-        or set(unit["quality_flags"] or []) & STYLE_SOURCE_BLOCKERS
+        or _blocking_flags(unit, item)
         or not pinned_source_bytes(unit["file_id"], unit["source_sha256"])
     ):
         raise ValueError("past_exam_source_not_locked")
     return unit
+
+
+def _blocking_flags(unit, item):
+    """The source paragraph's flags that stop it being shown as the style example. A table that only laid the question out
+    (item.table_layout, decided at import by table_dependency) does not count."""
+    flags = set(unit["quality_flags"] or [])
+    if item.get("table_layout"):
+        flags -= _TABLE
+    return flags & STYLE_SOURCE_BLOCKERS
 
 
 def _payload(conn, item, units, draft=None):

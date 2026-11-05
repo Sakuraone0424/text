@@ -77,6 +77,12 @@ _COMMON = (
     "A criterion may summarise or reword a paragraph (it need not be word for word) but must be supported in meaning "
     "by it. If a paragraph is cut off (for example it ends in the middle of a list such as '④ 受体鸟'), do not write "
     "the cut-off part into any scoring criterion. "
+    "STYLE: write a graduate-entrance (考研) knowledge question in the manner of the genuine past exams. It tests the biological "
+    "knowledge ITSELF. NEVER write 'according to the textbook / this chapter / this section / the literature / the information provided', "
+    "never refer to a figure or table ('图 X', '表 X', '下图'), never ask which statement is 'consistent with the textbook', and never "
+    "ask about authors, years or titles of cited papers. Options compare biological facts (mechanisms, structures, functions, "
+    "conditions), never the wording of the textbook. The stem must be answerable by someone who knows the subject, without "
+    "having read the supplied paragraph. A fill-in's answer must not appear anywhere in its stem. "
     "When evidence is insufficient, decline generation rather than invent an answer. "
     "Independent science and answer reviews will still be required."
 )
@@ -115,11 +121,22 @@ _SCHEMA_CONTRACT = (
     "rather than fabricate missing claims; a declined response is rejected. "
 )
 
+# Reading-comprehension wording. A past exam asks about the biology itself; it never says "according to the textbook / this
+# chapter / the literature" or asks which statement agrees with the textbook.
+_READING_STYLE = re.compile(
+    r"根据(?:教材|本章|本节|本书|本文|所给|所提供|上述|下述|以下)|教材(?:中|上|里)?(?:所述|表述|描述|内容|的说法|提到)|"
+    r"与(?:教材|文献|原文|上述|本章)[^，。？；]{0,8}(?:一致|相符|相同|不符|吻合)|本章|本节|"
+    r"文献(?:信息|资料|中|所)|所提供的(?:文献|材料|信息)|研究(?:了|的是)[^，。]{0,30}[（(]\s*(?:19|20)\d{2}\s*[)）]|"
+    r"[A-Z][a-zA-Zö]+\s*等\s*[（(]\s*(?:19|20)\d{2}|表\s*\d+\s*[-－.]?\s*\d*"
+)
+
 _UNANSWERABLE = re.compile(
     r"待补充|答案待定|暂无答案|无法核实|TODO|PLACEHOLDER|示例题目|测试题目",
     re.IGNORECASE,
 )
-_MISSING_ASSET = re.compile(r"如图所示|见下图|根据下图|见图\s*[0-9一二三四五六]*")
+_MISSING_ASSET = re.compile(
+    r"如图所示|见下图|根据下图|见图\s*[0-9一二三四五六]*|[（(]\s*图\s*[0-9一二三四五六七八九十]|图\s*\d+\s*[-－–]\s*\d+|下图|上图"
+)
 _UNHELPFUL_CHOICE = re.compile(
     r"^(以上(都|均|全部)|上述(都|均)|都(正确|不正确)|均(正确|错误)|"
     r"全部(正确|错误)|都不是|以上都不是|无法判断|信息不足)$"
@@ -149,8 +166,10 @@ def issues(question):
         problems.append("unknown_question_type")
     if _UNANSWERABLE.search(stem + " " + answer):
         problems.append("unresolved_placeholder")
-    if _MISSING_ASSET.search(stem):
+    if _MISSING_ASSET.search(stem + " " + " ".join(str(v) for v in (q.get("options") or {}).values())):
         problems.append("unavailable_figure_reference")
+    if _READING_STYLE.search(stem + " " + " ".join(str(v) for v in (q.get("options") or {}).values())):
+        problems.append("textbook_wording_in_stem")
     if kind == "single_choice":
         if any(_UNHELPFUL_CHOICE.fullmatch(str(value).strip()) for value in q.get("options", {}).values()):
             problems.append("unhelpful_all_or_none_distractor")
@@ -159,6 +178,11 @@ def issues(question):
     elif kind == "fill_blank":
         if not q.get("blanks") and not q.get("accepted_answers"):
             problems.append("missing_accepted_answer_set")
+        # The answer written in the question itself is no question: 「位于动粒外侧……动粒的____」 answered 「外」.
+        shown = stem.replace("____", "")
+        given = {str(a).strip() for a in [answer, *(q.get("accepted_answers") or [])] if str(a).strip()}
+        if any(a in shown and not re.fullmatch(r"[A-Za-z0-9]", a) for a in given):
+            problems.append("answer_disclosed_in_stem")
     elif kind in ("term", "short_answer", "essay"):
         min_len = 16 if kind == "term" else 32
         if len(re.sub(r"\s+", "", answer)) < min_len:

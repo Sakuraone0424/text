@@ -10,7 +10,7 @@ from app.db import get_db
 from app import cost_control
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
 from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
-from app import cost_reconcile
+from app import cny_prices, cost_reconcile
 from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
@@ -143,6 +143,7 @@ def plan(conn, uid, target=None):
     auto_quality.requeue_past_exam_duplicates(conn)   # before anything can retire them
     auto_quality.retire_stale(conn)
     auto_quality.retire_old_scoring(conn)
+    auto_quality.retire_unusable_sources(conn)   # literature-list sources, missing figures, answers written in the stem
     auto_quality.discard_unfixable(conn)
     for row in conn.execute(
         "SELECT p.question_id FROM candidate_review_packets p LEFT JOIN auto_question_states s ON s.question_id=p.question_id WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) AND (s.question_id IS NULL OR s.status='candidate') ORDER BY p.question_id LIMIT 10"
@@ -218,13 +219,28 @@ def calls_per_run(env=None):
 # there is still room for one more typical call before the deadline.
 SHUTDOWN = threading.Event()   # set by SIGTERM (a deploy restarts the worker): claim nothing more
 SHUTDOWN_GRACE_SECONDS = 30    # calls whose request is already out get this long to bring their result back
-DEFAULT_RUN_SECONDS = 240
+DEFAULT_RUN_SECONDS = 270      # a run's hard end: 4 min 30 s after it started (the next cron start is at 5 min)
 EXPECTED_CALL_SECONDS = 60
 SAFETY_SECONDS = 15
+DEFAULT_START_CUTOFF_SECONDS = 210   # no new call is started after 3 min 30 s
+MAX_BATCHES = 8                      # a safety stop: a run never loops more often than this
+WORKER_RUN_LOCK = 770000001          # advisory lock: one worker run at a time
+
+
+def start_cutoff_seconds(env=None):
+    """AI_START_CUTOFF_SECONDS: after this long since the run began no new model call is started (default 210 = 3 min 30 s,
+    between 30 and 240). Calls already out may bring their result back until run_seconds()."""
+    raw = (os.environ if env is None else env).get("AI_START_CUTOFF_SECONDS", "")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_START_CUTOFF_SECONDS
+    return min(max(value, 30), 240)
 
 
 def run_seconds(env=None):
-    """AI_RUN_SECONDS: whole-run time budget, default 240, between 60 and 270."""
+    """AI_RUN_SECONDS: the run's hard end, default 270 (4 min 30 s), between 60 and 270. Calls still out then are given up on:
+    their cost stays an estimate and their jobs are queued again, so a run is always over before the next cron start."""
     raw = (os.environ if env is None else env).get("AI_RUN_SECONDS", "")
     try:
         value = int(raw)
@@ -246,9 +262,10 @@ class CallPool:
     whether a job may run: that stays in ai_jobs.claim.
     """
 
-    def __init__(self, get_db_, executor, workers, limit, seconds, clock=time.monotonic):
+    def __init__(self, get_db_, executor, workers, limit, seconds, clock=time.monotonic, start_cutoff=None):
         self.get_db, self.executor = get_db_, executor
         self.workers, self.limit, self.seconds, self.clock = max(1, workers), limit, seconds, clock
+        self.start_cutoff = start_cutoff   # seconds after the pool starts beyond which no NEW call begins (None: the old room rule)
         self.lock = threading.Lock()
         self.cond = threading.Condition(self.lock)
         self.active = 0           # workers between starting to claim and handing their result on
@@ -269,6 +286,8 @@ class CallPool:
         self.overran = False
 
     def _room_for_another_call(self):
+        if self.start_cutoff is not None:
+            return self.clock() - self.t0 < self.start_cutoff
         expected = max(EXPECTED_CALL_SECONDS, self.longest)
         return self.clock() + expected <= self.deadline - SAFETY_SECONDS
 
@@ -354,9 +373,10 @@ class CallPool:
     def run(self):
         self.t0 = self.clock()
         self.deadline = self.t0 + self.seconds
-        if self.workers == 1:
+        if self.workers == 1 and self.start_cutoff is None:
             self._worker()  # one call at a time: no thread needed
             return self
+        # (With a start cutoff the run has a hard end: the call is watched from outside so a stuck one can be given up on.)
         threads = [threading.Thread(target=self._worker, name=f"call-{i}", daemon=True) for i in range(self.workers)]
         for t in threads:
             t.start()
@@ -408,6 +428,74 @@ def _fmt(value):
     return "-" if value in (None, "") else str(value).replace(" ", "_")
 
 
+def _plan_queue(conn, report, users, private, first):
+    """Fill the queue (so every call of a batch has a job) and put back what should be tried again."""
+    for user in users:
+        if first:
+            upgrade = model_compatibility.auto_upgrade(conn, user["user_id"])
+            report["upgrade"] = upgrade["status"] + (
+                ":" + ",".join(f"{c['model']}={c['reason']}" for c in upgrade.get("candidates", []))
+                if upgrade.get("candidates") else ":" + upgrade["model"] if upgrade.get("model") else ""
+            )
+        if (
+            not user["stopped"]
+            and private
+            and os.environ.get("AI_QUEUE_AUTOPLAN") == "1"
+        ):
+            try:
+                with conn.transaction():
+                    first_new = conn.execute("SELECT COALESCE(max(id),0) AS m FROM ai_jobs").fetchone()["m"]
+                    # queue enough work that every call this batch can make has a job to claim
+                    plan(conn, user["user_id"], target=2 * calls_per_run())
+                    report["planned"] = report.get("planned", 0) + conn.execute(
+                        "SELECT count(*) AS n FROM ai_jobs WHERE id>%s", (first_new,)).fetchone()["n"]
+                    if os.environ.get("AI_FULL_CORPUS_ENABLED") == "1":
+                        auto_knowledge.plan_small_batch(conn, user["user_id"])
+                        auto_generation.plan(conn, user["user_id"])
+                        auto_exams.plan(conn, user["user_id"])
+                    auto_insights.plan(conn, user["user_id"])
+            except ValueError:
+                pass  # Not admitted is not a success; job/probe status remains visible.
+            # Say in the log WHY nothing was planned (no gap at all, or a gap that no request could be written for).
+            try:
+                diagnosis = auto_generation.gap_diagnosis(conn, user["user_id"])
+                report["gap"], report["short_buckets"] = diagnosis["gap"], diagnosis["buckets"]
+                if diagnosis["gap"] and not report.get("planned"):
+                    report["plan_note"] = "gap_but_no_request_could_be_written"
+            except Exception:  # noqa: BLE001  (a log nicety must never stop a run)
+                pass
+    # Retry budget/stopped jobs only when user explicitly enabled new attempts.
+    conn.execute(
+        "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' "
+        "AND (j.error_code IN ('budget_exceeded','automation_stopped') OR j.error_code LIKE ANY(%s))",
+        ([c + "%" for c in ai_jobs.MODEL_GONE_CODES],),
+    )
+    # Jobs an earlier run blocked only because DeepSeek was busy or unreachable go back to the queue.
+    report["requeued_busy"] = report.get("requeued_busy", 0) + ai_jobs.requeue_platform_blocked(conn)
+
+
+def batch_exit_reason(pool, limit, busy_calls):
+    """Why a run should stop after this batch (None: carry on with the next one). Codes only."""
+    if SHUTDOWN.is_set():
+        return "shutdown"
+    if pool.overran:
+        return "overran"
+    if pool.calls and busy_calls * 2 > pool.calls:
+        return "platform_busy"                       # DeepSeek answered 503/429 to most of this batch
+    if pool.calls < limit:
+        code = str(pool.stopped_because or "no_claimable_job")
+        if code == "run_time_budget":
+            return "time_cutoff"
+        if code.startswith("no_claimable_job"):
+            return "peak_hours" if pool.last_claim.get("held_back") else "queue_empty"
+        if "budget" in code:
+            return "budget_exhausted"
+        if code.startswith("blocked:automation_stopped"):
+            return "automation_stopped"
+        return "stopped:" + code.split(":")[0]
+    return None
+
+
 def run(report):
     """One worker run. Fills `report` (ids, counts and codes only; no secrets, no textbook text)."""
     run_began = time.monotonic()
@@ -416,10 +504,12 @@ def run(report):
     report["autoplan"] = "1" if os.environ.get("AI_QUEUE_AUTOPLAN") == "1" else "0"
     report["bank_target"] = cost_control.bank_target() or "-"
     report["planned"] = 0
+    report["batches"] = 0
     os.environ["QUIZ_SERVICE_ROLE"] = (
         "worker"  # Short jobs never own the API backup volume.
     )
     if raw != "1":
+        report["exit_reason"] = "disabled"
         return
     from app.deployment_target import verify_isolated_target
 
@@ -429,6 +519,18 @@ def run(report):
         raise PermissionError("Explicit isolated source schema required")
     model_router.authorized()
     report["authorized"] = "ok"
+    # Only one run at a time, whatever starts it: if the previous run is somehow still going, this one leaves at once.
+    # (A transaction-level lock on a connection that stays open for the whole run; it is dropped when the run ends or dies.)
+    with get_db() as lock_conn:
+        got = lock_conn.execute("SELECT pg_try_advisory_xact_lock(%s) AS got", (WORKER_RUN_LOCK,)).fetchone()["got"]
+        if not got:
+            report["skipped"] = "already_running"
+            report["exit_reason"] = "already_running"
+            return
+        _locked_run(report, run_began)
+
+
+def _locked_run(report, run_began):
     tick()
     integrations_tick()  # Prepare at the scheduled tick before any long model task.
     private = os.environ.get("DEEPSEEK_PRIVATE_DATA_AUTHORIZED") == "1"
@@ -456,47 +558,18 @@ def run(report):
                 with conn.transaction():
                     refresh(conn)
                 report["price_refresh"] = "ok"
+                cny_prices.remember_success(conn)
             except (ValueError, httpx.HTTPError) as exc:
-                report["price_refresh"] = "failed:" + type(exc).__name__
+                code = cny_prices.failure_code(exc)
+                report["price_refresh"] = "failed:" + code        # (a fixed code, never page text)
+                cny_prices.remember_failure(conn, code)
                 # Missing/expired/conflicting prices block new calls at claim().
         if (
             any(u["auto_discover"] for u in users)
             and model_router.catalog(conn)["stale"]
         ):
             model_router.refresh(conn)
-        for user in users:
-            upgrade = model_compatibility.auto_upgrade(conn, user["user_id"])
-            report["upgrade"] = upgrade["status"] + (
-                ":" + ",".join(f"{c['model']}={c['reason']}" for c in upgrade.get("candidates", []))
-                if upgrade.get("candidates") else ":" + upgrade["model"] if upgrade.get("model") else ""
-            )
-            if (
-                not user["stopped"]
-                and private
-                and os.environ.get("AI_QUEUE_AUTOPLAN") == "1"
-            ):
-                try:
-                    with conn.transaction():
-                        first_new = conn.execute("SELECT COALESCE(max(id),0) AS m FROM ai_jobs").fetchone()["m"]
-                        # queue enough work that every call this run can make has a job to claim
-                        plan(conn, user["user_id"], target=2 * calls_per_run())
-                        report["planned"] = report.get("planned", 0) + conn.execute(
-                            "SELECT count(*) AS n FROM ai_jobs WHERE id>%s", (first_new,)).fetchone()["n"]
-                        if os.environ.get("AI_FULL_CORPUS_ENABLED") == "1":
-                            auto_knowledge.plan_small_batch(conn, user["user_id"])
-                            auto_generation.plan(conn, user["user_id"])
-                            auto_exams.plan(conn, user["user_id"])
-                        auto_insights.plan(conn, user["user_id"])
-                except ValueError:
-                    pass  # Not admitted is not a success; job/probe status remains visible.
-        # Retry budget/stopped jobs only when user explicitly enabled new attempts.
-        conn.execute(
-            "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' "
-            "AND (j.error_code IN ('budget_exceeded','automation_stopped') OR j.error_code LIKE ANY(%s))",
-            ([c + "%" for c in ai_jobs.MODEL_GONE_CODES],),
-        )
-        # Jobs an earlier run blocked only because DeepSeek was busy or unreachable go back to the queue.
-        report["requeued_busy"] = ai_jobs.requeue_platform_blocked(conn)
+        _plan_queue(conn, report, users, private, True)
         states, held, head = queue_snapshot(conn)
         report["queue"] = ",".join(f"{k}={v}" for k, v in sorted(states.items())) or "empty"
         report["peak_held"] = ",".join(held) or "-"
@@ -513,19 +586,53 @@ def run(report):
     with get_db() as conn:
         workers, adaptive = adaptive_concurrency(conn, configured)
     report["adaptive"] = adaptive
-    pool = CallPool(get_db, execute, workers, limit, run_seconds() - (time.monotonic() - run_began)).run()
-    report["calls"] = pool.calls
     report["concurrency"] = workers
+    cutoff, hard = start_cutoff_seconds(), run_seconds()
+    calls, ran, claimed, peak, overran = 0, 0, [], 0, False
+    exit_reason, pool = None, None
+    try:
+        # Batch after batch (AI_CALLS_PER_RUN calls each) while the run is young enough to start another and there is
+        # something to do. The first batch always starts; no batch starts after the cutoff; calls still out at `hard` are
+        # given up on and queued again, so the run is over before the next cron start.
+        while True:
+            elapsed = time.monotonic() - run_began
+            if ran or pool is not None:
+                if elapsed >= cutoff:
+                    exit_reason = "time_cutoff"
+                    break
+                with get_db() as conn:      # the same preparation as before the first batch
+                    dispatch_completed(conn)
+                    _plan_queue(conn, report, conn.execute("SELECT * FROM ai_settings").fetchall(), private, False)
+            with get_db() as conn:
+                batch_since = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
+            pool = CallPool(get_db, execute, workers, limit, hard - elapsed, start_cutoff=max(cutoff - elapsed, 0)).run()
+            calls += pool.calls
+            claimed += list(pool.claimed)
+            peak = max(peak, pool.peak)
+            overran = overran or pool.overran
+            ran += 1 if pool.calls else 0
+            if pool.errors:
+                raise pool.errors[0]
+            with get_db() as conn:
+                busy_503, busy_429, _ = platform_trouble(conn, batch_since)
+            exit_reason = batch_exit_reason(pool, limit, busy_503 + busy_429)
+            if exit_reason:
+                break
+            if ran >= MAX_BATCHES:
+                exit_reason = "max_batches"
+                break
+    finally:
+        report["calls"] = calls
+        report["batches"] = ran
+        report["exit_reason"] = exit_reason or "error"
+        report["parallel_peak"] = peak
+        report["claimed"] = ",".join(str(c) for c in claimed) or "-"
+        if overran:
+            report["overran"] = "yes"  # a call was still running at the deadline; its lease expires and it is retried
     with get_db() as conn:
         report["http_503"], report["http_429"], report["timeouts"] = platform_trouble(conn, report["since"])
-    report["parallel_peak"] = pool.peak
-    report["claimed"] = ",".join(str(c) for c in pool.claimed) or "-"
-    if pool.overran:
-        report["overran"] = "yes"  # a call was still running at the deadline; its lease expires and it is retried
-    if pool.errors:
-        raise pool.errors[0]
-    # Why the run stopped early (set by ai_jobs.claim; ids, kinds and codes only).
-    if pool.calls < limit:
+    # Why the last batch stopped early (set by ai_jobs.claim; ids, kinds and codes only).
+    if pool is not None and pool.calls < limit:
         report["stopped_because"] = _fmt(pool.stopped_because)
         for key in ("job_id", "kind", "running", "limit", "held_back"):
             if key in pool.last_claim:
@@ -627,7 +734,8 @@ def main():
         report["error"] = type(exc).__name__ + (":" + str(exc)[:120].replace(" ", "_") if safe else "")
         code = 1
     report["duration_s"] = f"{(datetime.now(timezone.utc) - started).total_seconds():.1f}"  # the whole run
-    record_heartbeat(report, started, report.get("error", "").split(":")[0] if code else "")
+    if not report.get("skipped"):                 # a run that left at once (the previous one still going) is not a run
+        record_heartbeat(report, started, report.get("error", "").split(":")[0] if code else "")
     report.pop("since", None)
     print("worker-run " + " ".join(f"{k}={_fmt(v)}" for k, v in report.items()), flush=True)
     if code:

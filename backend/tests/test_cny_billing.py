@@ -375,8 +375,10 @@ def test_public_price_parser_cny_and_layout_fail_closed():
     assert prices[0]["official_effective_at"] is None
     with pytest.raises(ValueError):
         parse(html.replace("0.02元", "0.02 USD"))
-    with pytest.raises(ValueError):
-        parse(html.replace("每 1,000 次成功请求", "每次请求"))
+    # The Search & Fetch table is not needed for model prices: a reshaped one drops the tool rates (tools stay disabled and
+    # tool_cost fails closed without them) instead of blocking the model prices.
+    reshaped = parse(html.replace("每 1,000 次成功请求", "每次请求"))
+    assert "search_per_success" not in reshaped[0]["rules"] and reshaped[0]["rules"]["network_tools_enabled"] is False
 
 
 def test_offpeak_usage_estimate_and_cross_boundary():
