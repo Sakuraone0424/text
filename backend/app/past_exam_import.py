@@ -981,7 +981,7 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
     term_room = term_room_now(conn)
     from app import auto_generation
 
-    satisfied = set(auto_generation.satisfied_keys(conn, uid, cached=False))   # buckets that need nothing more
+    satisfied = set(auto_generation.satisfied_keys(conn, uid))   # buckets that need nothing more
     for item in conn.execute(
         "SELECT * FROM past_exam_items WHERE status='imported' ORDER BY "
         + _PRIORITY_SQL

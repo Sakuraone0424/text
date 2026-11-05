@@ -117,7 +117,9 @@
     const step = Math.max(1, Math.ceil(labels.length / 5));
     labels.forEach((p, i) => {
       if (i % step && i !== labels.length - 1) return;
-      svg("text", { x: x(i), y: H - 8, "text-anchor": "middle", fill: COLORS.axis, "font-size": 11 }, chart).textContent = p.label;
+      // the end labels hang inward so they never leave the chart
+      const anchor = labels.length > 1 && i === labels.length - 1 ? "end" : labels.length > 1 && i === 0 && x(i) < L + 14 ? "start" : "middle";
+      svg("text", { x: anchor === "end" ? Math.min(x(i) + 4, W) : x(i), y: H - 8, "text-anchor": anchor, fill: COLORS.axis, "font-size": 11 }, chart).textContent = p.label;
     });
     series.forEach((s) => {
       const pts = s.points.map((p, i) => (p.value === null || p.value === undefined ? null : [x(i), y(p.value), p, i]));
@@ -156,16 +158,30 @@
     const list = html("div", undefined, f.body, "hbars");
     items.forEach((item) => {
       const row = html("div", undefined, list, "hbar-row");
+      const grouped = Boolean(item.sub);
       const head = html("div", undefined, row, "hbar-head");
       html("span", item.label, head, "hbar-label");
-      html("span", item.valueText || format(item.value), head, "hbar-value");
+      // a grouped item shows each bar's own value on the bar's line; a single bar keeps its value in the heading
+      if (!grouped) html("span", item.valueText || format(item.value), head, "hbar-value");
       (item.sub || [{ name: item.label, value: item.value, color: item.color }]).forEach((bar) => {
-        const track = html("div", undefined, row, "hbar-track");
+        const none = bar.value === null || bar.value === undefined;
+        const line = html("div", undefined, row, grouped ? "hbar-line sub" : "hbar-line");
+        // every bar says whose it is: 「生化」「细胞」 in the subject's colour, the value after it (0% is 0%, no data is 暂无)
+        if (grouped) {
+          const tag = html("span", bar.name, line, "hbar-name");
+          tag.style.setProperty("--dot", bar.color || item.color || COLORS.biochemistry);
+        }
+        const track = html("div", undefined, line, "hbar-track" + (none ? " none" : ""));
         const fill = html("i", undefined, track);
         const max = item.max || 1;
-        fill.style.width = (bar.value === null || bar.value === undefined ? 0 : Math.max(0, Math.min(100, (bar.value / max) * 100))) + "%";
+        const share = none ? 0 : Math.max(0, Math.min(100, (bar.value / max) * 100));
+        fill.style.width = (!none && share === 0 ? 0.8 : share) + "%";       // a real 0% keeps a hairline: it is a result, not a missing bar
         fill.style.background = bar.color || item.color || COLORS.biochemistry;
-        const text = `${item.label}${item.sub ? " · " + bar.name : ""}：${bar.value === null || bar.value === undefined ? "暂无数据" : format(bar.value)}${item.note ? "（" + item.note + "）" : ""}`;
+        if (grouped) html("span", none ? "暂无" : format(bar.value), line, "hbar-num" + (none ? " none" : ""));
+        const count = bar.answers ? `，共 ${bar.answers} 题` : "";
+        const text = grouped
+          ? `${item.label} · ${bar.name}${none ? "：暂无作答" : "得分率 " + format(bar.value) + count}${item.note ? "（" + item.note + "）" : ""}`
+          : `${item.label}：${none ? "暂无数据" : format(bar.value)}${item.note ? "（" + item.note + "）" : ""}`;
         bind(track, f.readout, text);
       });
     });
@@ -184,6 +200,7 @@
       T = 14,
       B = 28;
     const refs = spec.refLines || [];
+    const legendItems = spec.legend || [];
     const top = spec.max ?? Math.max(1, ...items.map((i) => i.value), ...refs.map((r) => r.value));
     const y = (v) => T + (1 - v / top) * (H - T - B);
     const format = spec.format || num;
@@ -201,6 +218,7 @@
     items.forEach((item, i) => {
       const cx = L + slot * i + slot / 2;
       const h = Math.max(item.value > 0 ? 2 : 0, (H - T - B) * (item.value / top));
+      if (item.value === 0) svg("text", { x: cx, y: H - B - 4, "text-anchor": "middle", fill: COLORS.axis, "font-size": 10 }, chart).textContent = "0";   // a real zero is shown, not left blank
       const rect = svg("rect", { x: cx - bar / 2, y: H - B - h, width: bar, height: h, rx: 3, fill: item.color || COLORS.biochemistry, class: "chart-bar" }, chart);
       bind(rect, f.readout, `${item.label}：${format(item.value)}${spec.unit ? " " + spec.unit : ""}${item.note ? "（" + item.note + "）" : ""}`);
       if (i % step === 0 || i === items.length - 1)
@@ -211,6 +229,15 @@
       svg("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: ref.color || COLORS.warn, "stroke-width": 1.4, "stroke-dasharray": "5 4" }, chart);
       svg("text", { x: W - R, y: yy - 4, "text-anchor": "end", fill: ref.color || COLORS.warn, "font-size": 11, "font-weight": 700 }, chart).textContent = ref.label;
     });
+    // colours that carry a meaning are explained (legend: [{label, color}])
+    if (legendItems.length) {
+      const legend = html("div", undefined, f.body, "chart-legend");
+      legendItems.forEach((l) => {
+        const item = html("span", undefined, legend);
+        html("i", undefined, item).style.background = l.color;
+        item.append(l.label);
+      });
+    }
     return root;
   }
 
@@ -231,36 +258,67 @@
     return root;
   }
 
-  /* heatmap({title, cells:[{day,value(0..1),note}], weeks}) : columns are weeks, rows Monday..Sunday */
+  /* heatmap({title, cells:[{day,today,value(0..1),answered,note}]}) : columns are weeks, rows Monday..Sunday.
+     A CSS grid: the cell size is whatever the card's width leaves after the weekday labels and the gaps, so nothing can
+     overflow at any width. Month names sit above the week in which a month begins. */
   function heatmap(root, spec) {
     const cells = spec.cells || [];
     if (!cells.some((c) => c.value > 0)) return empty(root, spec);
     const f = frame(root, { ...spec, readoutHint: "点按某一天查看当天做题量" });
-    const weeks = Math.ceil(cells.length / 7);
+    f.readout.hidden = true;                                   // the tip above the tapped day replaces the readout line
     const first = new Date(cells[0].day + "T00:00:00");
-    const lead = (first.getDay() + 6) % 7; // Monday = 0
-    const size = 15,
-      gap = 4,
-      L = 22;
-    const W = L + weeks * (size + gap) + 4,
-      H = 7 * (size + gap) + 16;
-    const chart = svg("svg", { viewBox: `0 0 ${W + 0} ${H}`, role: "img", class: "chart-svg heat" }, f.body);
-    chart.setAttribute("aria-label", `${spec.title}：最近${weeks}周。${spec.conclusion || ""}`);
-    svg("title", {}, chart).textContent = spec.title;
-    ["一", "三", "五", "日"].forEach((name, k) =>
-      svg("text", { x: 0, y: [0, 2, 4, 6][k] * (size + gap) + size - 2, fill: COLORS.axis, "font-size": 10 }, chart).textContent = name,
-    );
+    const lead = (first.getDay() + 6) % 7;                      // Monday = 0
+    const weeks = Math.ceil((lead + cells.length) / 7);         // (the first and last week are usually partial)
+    const wrap = html("div", undefined, f.body, "heat-wrap");
+    const grid = html("div", undefined, wrap, "heat-grid");
+    grid.style.setProperty("--weeks", String(weeks));
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", `${spec.title}：最近${weeks}周，列是周，行是星期。${spec.conclusion || ""}`);
+    const month = (d) => d.getMonth() + 1;
+    // month labels: the week column holding the 1st of a month; the first column too when no 1st follows closely
+    const labels = new Map();
     cells.forEach((cell, index) => {
-      const slot = index + lead,
-        col = Math.floor(slot / 7),
-        row = slot % 7;
+      const d = new Date(cell.day + "T00:00:00");
+      if (d.getDate() === 1) labels.set(Math.floor((index + lead) / 7), month(d) + "月");
+    });
+    if (!labels.has(0) && ![...labels.keys()].some((c) => c <= 2)) labels.set(0, month(first) + "月");
+    labels.forEach((text, col) => {
+      const m = html("span", text, grid, "heat-month");
+      m.style.gridColumn = String(col + 2);
+      m.style.gridRow = "1";
+    });
+    ["一", "二", "三", "四", "五", "六", "日"].forEach((name, row) => {
+      const w = html("span", name, grid, "heat-day" + (row % 2 === 0 ? "" : " minor"));
+      w.style.gridColumn = "1";
+      w.style.gridRow = String(row + 2);
+    });
+    let tip = null;
+    const hide = () => { if (tip) { tip.remove(); tip = null; } grid.querySelectorAll(".heat-cell.on").forEach((c) => c.classList.remove("on")); };
+    const outside = (e) => { if (!root.isConnected) return document.removeEventListener("pointerdown", outside, true); if (!wrap.contains(e.target) || e.target === wrap || e.target === grid) hide(); };
+    document.addEventListener("pointerdown", outside, true);
+    const dayText = (cell) => { const d = new Date(cell.day + "T00:00:00"); return `${month(d)}月${d.getDate()}日 · ${cell.answered ?? 0} 道`; };
+    cells.forEach((cell, index) => {
+      const slot = index + lead;
       const level = cell.value > 0 ? Math.max(1, Math.min(4, Math.ceil(cell.value * 4))) : 0; // five levels: 0..4
-      const rect = svg("rect", {
-        x: L + col * (size + gap), y: row * (size + gap), width: size, height: size, rx: 4,
-        fill: `var(--heat-${level})`, class: "heat-cell",
-        ...(cell.today ? { stroke: COLORS.biochemistry, "stroke-width": 1.5, "stroke-dasharray": "3 2" } : {}),
-      }, chart);
-      bind(rect, f.readout, `${cell.day}：${cell.note}`);
+      const box = html("button", undefined, grid, "heat-cell" + (cell.today ? " today" : ""));
+      box.type = "button";
+      box.style.gridColumn = String(Math.floor(slot / 7) + 2);
+      box.style.gridRow = String((slot % 7) + 2);
+      box.style.background = `var(--heat-${level})`;
+      box.setAttribute("aria-label", dayText(cell) + (cell.note ? "，" + cell.note.replace(/^做题 \d+ 道，?/, "") : "") + (cell.today ? "（今天）" : ""));
+      box.onclick = () => {
+        const same = box.classList.contains("on");
+        hide();
+        if (same) return;
+        box.classList.add("on");
+        tip = html("span", dayText(cell), wrap, "heat-tip");
+        tip.setAttribute("role", "status");
+        const left = box.offsetLeft + box.offsetWidth / 2, top = box.offsetTop;
+        tip.style.left = left + "px";
+        tip.style.top = top + "px";
+        const half = tip.offsetWidth / 2;                       // keep the tip inside the card
+        tip.style.left = Math.max(half, Math.min(wrap.clientWidth - half, left)) + "px";
+      };
     });
     const legend = html("div", undefined, f.body, "heat-legend");
     legend.append("少");

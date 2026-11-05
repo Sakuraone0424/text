@@ -213,12 +213,14 @@ def profile(conn, uid):
              subjects={s: dict(points=v[0], max=v[1], rate=rate(*v)) for s, v in p["subjects"].items()})
         for p in done[-30:]
     ]
-    types = defaultdict(lambda: [0, 0])
+    types = defaultdict(lambda: [0, 0, 0])
     for r in rows:
         if r["points"] is not None:
             types[(r["subject"], r["qtype"])][0] += r["points"]
             types[(r["subject"], r["qtype"])][1] += r["max_points"]
-    type_rates = [dict(subject=s, question_type=t, rate=rate(*types[(s, t)]), max=types[(s, t)][1]) for s in SUBJECTS for t in TYPES if types[(s, t)][1]]
+            types[(r["subject"], r["qtype"])][2] += 1
+    type_rates = [dict(subject=s, question_type=t, rate=rate(types[(s, t)][0], types[(s, t)][1]), max=types[(s, t)][1], answers=types[(s, t)][2])
+                  for s in SUBJECTS for t in TYPES if types[(s, t)][1]]
     # calendar: last 8 weeks, one cell per day (questions done and score rate)
     start = today - timedelta(days=55)
     cells = defaultdict(lambda: [0, 0, 0])

@@ -303,8 +303,8 @@
     const total = data.calendar.reduce((s, x) => s + x.answered, 0);
     C.heatmap(el("div", undefined, e), {
       title: "刷题日历", hideTitle: true,
-      cells: data.calendar.map((x) => ({ day: x.day, today: x.day === data.today, value: x.answered / 60, note: `做题 ${x.answered} 道${x.rate === null ? "" : "，得分率 " + pct(x.rate)}` })),
-      conclusion: total ? `最近 8 周有 ${days} 天做了题，共 ${total} 道。` : "",
+      cells: data.calendar.map((x) => ({ day: x.day, today: x.day === data.today, value: x.answered / 60, answered: x.answered, note: `做题 ${x.answered} 道${x.rate === null ? "" : "，得分率 " + pct(x.rate)}` })),
+      conclusion: total ? `最近 8 周有 ${days} 天做了题，共 ${total} 道。当前连续 ${data.summary?.streak_current ?? 0} 天。` : "",
       empty: "做完首套后显示每天的做题量",
     });
     // e) chapters: subject switch on the right
@@ -371,16 +371,22 @@
       conclusion: sameSpec + (parts.length ? parts.join("；") + "。" : "再完成一套就能看到变化。"),
     });
   }
+  const MIN_ANSWERS_FOR_CONCLUSION = 2;     // a cell with fewer answered questions says nothing yet
   function typeRates(root, rows) {
     const items = TYPES.filter((t) => rows.some((r) => r.question_type === t)).map((t) => {
-      const sub = ["biochemistry", "cell_biology"].map((s) => ({ name: SHORT[s], color: COLOR[s], value: rows.find((r) => r.subject === s && r.question_type === t)?.rate ?? null }));
-      return { label: TYPE[t], sub, value: null, valueText: sub.map((x) => `${x.name} ${pct(x.value)}`).join(" · "), max: 1, type: t };
+      const sub = ["biochemistry", "cell_biology"].map((s) => {
+        const r = rows.find((x) => x.subject === s && x.question_type === t);
+        return { name: SHORT[s], color: COLOR[s], value: r ? r.rate : null, answers: r ? r.answers : 0 };
+      });
+      return { label: TYPE[t], sub, value: null, max: 1, type: t };
     });
-    const flat = rows.filter((r) => r.rate !== null).sort((a, b) => a.rate - b.rate)[0];
+    // one useful sentence, and only from cells with enough answers behind them
+    const enough = rows.filter((r) => r.rate !== null && (r.answers ?? 0) >= MIN_ANSWERS_FOR_CONCLUSION).sort((a, b) => a.rate - b.rate)[0];
     C.hbars(root, {
-      title: "题型得分率", unit: "按题型 · 两科对比", items, format: pct,
-      conclusion: flat ? `${TYPE[flat.question_type]}题得分率最低：${SHORT[flat.subject]} ${pct(flat.rate)}。` : "",
+      title: "题型得分率", unit: "按题型 · 生化 / 细胞", items, format: pct,
+      conclusion: enough ? `${TYPE[enough.question_type]}题得分率最低：${SHORT[enough.subject]} ${pct(enough.rate)}，建议优先复习。` : "",
       empty: "完成第一套卷子后显示", emptyHint: "已判分的题按题型汇总，两科分组对比。",
+      readoutHint: "点按条形查看这一格的得分率和题数",
     });
   }
   function chapters(card, rows) {
@@ -407,6 +413,13 @@
         row.onclick = () => chapterPractice(current, r.chapter);
       });
     };
+    const key = el("p", undefined, card, "chart-legend");
+    const swatch = el("span", undefined, key);
+    el("i", undefined, swatch).style.background = C.COLORS.cell_biology;
+    swatch.append("正确率低于 50%");
+    const swatch2 = el("span", undefined, key);
+    el("i", undefined, swatch2).style.background = C.COLORS.biochemistry;
+    swatch2.append("50% 及以上");
     const toggle = el("div", undefined, head, "segmented");
     toggle.setAttribute("role", "group");
     toggle.setAttribute("aria-label", "科目");
@@ -434,6 +447,7 @@
     const mmss = (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, "0")}`;
     C.columns(el("div", undefined, card), {
       title: "各题型平均每题用时", hideTitle: true, unit: "每题", items, format: (v) => mmss(v),
+      legend: [{ label: "在建议用时内", color: C.COLORS.biochemistry }, { label: "超出建议用时", color: C.COLORS.cell_biology }],
       conclusion: !t.by_type.length ? "" : over
         ? `${TYPE[over.question_type]}平均每题 ${mmss(over.avg_seconds)}，超出按分值分配的建议用时（${mmss(over.suggested_seconds)}），可以适当压缩。`
         : "各题型都在按分值分配的建议用时内。",
@@ -451,7 +465,7 @@
     const next = r.next_7_days;
     const total = next.reduce((s, x) => s + x.count, 0);
     C.columns(el("div", undefined, card), {
-      title: "未来 7 天到期", unit: "道", items: next.map((x, i) => ({ label: i === 0 ? "今天" : dateLabel(x.day), value: x.count, color: i === 0 ? C.COLORS.cell_biology : C.COLORS.biochemistry })),
+      title: "未来 7 天到期", unit: "道", legend: [{ label: "今天", color: C.COLORS.cell_biology }, { label: "之后", color: C.COLORS.biochemistry }], items: next.map((x, i) => ({ label: i === 0 ? "今天" : dateLabel(x.day), value: x.count, color: i === 0 ? C.COLORS.cell_biology : C.COLORS.biochemistry })),
       conclusion: total ? `未来 7 天共 ${total} 道到期，今天 ${next[0].count} 道。` : "",
       empty: "还没有复习卡片", emptyHint: "答错的题会自动进入复习安排。",
     });
