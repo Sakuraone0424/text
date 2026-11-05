@@ -496,7 +496,8 @@ def batch_exit_reason(pool, limit, busy_calls):
         if code == "run_time_budget":
             return "time_cutoff"
         if code.startswith("no_claimable_job"):
-            return "peak_hours" if pool.last_claim.get("held_back") else "queue_empty"
+            held = str(pool.last_claim.get("held_back") or "")
+            return "daily_quota" if held == "daily_quota" else "peak_hours" if held else "queue_empty"
         if "budget" in code:
             return "budget_exhausted"
         if code.startswith("blocked:automation_stopped"):
