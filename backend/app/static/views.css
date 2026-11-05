@@ -253,3 +253,25 @@ body.is-submitting #questions { opacity: 0.6; }
 /* pull down to refresh */
 .pull-hint { text-align: center; color: var(--muted); font-size: 13px; padding: 8px 0; }
 .pull-hint[hidden] { display: none; }
+
+
+/* the install hint belongs to the home page */
+body:not([data-view="home"]) #a2hs-hint { display: none; }
+
+/* the card title of a question is just its number (subject, type and points are in the tag row above) */
+.training-app .question-card .question-no { font-size: 14px; font-weight: 600; color: var(--muted); margin: 0 0 4px; }
+
+/* the total while the essays are still being graded */
+.training-app .total-score.grading { font-size: 28px; }
+.training-app .total-score.grading small { display: block; font-size: 13px; margin-top: 4px; }
+
+/* review: one question at a time */
+.training-app .review-card { display: flex; flex-direction: column; gap: 10px; }
+.training-app .review-input { width: 100%; min-height: 48px; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; font-size: 16px; background: var(--card); color: var(--ink); }
+.training-app .review-answer { display: flex; flex-direction: column; gap: 8px; }
+.training-app .review-answer .verdict { font-weight: 700; margin: 0; }
+.training-app .review-answer .verdict.ok { color: var(--ok); }
+.training-app .review-answer .verdict.bad { color: var(--warn-ink); }
+.training-app .review-answer .answer-line { font-weight: 600; margin: 0; }
+.training-app .rating-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.training-app .rating-row button:disabled { opacity: 0.35; }

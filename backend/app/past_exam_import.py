@@ -65,7 +65,7 @@ IMPORT_BLOCK_REASONS = frozenset(
 # order and may hold at most PAST_TERM_MAX_SHARE of the generation tasks in flight (set the variable to 1 to restore).
 PAST_TERM_MAX_SHARE = float(os.environ.get("PAST_TERM_MAX_SHARE", "0.2"))
 _PRIORITY_SQL = (
-    "CASE question_type WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
+    "CASE question_type WHEN 'single_choice' THEN 0 WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
     "WHEN 'fill_blank' THEN 2 WHEN 'term' THEN 4 ELSE 3 END"
 )
 

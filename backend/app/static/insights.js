@@ -131,6 +131,7 @@
     $("bank-eta").textContent = etaText(bank);
     lock = todayState === "none" ? bank : null;
     applyLock();
+    if (todayState === "submitted") $("prepare-note").hidden = true;      // nothing to prepare once today's paper is handed in
   }
   function paintBankStamp() {
     if (bankStamp && $("bank-updated")) $("bank-updated").textContent = "更新于 " + window.Live.stamp(bankStamp);
@@ -687,16 +688,18 @@
     const total = el("div", undefined, line);
     el("span", "总分", total, "stat-label");
     const big = el("p", undefined, total, "total-score");
-    big.append(data.score === null ? String(data.graded_points) : String(data.score));
-    el("small", data.score === null ? `/ ${data.max_points}（判分中）` : `/ ${data.max_points}`, big);
+    // while the subjective answers are still being graded there is no total yet: not a big 0, but what is known
+    big.append(data.score === null ? "判分中" : String(data.score));
+    if (data.score === null) big.classList.add("grading");
+    el("small", data.score === null ? ` 已确定 ${data.graded_points} 分 / 满分 ${data.max_points}` : `/ ${data.max_points}`, big);
     const compare = el("div", undefined, line, "compare");
     const split = el("div", undefined, key, "score-split");
     Object.keys(SUBJECT).forEach((subject) => {
       const s2 = data.subject_scores?.[subject];
       const box = el("div", undefined, split, subject === "biochemistry" ? "bio" : "cell");
       el("span", SUBJECT[subject], box);
-      const value = el("strong", s2 ? String(s2.score === null ? s2.graded_points : s2.score) : "—", box);
-      if (s2) el("small", ` / ${s2.max_points}`, value);
+      const value = el("strong", s2 ? (s2.score === null ? "—" : String(s2.score)) : "—", box);
+      if (s2) el("small", s2.score === null ? ` 已确定 ${s2.graded_points} / ${s2.max_points}` : ` / ${s2.max_points}`, value);
       const bar = el("div", undefined, box, "thin-bar");
       const fill = el("i", undefined, bar);
       fill.style.width = s2 && s2.max_points ? Math.min(100, ((s2.score === null ? s2.graded_points : s2.score) / s2.max_points) * 100) + "%" : "0%";
@@ -715,7 +718,8 @@
     const typeBox = el("div", undefined, types);
     C.hbars(typeBox, {
       title: "各题型得分率", unit: "本卷", items: rows, format: pct,
-      conclusion: lowest ? `${lowest.label}得分率最低：${lowest.name} ${pct(lowest.value)}。` : "",
+      // no "lowest" while some types are still being graded: it would be a conclusion about half the paper
+      conclusion: lowest && !data.pending ? `${lowest.label}得分率最低：${lowest.name} ${pct(lowest.value)}。` : "",
       empty: "判分完成后显示各题型得分率",
     });
     if (rows.length) {

@@ -141,6 +141,7 @@ def test_one_run_makes_no_more_calls_than_the_limit_and_dispatches_between_them(
         monkeypatch.delenv("AI_CALLS_PER_RUN", raising=False)
     else:
         monkeypatch.setenv("AI_CALLS_PER_RUN", value)
+    monkeypatch.setattr(auto_worker, "MAX_BATCHES", 1)  # the limit is per batch; batching has its own tests
     auto_worker.main()
     assert seen.count("call") == expected
     # every call is followed by a dispatch, so its review jobs can run in the same run
@@ -230,7 +231,8 @@ def test_used_paragraphs_count_requests_already_written_from_them(db, corpus, se
 def test_bucket_gap_deducts_work_already_on_its_way(db, corpus, setup_ai):
     pei.import_items(db)
     gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
-    assert gaps[("biochemistry", "single_choice")] == 20
+    # an imported past-exam single choice is work on its way now too (past-exam singles come first, AI singles fill the rest)
+    assert gaps[("biochemistry", "single_choice")] == 20 - 1
     assert gaps[("biochemistry", "term")] == 8  # an imported past-exam term is throttled (20% cap): it no longer holds back a new one
     assert gaps[("biochemistry", "short_answer")] == 2 - 1
     job = gen.plan_gap(db, setup_ai)

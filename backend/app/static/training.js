@@ -375,7 +375,7 @@ async function flush() {
       }
       if (pending[id] === value) delete pending[id];
       persist();
-      status("已保存至服务端");
+      status("已保存");
     } catch (e) {
       if (e.status === 409) {
         showConflict();
@@ -499,9 +499,9 @@ function render() {
     if (value.flagged) article.classList.add("flagged");
     element(
       "h2",
-      `${q.position}. ${q.subject === "biochemistry" ? "生化与分子生物学" : "细胞生物学"} · ${names[q.question_type]} · ${q.max_points}分${q.is_retest ? " · FSRS复测" : q.review_knowledge_tags?.length ? " · 知识点复测变式" : ""}${q.reused ? " · 复用题" : ""}`,
+      `第${q.position}题${q.is_retest ? " · FSRS复测" : q.review_knowledge_tags?.length ? " · 知识点复测变式" : ""}${q.reused ? " · 复用题" : ""}`,
       article,
-    );
+    ).className = "question-no";
     const stem = element("p", q.stem, article);
     stem.className = "question-stem";
     stem.tabIndex = -1;
@@ -740,7 +740,6 @@ async function showResult() {
         : ""),
     $("result"),
   );
-  renderAnalysis(result.selection_analysis, $("result"));
   let number = 0;
   for (const answer of result.answers) {
     number += 1;
@@ -798,7 +797,7 @@ async function showResult() {
         const why = answer.feedback.criterion_reasons?.[i];
         if (why) element("small", "理由：" + why, article).className = "criterion-reason";
       });
-    } else {
+    } else if (!["single_choice", "fill_blank"].includes(answer.question_type)) {
       for (const criterion of answer.rubric)
         element(
           "p",
@@ -832,7 +831,10 @@ async function showResult() {
           element("p", label + "：" + item, article);
     }
     if (answer.points !== null && answer.points < answer.max_points) {
-      const label = element("label", "复盘原因", article);
+      const reflect = element("details", undefined, article);
+      reflect.className = "reflection";
+      element("summary", "写复盘（可选）", reflect);
+      const label = element("label", "复盘原因", reflect);
       const choice = element("select", undefined, label);
       for (const [category, text] of Object.entries({
         concept_unclear: "概念不清",
@@ -846,10 +848,10 @@ async function showResult() {
         const option = element("option", text, choice);
         option.value = category;
       }
-      const note = element("input", undefined, article);
+      const note = element("input", undefined, reflect);
       note.placeholder = "补充你的复盘说明";
       note.maxLength = 2000;
-      const record = element("button", "保存复盘", article);
+      const record = element("button", "保存复盘", reflect);
       record.onclick = async () => {
         try {
           await api(
@@ -870,24 +872,15 @@ async function showResult() {
         }
       };
     }
-    for (const evidence of answer.evidence) {
-      const bibliographicPending = /未核查|待核查/.test(
-        (evidence.authors || "") + " " + (evidence.edition || "")
-      );
-      element(
-        "p",
-        "教材依据：" + evidence.textbook + " · " + evidence.chapter +
-          " · " + evidence.locator,
-        article,
-      );
-      if (bibliographicPending)
-        element("p", "书目信息尚未核验；OCR定位不等于纸书页码。", article);
-      element("blockquote", evidence.excerpt, article);
+    if (answer.evidence?.length) {
+      const sources = element("details", undefined, article);
+      sources.className = "evidence";
+      element("summary", "教材依据：" + [...new Set(answer.evidence.map((e) => e.chapter))].join("、"), sources);
+      for (const evidence of answer.evidence) element("blockquote", evidence.excerpt, sources);
     }
   }
   window.TrainingUI?.result(result);
   startGradingActivity(paper.paper_id);
-  showVerificationStatus(paper.paper_id);
   status("已交卷。选择题、填空题已出分；名词解释和简答由AI判分，判完自动刷新，判不了的显示原因，不会直接记0分。");
 }
 
@@ -981,10 +974,11 @@ function startGradingActivity(paperId) {
         gradingActivityTimer = null;
         return;
       }
-      hint.textContent = "已判分 " + data.graded + "/" + data.total +
-        " 题，待判分 " + data.pending + " 题。" +
-        (data.auto_queue_available ? "" :
-          "自动判分尚未启用或授权不足；不会假装已发送AI任务。");
+      hint.textContent = data.pending
+        ? "已判分 " + data.graded + "/" + data.total + " 题，待判分 " + data.pending + " 题。" +
+          (data.auto_queue_available ? "" : "自动判分尚未启用或授权不足；不会假装已发送AI任务。")
+        : "全部 " + data.total + " 题已判分。";
+      refreshScores.hidden = !data.pending;
       events.replaceChildren();
       for (const row of data.questions) {
         const mark = document.querySelector(
@@ -1008,7 +1002,6 @@ function startGradingActivity(paperId) {
       if (data.complete && gradingActivityTimer) {
         clearInterval(gradingActivityTimer);
         gradingActivityTimer = null;
-        hint.textContent += " 判分已完成，成绩以服务端记录为准。";
       }
     } catch (error) {
       hint.textContent = "批改状态暂时无法读取：" + error.message;
@@ -1341,113 +1334,159 @@ $("memory").onclick = async () => {
     if (paper?.timing.status === "in_progress" && deadline)
       throw new Error("请先完成当前限时训练，再进行错题复测。");
     const result = await api("/v2/memory/due");
-    $("learning").replaceChildren();
-    element("h2", "到期复测", $("learning"));
-    if (!result.items.length) element("p", "暂无到期复测", $("learning"));
-    for (const card of result.items) {
-      const article = element("article", undefined, $("learning"));
-      element("p", card.stem, article);
-      const choice = card.question_type === "single_choice";
-      const options = choice && card.options && typeof card.options === "object"
-        ? Object.entries(card.options).sort(([a], [b]) => a.localeCompare(b))
-        : [];
-      let selected = null;
-      const optionButtons = [];
-      if (choice && !options.length) {
-        element("p", "旧卡片缺少选项，不能完整复测。请联系维护者核查题目快照。", article);
-      }
-      for (const [letter, text] of options) {
-        const button = element("button", letter + ". " + text, article);
-        button.type = "button";
-        button.className = "review-choice";
-        button.setAttribute("aria-pressed", "false");
-        button.onclick = () => {
-          selected = letter;
-          for (const item of optionButtons)
-            item.setAttribute("aria-pressed", String(item === button));
-        };
-        optionButtons.push(button);
-      }
-      if (choice && options.length)
-        element("p", "先独立选择，再查看答案；选择只用于本次复习，不改写原卷。", article);
-      const reveal = element("button", "先回忆，再查看答案", article);
-      reveal.onclick = async () => {
-        try {
-          const solution = await api("/v2/memory/" + card.question_id + "/solution");
-          const answerDisplay = solution.answer_display || solution.answer;
-          reveal.disabled = true;
-          for (const button of optionButtons) button.disabled = true;
-          if (choice && selected !== null) {
-            const picked = options.find(([letter]) => letter === selected);
-            element("p", "本次选择：" + selected + ". " + (picked ? picked[1] : ""), article);
-            element("p", selected === solution.answer ? "本次选择正确" : "本次选择需要订正", article);
-          }
-          element("p", "正确答案：" + answerDisplay, article);
-          const criteria = (solution.rubric || []).map(
-            (item) => "评分核对点（" + item.points + "分）：" + item.description
-          );
-          for (const line of criteria) element("p", line, article);
-          const evidence = (solution.evidence || []).map((entry) =>
-            entry.textbook + " · " + entry.chapter + " · " + entry.locator +
-            "：" + entry.excerpt
-          );
-          if (solution.evidence?.length) {
-            const detail = element("details", undefined, article);
-            element("summary", "教材依据与出处核验状态", detail);
-            for (const entry of solution.evidence) {
-              const unknown = /未核查|待核查/.test(
-                (entry.authors || "") + " " + (entry.edition || "")
-              );
-              element("p", entry.textbook + " · " + entry.chapter +
-                " · " + entry.locator + (unknown ? " · 书目信息待核查" : ""), detail);
-              element("blockquote", entry.excerpt, detail);
-            }
-          }
-          const copy = element("button", "复制正确答案、评分点及教材依据", article);
-          copy.onclick = async () => {
-            try {
-              await navigator.clipboard.writeText([
-                card.stem, ...options.map(([letter, text]) => letter + ". " + text),
-                "正确答案：" + answerDisplay, ...criteria, ...evidence
-              ].join("\n"));
-              status("已复制完整复习内容。");
-            } catch {
-              status("复制未成功，请长按正确答案或教材依据选择文本。");
-            }
-          };
-          for (const [rating, label] of [
-            [1, "忘记"],
-            [2, "困难"],
-            [3, "记得"],
-            [4, "轻松"],
-          ]) {
-            const button = element("button", label, article);
-            button.onclick = async () => {
-              try {
-                await api("/v2/memory/" + card.question_id + "/review", {
-                  method: "POST",
-                  body: JSON.stringify({
-                    rating,
-                    expected_version: card.version,
-                    event_key: crypto.randomUUID(),
-                  }),
-                });
-                article.replaceChildren();
-                element("p", "复习反馈已保存，下次复测时间已更新。", article);
-              } catch (e) {
-                status(e.message);
-              }
-            };
-          }
-        } catch (e) {
-          status(e.message);
-        }
-      };
-    }
+    reviewSession(result.items);
   } catch (e) {
-    status(e.message);
+    learningError($("memory").onclick, e, "到期复测");
   }
 };
+
+/* Review one question at a time: first the question (a choice to pick, a blank to fill, or just recall), then the answer and a
+   rating. The rating follows what you did: a wrong choice or blank can only be 忘记 / 困难, a right one 记得 / 轻松; with
+   nothing to check (recall questions) all four are open. After the rating the next question comes by itself; the last
+   one ends with a short summary. */
+const NORMALIZE = (text) => String(text || "").replace(/[\s\u3000，。、；;,.]/g, "").toLowerCase();
+function reviewSession(items) {
+  const root = $("learning");
+  root.dataset.owner = location.hash || "#/mistakes";
+  const tally = { done: 0, right: 0, wrong: 0, recall: 0 };
+  const total = items.length;
+  const finish = () => {
+    root.replaceChildren();
+    element("h2", "本次复习完成", root);
+    const card = element("div", undefined, root);
+    card.className = "card";
+    element("p", `共复习 ${tally.done} 道：答对 ${tally.right} 道，答错 ${tally.wrong} 道，自评 ${tally.recall} 道。`, card);
+    element("p", "下次复习时间已按你的评价更新。", card).className = "note";
+    const again = element("button", "再看一遍到期的题", card);
+    again.type = "button";
+    again.className = "secondary";
+    again.onclick = () => $("memory").onclick();
+  };
+  // The answer of a card is fetched while the learner is still thinking (and the next card's right after), so 「查看答案」 shows it at
+  // once instead of waiting for the network; the rating is sent in the background and the next card appears immediately.
+  const solutions = {};
+  const solutionOf = (card) =>
+    (solutions[card.question_id] ||= api("/v2/memory/" + card.question_id + "/solution").catch((error) => {
+      delete solutions[card.question_id];
+      throw error;
+    }));
+  const show = (index) => {
+    if (index >= total) return finish();
+    const card = items[index];
+    solutionOf(card).catch(() => {});
+    if (items[index + 1]) solutionOf(items[index + 1]).catch(() => {});
+    root.replaceChildren();
+    const head = element("div", undefined, root);
+    head.className = "card-heading";
+    element("h2", "到期复测", head);
+    element("span", `第 ${index + 1} / ${total} 道`, head).className = "muted small";
+    const bar = element("progress", undefined, root);
+    bar.max = total;
+    bar.value = index;
+    bar.setAttribute("aria-label", "复习进度");
+    const article = element("article", undefined, root);
+    article.className = "card review-card";
+    element("p", card.stem, article).className = "question-stem";
+    const choice = card.question_type === "single_choice";
+    const blank = card.question_type === "fill_blank";
+    const options = choice && card.options && typeof card.options === "object"
+      ? Object.entries(card.options).sort(([a], [b]) => a.localeCompare(b))
+      : [];
+    let selected = null;
+    let typed = null;
+    const optionButtons = [];
+    if (choice && !options.length) element("p", "旧卡片缺少选项，不能完整复测。请联系维护者核查题目快照。", article);
+    for (const [letter, text] of options) {
+      const button = element("button", letter + ". " + text, article);
+      button.type = "button";
+      button.className = "review-choice";
+      button.setAttribute("aria-pressed", "false");
+      button.onclick = () => {
+        selected = letter;
+        for (const item of optionButtons) item.setAttribute("aria-pressed", String(item === button));
+        reveal.disabled = false;
+      };
+      optionButtons.push(button);
+    }
+    if (blank) {
+      typed = element("input", undefined, article);
+      typed.type = "text";
+      typed.placeholder = "先写下你的答案";
+      typed.autocomplete = "off";
+      typed.className = "review-input";
+    }
+    const reveal = element("button", choice || blank ? "查看答案" : "先回忆，再查看答案", article);
+    reveal.type = "button";
+    reveal.className = "primary";
+    reveal.disabled = choice && options.length > 0; // pick first
+    reveal.onclick = async () => {
+      reveal.disabled = true;
+      let solution;
+      try {
+        solution = await solutionOf(card);
+      } catch (e) {
+        reveal.disabled = false;
+        status(e.message);
+        return;
+      }
+      const answerDisplay = solution.answer_display || solution.answer;
+      for (const button of optionButtons) button.disabled = true;
+      if (typed) typed.disabled = true;
+      let outcome = "recall";
+      if (choice && selected !== null) outcome = selected === solution.answer ? "right" : "wrong";
+      if (blank && typed.value.trim()) outcome = NORMALIZE(typed.value) === NORMALIZE(solution.answer) ? "right" : "unsure";
+      const box = element("div", undefined, article);
+      box.className = "review-answer";
+      if (outcome === "right") element("p", "答对了", box).className = "verdict ok";
+      if (outcome === "wrong") element("p", "答错了，正确答案如下", box).className = "verdict bad";
+      if (outcome === "unsure") element("p", "和标准答案写法不完全一样，请对照后自己评价", box).className = "verdict";
+      element("p", "正确答案：" + answerDisplay, box).className = "answer-line";
+      const criteria = (solution.rubric || []).filter((item) => !choice && item.description).map(
+        (item) => "评分核对点（" + item.points + "分）：" + item.description
+      );
+      for (const line of criteria) element("p", line, box).className = "note";
+      if (solution.evidence?.length) {
+        const detail = element("details", undefined, box);
+        element("summary", "教材依据", detail);
+        for (const entry of solution.evidence) {
+          element("p", entry.textbook + " · " + entry.chapter, detail);
+          element("blockquote", entry.excerpt, detail);
+        }
+      }
+      element("p", "你觉得这道题", box).className = "note";
+      const row = element("div", undefined, box);
+      row.className = "rating-row";
+      // what each rating may be, given what happened
+      // (a typed answer that differs from the key may still be a fair paraphrase: 轻松 is closed, the rest is the learner's call)
+      const allowed = outcome === "wrong" ? [1, 2] : outcome === "right" ? [3, 4] : outcome === "unsure" ? [1, 2, 3] : [1, 2, 3, 4];
+      for (const [rating, label] of [[1, "忘记"], [2, "困难"], [3, "记得"], [4, "轻松"]]) {
+        const button = element("button", label, row);
+        button.type = "button";
+        button.disabled = !allowed.includes(rating);
+        button.onclick = () => {
+          row.querySelectorAll("button").forEach((b) => (b.disabled = true));
+          const body = JSON.stringify({ rating, expected_version: card.version, event_key: crypto.randomUUID() });
+          const send = () => api("/v2/memory/" + card.question_id + "/review", { method: "POST", body });
+          // saved in the background (the same event key makes a retry harmless); the next card does not wait for it
+          send().catch(() => send()).catch((e) => status("这道题的复习结果没有保存成功：" + e.message + "。请稍后再复习一次。"));
+          tally.done += 1;
+          if (outcome === "right") tally.right += 1;
+          else if (outcome === "wrong") tally.wrong += 1;
+          else tally.recall += 1;
+          show(index + 1);
+        };
+      }
+      box.scrollIntoView?.({ block: "nearest" });
+    };
+  };
+  if (!total) {
+    root.replaceChildren();
+    element("h2", "到期复测", root);
+    element("p", "今天没有到期的题，明天再来。", root);
+    return;
+  }
+  show(0);
+}
 // A learning sub-page that cannot load says why, inside the page, with a retry button (never a bare toast, never the sign-in form).
 function learningError(handler, error, heading) {
   const root = $("learning");

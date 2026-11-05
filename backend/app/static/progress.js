@@ -71,6 +71,8 @@ const REASON = {
   unknown_question_type: "题型未知",
   unresolved_placeholder: "题干或答案里有占位符",
   unavailable_figure_reference: "题干引用了看不到的图",
+  answer_disclosed_in_stem: "答案已经写在题干里",
+  textbook_wording_in_stem: "题干是阅读理解式的（根据教材/本章/文献/图表……）",
   unhelpful_all_or_none_distractor: "选项里有「以上都对/都不对」",
   missing_unique_answer_rationale: "缺少唯一答案的理由",
   missing_accepted_answer_set: "缺少可接受答案集合",
@@ -280,7 +282,25 @@ function platformLine(report) {
   line.textContent = `DeepSeek 繁忙，自动等待重试：${p.waiting_jobs} 个任务在等待（不算失败，不占重试次数）${next}${last}。`;
 }
 
+// The price page of the provider could not be read: new writing stops when the prices in force run out, so say so early.
+const PRICE_WHY = {
+  official_price_layout_changed: "官方价格页的版面变了", official_prices_missing: "价格页里找不到价格表", price_model_identity_invalid: "价格页里的模型名不认识",
+  official_cny_price_units_unknown: "价格单位不是「元」", tool_policy_needs_reverification: "价格页里联网工具的计费说明变了",
+  official_period_policy_needs_reverification: "价格页里的高峰/低峰时段说明变了", http_403: "价格页拒绝了访问（403）", http_404: "价格页地址不存在（404）",
+};
+function priceLine(report) {
+  const p = report.prices;
+  const line = $("price-note");
+  line.hidden = !(p && (!p.ok || p.blocking));
+  if (line.hidden) return;
+  const why = PRICE_WHY[p.code] || (p.code ? "原因代码 " + p.code : "原因未记录");
+  line.textContent = p.blocking
+    ? `价格已过期，出题已被暂停：最近 ${p.failures} 次刷新失败（${why}）。`
+    : `价格刷新失败（${why}），已连续 ${p.failures} 次；现有价格还能用约 ${Math.max(0, p.hours_left)} 小时，之后出题会被暂停。`;
+}
+
 function status(report) {
+  priceLine(report);
   platformLine(report);
   const period = report.period;
   $("period").textContent = period.is_peak ? "高峰·暂缓" : "低峰·出题中";

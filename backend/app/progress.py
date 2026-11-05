@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app import ai_jobs, cny_billing, cost_control, cost_reconcile
+from app import ai_jobs, cny_billing, cny_prices, cost_control, cost_reconcile
 from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count
 from app.training_spec_v4 import COUNTS, SUBJECTS
 
@@ -469,5 +469,6 @@ def report(conn, uid):
         period=cost_control.peak_outlook(now),
         worker=worker_status(conn, now),
         platform=platform_status(conn),
+        prices=cny_prices.status(conn),
         next_paper=next_paper(conn, rows, now),
     )

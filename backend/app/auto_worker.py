@@ -10,7 +10,7 @@ from app.db import get_db
 from app import cost_control
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
 from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
-from app import cost_reconcile
+from app import cny_prices, cost_reconcile
 from app.harness_gateway import execute
 from app.worker import tick, integrations_tick
 
@@ -143,6 +143,7 @@ def plan(conn, uid, target=None):
     auto_quality.requeue_past_exam_duplicates(conn)   # before anything can retire them
     auto_quality.retire_stale(conn)
     auto_quality.retire_old_scoring(conn)
+    auto_quality.retire_unusable_sources(conn)   # literature-list sources, missing figures, answers written in the stem
     auto_quality.discard_unfixable(conn)
     for row in conn.execute(
         "SELECT p.question_id FROM candidate_review_packets p LEFT JOIN auto_question_states s ON s.question_id=p.question_id WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) AND (s.question_id IS NULL OR s.status='candidate') ORDER BY p.question_id LIMIT 10"
@@ -455,6 +456,14 @@ def _plan_queue(conn, report, users, private, first):
                     auto_insights.plan(conn, user["user_id"])
             except ValueError:
                 pass  # Not admitted is not a success; job/probe status remains visible.
+            # Say in the log WHY nothing was planned (no gap at all, or a gap that no request could be written for).
+            try:
+                diagnosis = auto_generation.gap_diagnosis(conn, user["user_id"])
+                report["gap"], report["short_buckets"] = diagnosis["gap"], diagnosis["buckets"]
+                if diagnosis["gap"] and not report.get("planned"):
+                    report["plan_note"] = "gap_but_no_request_could_be_written"
+            except Exception:  # noqa: BLE001  (a log nicety must never stop a run)
+                pass
     # Retry budget/stopped jobs only when user explicitly enabled new attempts.
     conn.execute(
         "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' "
@@ -549,8 +558,11 @@ def _locked_run(report, run_began):
                 with conn.transaction():
                     refresh(conn)
                 report["price_refresh"] = "ok"
+                cny_prices.remember_success(conn)
             except (ValueError, httpx.HTTPError) as exc:
-                report["price_refresh"] = "failed:" + type(exc).__name__
+                code = cny_prices.failure_code(exc)
+                report["price_refresh"] = "failed:" + code        # (a fixed code, never page text)
+                cny_prices.remember_failure(conn, code)
                 # Missing/expired/conflicting prices block new calls at claim().
         if (
             any(u["auto_discover"] for u in users)
