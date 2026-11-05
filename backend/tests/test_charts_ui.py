@@ -51,6 +51,8 @@ def show(engine, live_app, scheme, data):
     page.wait_for_selector('nav.primary-nav [data-view="profile"]')
     page.locator('nav.primary-nav [data-view="profile"]').click()
     expect(page.locator("#profile-data .heat-cell")).to_have_count(56)
+    # (the first, unfaked load is cut short by the second navigation: WebKit reports its aborted fetches as page errors)
+    errors[:] = [e for e in errors if "access control checks" not in e]
     return page, errors
 
 
