@@ -465,7 +465,9 @@ def _plan_queue(conn, report, users, private, first):
                 diagnosis = auto_generation.gap_diagnosis(conn, user["user_id"])
                 report["gap"], report["short_buckets"] = diagnosis["gap"], diagnosis["buckets"]
                 report["avail"], report["gap_detail"] = diagnosis["avail"], diagnosis["gap_detail"]
-                report["on_way"] = diagnosis["on_way"]       # queued/running write+review+repair jobs per bucket
+                report["on_way"] = diagnosis["on_way"]
+                if diagnosis["gap"]:
+                    report["stuck"] = auto_generation.short_bucket_report(conn, user["user_id"])   # per short bucket: first blocked step + funnel       # queued/running write+review+repair jobs per bucket
                 if cost_control.is_peak() and diagnosis["gap"]:
                     # computed in peak hours too; only the calls themselves wait
                     report["plan_note"] = f"高峰暂停，低峰时将规划{diagnosis['gap']}个"

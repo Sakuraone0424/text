@@ -510,6 +510,53 @@ def bucket_gaps(conn, uid):
     return [(d["subject"], d["kind"], d["gap"]) for d in bucket_detail(conn, uid) if d["gap"] > 0]
 
 
+def bucket_funnel(conn, subject, kind):
+    """Where the questions of one bucket end up: requests written, and the states their questions are in, with the most
+    common reason for the blocked / retired ones. Numbers and fixed codes only."""
+    jobs = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' "
+        "AND payload->>'subject'=%s AND payload->>'question_type'=%s", (subject, kind)).fetchone()["n"]
+    failed = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' "
+        "AND payload->>'subject'=%s AND payload->>'question_type'=%s AND state IN ('failed','blocked')", (subject, kind)).fetchone()["n"]
+    states = {
+        r["status"]: r["n"] for r in conn.execute(
+            "SELECT st.status,count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+            "WHERE q.content->>'subject'=%s AND q.content->>'question_type'=%s GROUP BY 1", (subject, kind)).fetchall()}
+    top = conn.execute(
+        "SELECT st.reason,count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+        "WHERE q.content->>'subject'=%s AND q.content->>'question_type'=%s AND st.status IN ('blocked','retired') "
+        "AND st.reason IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 1", (subject, kind)).fetchone()
+    past = conn.execute(
+        "SELECT status,count(*) AS n FROM past_exam_items WHERE subject=%s AND question_type=%s GROUP BY 1", (subject, kind)).fetchall()
+    return dict(jobs=jobs, failed_jobs=failed, states=states, top_reason=(top["reason"], top["n"]) if top else None,
+                past={r["status"]: r["n"] for r in past})
+
+
+def why_nothing_is_written(conn, subject, kind):
+    """The first step at which a short bucket gets no new writing request, as a fixed code (or 'writable')."""
+    if not select_exam_style(conn, subject, kind):
+        return "no_exam_style"            # no clean genuine past question of this type to imitate (neither 论述/问答 nor 简答)
+    if not paragraph_pool(conn, subject):
+        return "no_textbook_paragraph"
+    return "writable"
+
+
+def short_bucket_report(conn, uid):
+    """For the worker log: for every bucket that has a gap, 'subject:type=<step>/<funnel>' (one line each, joined by ',')."""
+    parts = []
+    for d in bucket_detail(conn, uid):
+        if d["gap"] <= 0:
+            continue
+        f = bucket_funnel(conn, d["subject"], d["kind"])
+        top = f"{f['top_reason'][0]}x{f['top_reason'][1]}" if f["top_reason"] else "-"
+        states = "/".join(f"{k}{v}" for k, v in sorted(f["states"].items())) or "-"
+        past = "/".join(f"{k}{v}" for k, v in sorted(f["past"].items())) or "-"
+        parts.append(f"{d['subject'][:4]}:{d['kind']}={why_nothing_is_written(conn, d['subject'], d['kind'])}"
+                     f"|jobs{f['jobs']}|failed{f['failed_jobs']}|q:{states}|top:{top}|past:{past}")
+    return ";".join(parts) or "-"
+
+
 def gap_diagnosis(conn, uid):
     """For the worker log, computed on every run (peak or not): total missing, short buckets, and per bucket the usable stock
     (avail) and the gap (gap_detail), as 'subject:type=n' lists."""
@@ -677,6 +724,11 @@ def allocate_order(conn, gaps):
         return g[2] / total_gap - (recent[(g[0], g[1])] / seen if seen else 0)
 
     ordered = sorted(gaps, key=lambda g: -deficit(g))
+    # No bucket with a gap may starve: one that got none of the last ALLOCATION_WINDOW requests goes first (a gap of 1 against
+    # a total gap of 90 earns a share of about 1%, so a bucket like biochemistry essay was almost never chosen).
+    starved = [g for g in ordered if seen >= ALLOCATION_WINDOW // 2 and recent[(g[0], g[1])] == 0]
+    if starved:
+        ordered = starved[:1] + [g for g in ordered if g is not starved[0]]
     single = [g for g in ordered if g[1] == "single_choice"]
     share = sum(v for (s_, t_), v in recent.items() if t_ == "single_choice") / seen if seen else 0
     if single and share < SINGLE_CHOICE_MIN_SHARE:
