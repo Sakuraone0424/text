@@ -705,7 +705,8 @@ $("submit").onclick = async () => {
       body: JSON.stringify({ expected_version: version, answers: {} }),
     });
     done = true; // accepted: the paper is submitted and cannot be edited any more
-    await showResult();
+    // a short tick (about 450 ms) plays over the page while the result loads underneath, then the result is there
+    await Promise.all([window.Motion?.done?.() ?? Promise.resolve(), showResult()]);
   } catch (e) {
     status(done ? `已交卷，但成绩暂时读不出来：${e.message}` : `交卷失败：${e.message}。答案已保留，可以再次点交卷（重复提交不会重复计分）。`);
   } finally {

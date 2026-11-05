@@ -353,5 +353,6 @@ $("mv-retry").onclick = () => {
   $("mv-skeleton").hidden = !!data;
   load(!!data);
 };
+window.Live.pullToRefresh($("model-view"), () => load(true));      // unsaved edits stay
 window.ModelView = { show: () => load(!!data), dirty, leave: () => !dirty() || confirm("有未保存的改动，确定离开吗？") };
 })();

@@ -127,7 +127,8 @@
       pts.forEach((pt) => {
         if (pt) path.push((path.length ? "L" : "M") + pt[0].toFixed(1) + " " + pt[1].toFixed(1));
       });
-      svg("path", { d: path.join(" "), fill: "none", stroke: s.color, "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round" }, chart);
+      const line = svg("path", { d: path.join(" "), fill: "none", stroke: s.color, "stroke-width": 2.2, "stroke-linejoin": "round", "stroke-linecap": "round" }, chart);
+      window.Motion?.draw(line, "line:" + spec.title + ":" + s.name);      // drawn left to right, once, when first in view
       pts.forEach((pt) => {
         if (!pt) return;
         // a larger invisible hit area for thumbs sits UNDER the visible dot and forwards taps to it
@@ -177,6 +178,7 @@
         const share = none ? 0 : Math.max(0, Math.min(100, (bar.value / max) * 100));
         fill.style.width = (!none && share === 0 ? 0.8 : share) + "%";       // a real 0% keeps a hairline: it is a result, not a missing bar
         fill.style.background = bar.color || item.color || COLORS.biochemistry;
+        window.Motion?.grow(fill, "x", "hbar:" + spec.title + ":" + item.label + ":" + bar.name);
         if (grouped) html("span", none ? "暂无" : format(bar.value), line, "hbar-num" + (none ? " none" : ""));
         const count = bar.answers ? `，共 ${bar.answers} 题` : "";
         const text = grouped
@@ -220,6 +222,7 @@
       const h = Math.max(item.value > 0 ? 2 : 0, (H - T - B) * (item.value / top));
       if (item.value === 0) svg("text", { x: cx, y: H - B - 4, "text-anchor": "middle", fill: COLORS.axis, "font-size": 10 }, chart).textContent = "0";   // a real zero is shown, not left blank
       const rect = svg("rect", { x: cx - bar / 2, y: H - B - h, width: bar, height: h, rx: 3, fill: item.color || COLORS.biochemistry, class: "chart-bar" }, chart);
+      window.Motion?.grow(rect, "y", "col:" + spec.title + ":" + item.label, { delay: Math.min(i, 6) * 30 });   // grows from the bottom, once
       bind(rect, f.readout, `${item.label}：${format(item.value)}${spec.unit ? " " + spec.unit : ""}${item.note ? "（" + item.note + "）" : ""}`);
       if (i % step === 0 || i === items.length - 1)
         svg("text", { x: cx, y: H - 8, "text-anchor": "middle", fill: COLORS.axis, "font-size": 11 }, chart).textContent = item.label;
@@ -253,6 +256,7 @@
     const share = spec.max ? Math.max(0, Math.min(1, spec.value / spec.max)) : 0;
     fill.style.width = share * 100 + "%";
     fill.style.background = spec.color || (share < 0.5 && spec.warnBelowHalf ? COLORS.warn : COLORS.biochemistry);
+    window.Motion?.grow(fill, "x", "progress:" + spec.label);
     track.setAttribute("role", "img");
     track.setAttribute("aria-label", `${spec.label}：${spec.text || spec.value + " / " + spec.max}`);
     return root;
