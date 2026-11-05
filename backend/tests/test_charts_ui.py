@@ -1,6 +1,7 @@
 """My-page charts at 390px (iPhone 15 profile; WebKit in CI, Chromium here), light and dark: the practice calendar and the
 per-type score bars. Nothing leaves its card, every bar says whose it is, 0% and "no data" differ, and the conclusion is
 drawn only from enough answers. Screenshots go to SHOT_DIR."""
+import json
 import os
 from datetime import date, timedelta
 from pathlib import Path
@@ -41,7 +42,11 @@ def show(engine, live_app, scheme, data):
     client, _, _ = live_app
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base, scheme=scheme)
-    page.route("**/v2/stats/profile", lambda route: route.fulfill(json=data))
+    # WebKit's route() cannot intercept requests the page's service worker handles: answer in the page itself
+    page.context.add_init_script("""(() => { const data = %s, real = window.fetch.bind(window);
+        window.fetch = (input, init) => String(input && input.url || input).includes('/v2/stats/profile')
+            ? Promise.resolve(new Response(JSON.stringify(data), { status: 200, headers: { 'content-type': 'application/json' } }))
+            : real(input, init); })();""" % json.dumps(data))
     page.goto(base + "/training")
     page.wait_for_selector('nav.primary-nav [data-view="profile"]')
     page.locator('nav.primary-nav [data-view="profile"]').click()
