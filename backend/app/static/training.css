@@ -441,4 +441,4 @@
 .training-app .hbar-name::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); margin-right: 4px; vertical-align: 0; }
 .training-app .hbar-num { font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
 .training-app .hbar-num.none { color: var(--muted); }
-.training-app .hbar-track.none { background: repeating-linear-gradient(90deg, var(--tag) 0 6px, transparent 6px 10px); }
+.training-app .hbar-track.none { background: transparent; border: 1px dashed color-mix(in srgb, var(--muted) 55%, transparent); box-sizing: border-box; }   /* no data: a dashed outline, not an empty bar */
