@@ -32,6 +32,7 @@ def serve(page, **routes):
           if (!hit) return real(input, init);
           window.__calls[hit] = (window.__calls[hit] || 0) + 1;
           const r = window.__routes[hit], body = Array.isArray(r) ? r[0] : r, delay = Array.isArray(r) ? r[1] : 0;
+          if (body === null) return new Promise((resolve) => setTimeout(() => resolve(real(input, init)), delay));      // the real answer, late
           return new Promise((resolve) => setTimeout(() => resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })), delay)); }; })();""" % json.dumps(routes))
 
 
@@ -41,6 +42,7 @@ def start(engine, live_app, scheme="light", reduced=False, routes=None, path="/t
     page, errors = open_page(engine, "safari", base, scheme=scheme)
     if reduced:
         page.emulate_media(reduced_motion="reduce")
+    page.evaluate("localStorage.clear(); sessionStorage.clear()")        # (open_page already loaded the page once against the real server)
     serve(page, **(routes or {"/v2/stats/overview": FULL}))
     page.goto(base + path)
     page.wait_for_selector('nav.primary-nav [data-view="home"]')
@@ -178,6 +180,7 @@ def test_dialogs_are_bottom_sheets_that_slide_up_and_down(engine, live_app):
     page, _ = start(engine, live_app)
     page.evaluate("document.getElementById('question-dialog').showModal()")
     assert page.evaluate("getComputedStyle(document.getElementById('question-dialog')).animationName") == "sheet-up"
+    page.wait_for_timeout(320)                                                   # (once it has slid up)
     box = page.evaluate("(() => { const r = document.getElementById('question-dialog').getBoundingClientRect(); return [r.bottom, innerHeight]; })()")
     assert abs(box[0] - box[1]) < 2                                              # sitting on the bottom edge
     page.evaluate("document.getElementById('question-dialog').close()")
@@ -199,7 +202,8 @@ def test_the_skeleton_has_a_light_sweep_that_loops(engine, live_app):
 # ---- the refresh states ---------------------------------------------------------------------------------------------------
 
 def test_the_start_button_is_not_clickable_while_the_state_loads(engine, live_app):
-    page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 1200]})
+    # today's paper and the overview both answer late: until then the state is unknown
+    page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 1500], "/v2/papers": [None, 1500]})
     button = page.locator("#prepare")
     assert button.is_disabled() and button.get_attribute("data-loading") == "1"      # a grey placeholder, not a primary button
     expect(page.locator("#paper-state")).not_to_have_text("已就绪")
@@ -239,7 +243,7 @@ def test_a_paper_still_being_graded_is_not_shown_as_no_data(engine, live_app):
 
 def test_the_first_visit_without_a_kept_copy_shows_placeholders_not_empty_sentences(engine, live_app):
     page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 1500]})
-    assert page.locator("#home-view").get_attribute("data-loading") == "1"
+    page.wait_for_selector('#home-view[data-loading="1"]', timeout=3000)
     assert page.evaluate("getComputedStyle(document.getElementById('stat-avg')).color") in ("rgba(0, 0, 0, 0)", "transparent")
     expect(page.locator("#home-view")).not_to_have_attribute("data-loading", "1", timeout=4000)
     page.close()

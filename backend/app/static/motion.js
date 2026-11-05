@@ -52,9 +52,7 @@
       n += 1;
       play(card, [{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 260, delay, fill: "backwards" });
     };
-    page.querySelectorAll(":scope > .card, :scope > section.card, :scope > .stat-row > .card, :scope .hero-card").forEach((card, i, all) => {
-      if (all.indexOf(card) === i) lift(card);
-    });
+    new Set(page.querySelectorAll(":scope > .card, :scope > section.card, :scope > .stat-row > .card, :scope .hero-card")).forEach(lift);
     // cards a page builds after its data arrives (profile, progress) take the next places while it is new
     const watcher = new MutationObserver((records) => {
       records.forEach((r) => r.addedNodes.forEach((node) => {
