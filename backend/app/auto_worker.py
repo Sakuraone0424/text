@@ -460,14 +460,18 @@ def _plan_queue(conn, report, users, private, first):
             try:
                 diagnosis = auto_generation.gap_diagnosis(conn, user["user_id"])
                 report["gap"], report["short_buckets"] = diagnosis["gap"], diagnosis["buckets"]
-                if diagnosis["gap"] and not report.get("planned"):
+                report["avail"], report["gap_detail"] = diagnosis["avail"], diagnosis["gap_detail"]
+                if cost_control.is_peak() and diagnosis["gap"]:
+                    # computed in peak hours too; only the calls themselves wait
+                    report["plan_note"] = f"高峰暂停，低峰时将规划{diagnosis['gap']}个"
+                elif diagnosis["gap"] and not report.get("planned"):
                     report["plan_note"] = "gap_but_no_request_could_be_written"
             except Exception:  # noqa: BLE001  (a log nicety must never stop a run)
                 pass
     # Retry budget/stopped jobs only when user explicitly enabled new attempts.
     conn.execute(
         "UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' "
-        "AND (j.error_code IN ('budget_exceeded','automation_stopped') OR j.error_code LIKE ANY(%s))",
+        "AND (j.error_code IN ('budget_exceeded','automation_stopped','verified_cny_price_required') OR j.error_code LIKE ANY(%s))",
         ([c + "%" for c in ai_jobs.MODEL_GONE_CODES],),
     )
     # Jobs an earlier run blocked only because DeepSeek was busy or unreachable go back to the queue.

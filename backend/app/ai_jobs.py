@@ -273,9 +273,10 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         # were approved at the higher ceiling and keep it.
         amount = model_router.cost_bound({**s, "price_snapshot": price}, at=None if any(k in s for k in SCOPED) else cny_billing.utcnow())
     except ValueError:
-        price = {}
-        amount = Decimal(0)
-        reason = "verified_cny_price_required"
+        # No verified price in force (expired, never fetched, or being confirmed): the job WAITS in the queue. It is not
+        # blocked, so nothing needs putting back by hand once a price is verified again.
+        _note("waiting_for_verified_price", job_id=job["id"], kind=job["kind"])
+        return None
     totals = cny_billing.totals(conn, uid)
     budget_scope = None  # which limit stopped it: daily | monthly | trial | task | cap
     if live.get("daily_limit_enabled", True) and totals["day"] + amount > live["daily_cny"]:

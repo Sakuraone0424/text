@@ -193,4 +193,4 @@ def test_past_exam_single_choice_goes_first_and_ai_singles_cover_only_the_rest()
     from app import auto_generation as gen, past_exam_import as pei
     assert pei._PRIORITY_SQL.index("'single_choice' THEN 0") < pei._PRIORITY_SQL.index("'term'")
     import inspect
-    assert "'single_choice'" in inspect.getsource(gen.bucket_gaps)
+    assert "'single_choice'" in inspect.getsource(gen.bucket_detail)

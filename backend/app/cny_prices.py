@@ -86,6 +86,35 @@ def _tool_rates(all_rows):
     return rates
 
 
+# The peak/off-peak rule this system prices by (cost_control.is_peak): Beijing time, Monday-Friday except Chinese public
+# holidays, 09:00-12:00 and 14:00-18:00 is peak; everything else (weekends, holidays) is off-peak at half the peak price.
+EXPECTED_PERIOD_RULES = dict(
+    weekdays="mon-fri", hours=((540, 720), (840, 1080)), holidays_off_peak=True, off_peak_ratio="half",
+)
+_RANGE = re.compile(r"(\d{1,2})[:：](\d{2})\s*[-–—~～至到]\s*(\d{1,2})[:：](\d{2})")
+_HALF = re.compile(r"一半|50\s*%|1\s*/\s*2|二分之一|五折|减半|半价")
+
+
+def period_rules(text):
+    """The peak-period RULE stated on the price page (weekdays, hours, holiday treatment, off-peak ratio), independent of how
+    it is worded. Anything not stated clearly comes back as None / empty so it cannot equal the rule we price by."""
+    sentences = [x.strip() for x in re.split(r"[。；;\n]", text) if x.strip()]
+    ranged = [x for x in sentences if _RANGE.search(x)]
+    peak = next((x for x in ranged if "高峰" in x), ranged[0] if ranged else "")
+    hours = tuple(sorted((int(a) * 60 + int(b), int(c) * 60 + int(d)) for a, b, c, d in _RANGE.findall(peak)))
+    weekdays = "mon-fri" if re.search(r"周一\s*(至|到|-|~)\s*周五|星期一\s*(至|到)\s*星期五|工作日", peak) else None
+    holiday_excluded = bool(re.search(r"不含[^，。）)]{0,8}节假日|除[^，。）)]{0,8}节假日", peak))
+    ratio_sentence = next((x for x in sentences if re.search(r"空闲|低峰|非高峰|闲时", x) and re.search(r"高峰", x)
+                           and re.search(r"一半|\d+\s*%|\d\s*折|\d\s*/\s*\d|二分之一|减半|半价|倍|[一二三四五六七八九\d]\s*成", x)), "")
+    if not ratio_sentence:
+        ratio = "half"          # not restated on the page: the rate table itself carries the prices
+    else:
+        ratio = "half" if _HALF.search(ratio_sentence) and not re.search(r"(?<!5)(?<!50)\d+\s*%|[1-46-9]\s*折|倍|[一二三四五六七八九\d]\s*成", ratio_sentence) else "changed"
+    # weekends and holidays are off-peak: said outright, or implied by "Monday-Friday except holidays"
+    offpeak_days = holiday_excluded and weekdays == "mon-fri"
+    return dict(weekdays=weekdays, hours=hours, holidays_off_peak=offpeak_days, off_peak_ratio=ratio)
+
+
 def parse(html, observed=None):
     at = observed or b.utcnow()
     p = Tables()
@@ -124,13 +153,7 @@ def parse(html, observed=None):
             server_tool_effective_at="2026-11-01T00:00:00+08:00",
             network_tools_enabled=False,
         )
-        if not all(
-            text in page_text
-            for text in (
-                "2026 年 11 月 1 日 00:00",
-                "北京时间周一至周五（不含中国法定节假日）9:00 - 12:00、14:00 - 18:00",
-            )
-        ):
+        if period_rules(page_text) != EXPECTED_PERIOD_RULES:
             raise ValueError("official_period_policy_needs_reverification")
         records.append(
             dict(

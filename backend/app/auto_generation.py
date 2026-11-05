@@ -437,24 +437,33 @@ def _count_by_bucket(conn, sql, params=()):
     return {(r["s"], r["t"]): r["n"] for r in conn.execute(sql, params).fetchall()}
 
 
-def bucket_gaps(conn, uid):
-    """Buckets still short of the two-day reserve, in fair-attempt order.
+STALE_SUPPLY_HOURS = 6   # "on its way" that has not moved for this long is stuck, not supply (see bucket_detail)
 
-    Supply already on its way is deducted so the planner never over-orders:
-    questions being reviewed or repaired, unfinished writing requests, and for
-    term/short answer the past-exam items not yet turned into questions.
+
+def bucket_detail(conn, uid):
+    """Every (subject x type) bucket, in fair-attempt order, with the numbers its gap is made of:
+    target (wanted), avail (usable stock), pipeline / inflight / past (work already on its way) and gap (>0: still short).
+
+    Supply on its way is deducted so the planner never over-orders: questions being reviewed or repaired, unfinished writing
+    requests, and the past-exam items not yet turned into questions. Work that has not moved for STALE_SUPPLY_HOURS (a finished
+    request nobody dispatched, a question stuck in review) is NOT deducted: otherwise one stuck pile makes the gap 0 for ever and
+    nothing new is ever written. Past-exam items count for at most half the target, so they can never fully hold the AI back.
     """
     pipeline = _count_by_bucket(
         conn,
         "SELECT q.content->>'subject' AS s,q.content->>'question_type' AS t,count(*) AS n "
         "FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
-        "WHERE st.status IN ('candidate','checking','repairing') GROUP BY 1,2",
+        "WHERE st.status IN ('candidate','checking','repairing') "
+        "AND st.updated_at > clock_timestamp() - make_interval(hours => %s) GROUP BY 1,2",
+        (STALE_SUPPLY_HOURS,),
     )
     inflight = _count_by_bucket(
         conn,
         "SELECT payload->>'subject' AS s,payload->>'question_type' AS t,count(*) AS n FROM ai_jobs "
         "WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' "
-        "AND dispatched_at IS NULL AND state IN ('pending','running','retrying','succeeded') GROUP BY 1,2",
+        "AND dispatched_at IS NULL AND state IN ('pending','running','retrying','succeeded') "
+        "AND COALESCE(finished_at, created_at) > clock_timestamp() - make_interval(hours => %s) GROUP BY 1,2",
+        (STALE_SUPPLY_HOURS,),
     )
     past = _count_by_bucket(
         conn,
@@ -462,23 +471,33 @@ def bucket_gaps(conn, uid):
         "WHERE (status='queued' AND question_type='term') "  # imported term items are throttled: they no longer hold back new ones
         "OR (status IN ('imported','queued') AND question_type IN ('short_answer','essay','single_choice')) GROUP BY 1,2",   # real past-exam singles first: the AI writes only what they cannot cover
     )
-    gaps = []
+    out = []
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
         key = (subject, kind)
-        gap = (
-            cost_control.reserve_target(required, STARTUP_RESERVE_DAYS)
-            - eligible_reserve_count(conn, uid, subject, kind)
-            - pipeline.get(key, 0) - inflight.get(key, 0) - past.get(key, 0)
-        )
-        if gap > 0:
-            gaps.append((subject, kind, gap))
-    return gaps
+        target = cost_control.reserve_target(required, STARTUP_RESERVE_DAYS)
+        avail = eligible_reserve_count(conn, uid, subject, kind)
+        on_way = dict(pipeline=pipeline.get(key, 0), inflight=inflight.get(key, 0), past=min(past.get(key, 0), target // 2))
+        out.append(dict(subject=subject, kind=kind, target=target, avail=avail, **on_way,
+                        gap=target - avail - sum(on_way.values())))
+    return out
+
+
+def bucket_gaps(conn, uid):
+    """Buckets still short of the two-day reserve, in fair-attempt order: (subject, type, missing)."""
+    return [(d["subject"], d["kind"], d["gap"]) for d in bucket_detail(conn, uid) if d["gap"] > 0]
 
 
 def gap_diagnosis(conn, uid):
-    """How short the bank is, for the worker log: total missing questions and in how many (subject x type) buckets."""
-    gaps = bucket_gaps(conn, uid)
-    return dict(gap=sum(g for _, _, g in gaps), buckets=len(gaps))
+    """For the worker log, computed on every run (peak or not): total missing, short buckets, and per bucket the usable stock
+    (avail) and the gap (gap_detail), as 'subject:type=n' lists."""
+    detail = bucket_detail(conn, uid)
+    label = lambda d: f"{d['subject'][:4]}:{d['kind']}"
+    return dict(
+        gap=sum(d["gap"] for d in detail if d["gap"] > 0), buckets=sum(1 for d in detail if d["gap"] > 0),
+        avail=",".join(f"{label(d)}={d['avail']}" for d in detail),
+        gap_detail=",".join(f"{label(d)}={max(d['gap'], 0)}" for d in detail),
+        detail=detail,
+    )
 
 
 def paragraph_pool(conn, subject):
