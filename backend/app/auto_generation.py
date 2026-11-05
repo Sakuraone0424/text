@@ -631,6 +631,39 @@ def chapter_weights(pool, frequency, used):
     return by_chapter, weights
 
 
+WEAK_RATE = 0.6          # a chapter answered below this accuracy counts as weak
+WEAK_BOOST = 2.0         # ... and is chosen this much more often
+WEAK_MIN_PAPERS = 2      # graded papers needed before the learner's results steer the writing
+WEAK_FLOOR = 0.25        # no chapter's weight falls below this share of the average: every chapter keeps a minimum of questions
+
+
+def weak_chapter_names(conn, uid, subject):
+    """Chapter names (of one subject) the learner answers below WEAK_RATE; empty until WEAK_MIN_PAPERS papers are graded
+    or when the learner has switched the feature off."""
+    from app import learning_stats, model_router
+
+    if model_router.settings(conn, uid).get("weak_focus") is False:
+        return set()
+    rows = learning_stats.graded_rows(conn, uid)
+    if len(learning_stats.papers(rows)) < WEAK_MIN_PAPERS:
+        return set()
+    table = learning_stats.chapter_table(rows, learning_stats.practice_rows(conn, uid))
+    return {c["chapter"] for c in table
+            if c["subject"] == subject and c["answers"] >= learning_stats.MIN_CHAPTER_ANSWERS and c["rate"] is not None and c["rate"] < WEAK_RATE}
+
+
+def apply_weak_focus(weights, weak):
+    """Weak chapters count double; and no chapter falls below WEAK_FLOOR of the average weight."""
+    if not weights:
+        return weights
+    out = dict(weights)
+    for key in out:
+        if key.split("|", 1)[-1] in weak:
+            out[key] *= WEAK_BOOST
+    floor = WEAK_FLOOR * (sum(out.values()) / len(out))
+    return {k: max(v, floor) for k, v in out.items()}
+
+
 def pick_paragraph(by_chapter, weights, used, rng, skip=()):
     """Weighted choice: chapter by examined frequency, then a less-used paragraph."""
     chapters = sorted(c for c, units in by_chapter.items() if any(u not in skip for u in units))
@@ -656,6 +689,7 @@ def _enqueue_gap(conn, uid, subject, kind):
         return None
     used = used_paragraphs(conn)
     by_chapter, weights = chapter_weights(pool, past_exam_import.chapter_frequency(conn, subject), used)
+    weights = apply_weak_focus(weights, weak_chapter_names(conn, uid, subject))
     prior = conn.execute(
         "SELECT count(*) AS n FROM ai_jobs WHERE user_id=%s AND kind='generation' "
         "AND payload->>'subject'=%s AND payload->>'question_type'=%s",

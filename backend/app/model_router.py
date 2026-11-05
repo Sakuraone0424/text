@@ -174,6 +174,7 @@ def configure(conn, user_id, model, effort, verify=True, **options):
         "task_limit_enabled",
         "daily_limit_enabled",
         "monthly_limit_enabled",
+        "weak_focus",
     }
     if set(options) - allowed:
         raise ValueError("unknown_setting")

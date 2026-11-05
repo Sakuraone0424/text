@@ -30,6 +30,7 @@ function form() {
     effort: $("effort").value,
     auto_discover: $("discover").checked,
     auto_upgrade: $("upgrade").checked,
+    weak_focus: $("weak-focus").checked,
     task_cny: money($("task-budget").value),
     trial_cny: money($("trial-budget").value),
     trial_active: $("trial-active").checked,
@@ -55,6 +56,7 @@ function fill(s) {
   $("max-concurrency").value = String(s.max_concurrency);
   $("discover").checked = !!s.auto_discover;
   $("upgrade").checked = !!s.auto_upgrade;
+  $("weak-focus").checked = s.weak_focus !== false;
 }
 const dirty = () => !!saved && JSON.stringify(form()) !== JSON.stringify(saved);
 function refreshDirty() {

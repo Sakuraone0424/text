@@ -190,6 +190,7 @@ class SaveAll(StrictModel):
     task_limit_enabled: StrictBool
     daily_limit_enabled: StrictBool
     monthly_limit_enabled: StrictBool
+    weak_focus: StrictBool | None = None      # 薄弱章节优先出题 (None: leave as it is)
 
 
 @router.post("/save")
@@ -202,7 +203,7 @@ def save_all(data: SaveAll, request: Request, name=Depends(require_auth)):
         same = (data.model_id, data.effort) == (current["model_id"], current["effort"])
         models.configure(
             c, u, data.model_id, data.effort, verify=not same,
-            **data.model_dump(exclude={"model_id", "effort"}),
+            **{k: v for k, v in data.model_dump(exclude={"model_id", "effort"}).items() if not (k == "weak_focus" and v is None)},
         )
         return status(c, u)
 
