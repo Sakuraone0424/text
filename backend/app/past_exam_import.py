@@ -979,6 +979,9 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
     ).fetchone()["n"]
     room, queued = batch - active, 0
     term_room = term_room_now(conn)
+    from app import auto_generation
+
+    satisfied = set(auto_generation.satisfied_keys(conn, uid, cached=False))   # buckets that need nothing more
     for item in conn.execute(
         "SELECT * FROM past_exam_items WHERE status='imported' ORDER BY "
         + _PRIORITY_SQL
@@ -986,6 +989,8 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
     ).fetchall():
         if queued >= room:
             break
+        if f"{item['subject']}|{item['question_type']}" in satisfied:
+            continue  # stocked above the two-day reserve: the item waits (status 'imported') until the bucket has a gap
         target = cost_control.bank_target()
         if target and cost_control.bucket_supply(conn, item["subject"], item["question_type"]) >= target:
             continue  # temporary first-batch limit: this bucket is already stocked

@@ -482,6 +482,29 @@ def bucket_detail(conn, uid):
     return out
 
 
+_SATISFIED = {}   # uid -> (monotonic time, keys): the stock check is not repeated for every claim of a run
+SATISFIED_TTL_SECONDS = 30
+
+
+def satisfied_keys(conn, uid, cached=True):
+    """The buckets that need nothing more: usable stock >= the two-day reserve. 'subject|type' strings.
+
+    Questions of such a bucket are neither written nor reviewed (a job of the queue waits until the bucket has a gap again)."""
+    import time as _time
+
+    now = _time.monotonic()
+    hit = _SATISFIED.get(uid)
+    if cached and hit and now - hit[0] < SATISFIED_TTL_SECONDS:
+        return hit[1]
+    keys = []
+    for subject in SUBJECTS:
+        for kind, required in COUNTS.items():
+            if eligible_reserve_count(conn, uid, subject, kind, cached=True) >= cost_control.reserve_target(required, STARTUP_RESERVE_DAYS):
+                keys.append(f"{subject}|{kind}")
+    _SATISFIED[uid] = (now, keys)
+    return keys
+
+
 def bucket_gaps(conn, uid):
     """Buckets still short of the two-day reserve, in fair-attempt order: (subject, type, missing)."""
     return [(d["subject"], d["kind"], d["gap"]) for d in bucket_detail(conn, uid) if d["gap"] > 0]
@@ -492,7 +515,16 @@ def gap_diagnosis(conn, uid):
     (avail) and the gap (gap_detail), as 'subject:type=n' lists."""
     detail = bucket_detail(conn, uid)
     label = lambda d: f"{d['subject'][:4]}:{d['kind']}"
+    waiting = {
+        (r["s"], r["t"]): r["n"]
+        for r in conn.execute(
+            "SELECT COALESCE(payload->>'subject',payload->'question'->>'subject') AS s,"
+            "COALESCE(payload->>'question_type',payload->'question'->>'question_type') AS t,count(*) AS n FROM ai_jobs "
+            "WHERE kind=ANY(%s) AND state IN ('pending','running','retrying') GROUP BY 1,2", (list(cost_control.OFF_PEAK_ONLY),)
+        ).fetchall()
+    }
     return dict(
+        on_way=",".join(f"{label(d)}={waiting.get((d['subject'], d['kind']), 0)}" for d in detail),
         gap=sum(d["gap"] for d in detail if d["gap"] > 0), buckets=sum(1 for d in detail if d["gap"] > 0),
         avail=",".join(f"{label(d)}={d['avail']}" for d in detail),
         gap_detail=",".join(f"{label(d)}={max(d['gap'], 0)}" for d in detail),
