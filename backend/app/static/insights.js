@@ -413,6 +413,13 @@
         row.onclick = () => chapterPractice(current, r.chapter);
       });
     };
+    const key = el("p", undefined, card, "chart-legend");
+    const swatch = el("span", undefined, key);
+    el("i", undefined, swatch).style.background = C.COLORS.cell_biology;
+    swatch.append("正确率低于 50%");
+    const swatch2 = el("span", undefined, key);
+    el("i", undefined, swatch2).style.background = C.COLORS.biochemistry;
+    swatch2.append("50% 及以上");
     const toggle = el("div", undefined, head, "segmented");
     toggle.setAttribute("role", "group");
     toggle.setAttribute("aria-label", "科目");
@@ -440,6 +447,7 @@
     const mmss = (v) => `${Math.floor(v / 60)}:${String(Math.round(v % 60)).padStart(2, "0")}`;
     C.columns(el("div", undefined, card), {
       title: "各题型平均每题用时", hideTitle: true, unit: "每题", items, format: (v) => mmss(v),
+      legend: [{ label: "在建议用时内", color: C.COLORS.biochemistry }, { label: "超出建议用时", color: C.COLORS.cell_biology }],
       conclusion: !t.by_type.length ? "" : over
         ? `${TYPE[over.question_type]}平均每题 ${mmss(over.avg_seconds)}，超出按分值分配的建议用时（${mmss(over.suggested_seconds)}），可以适当压缩。`
         : "各题型都在按分值分配的建议用时内。",
@@ -457,7 +465,7 @@
     const next = r.next_7_days;
     const total = next.reduce((s, x) => s + x.count, 0);
     C.columns(el("div", undefined, card), {
-      title: "未来 7 天到期", unit: "道", items: next.map((x, i) => ({ label: i === 0 ? "今天" : dateLabel(x.day), value: x.count, color: i === 0 ? C.COLORS.cell_biology : C.COLORS.biochemistry })),
+      title: "未来 7 天到期", unit: "道", legend: [{ label: "今天", color: C.COLORS.cell_biology }, { label: "之后", color: C.COLORS.biochemistry }], items: next.map((x, i) => ({ label: i === 0 ? "今天" : dateLabel(x.day), value: x.count, color: i === 0 ? C.COLORS.cell_biology : C.COLORS.biochemistry })),
       conclusion: total ? `未来 7 天共 ${total} 道到期，今天 ${next[0].count} 道。` : "",
       empty: "还没有复习卡片", emptyHint: "答错的题会自动进入复习安排。",
     });

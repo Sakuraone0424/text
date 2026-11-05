@@ -117,7 +117,9 @@
     const step = Math.max(1, Math.ceil(labels.length / 5));
     labels.forEach((p, i) => {
       if (i % step && i !== labels.length - 1) return;
-      svg("text", { x: x(i), y: H - 8, "text-anchor": "middle", fill: COLORS.axis, "font-size": 11 }, chart).textContent = p.label;
+      // the end labels hang inward so they never leave the chart
+      const anchor = labels.length > 1 && i === labels.length - 1 ? "end" : labels.length > 1 && i === 0 && x(i) < L + 14 ? "start" : "middle";
+      svg("text", { x: anchor === "end" ? Math.min(x(i) + 4, W) : x(i), y: H - 8, "text-anchor": anchor, fill: COLORS.axis, "font-size": 11 }, chart).textContent = p.label;
     });
     series.forEach((s) => {
       const pts = s.points.map((p, i) => (p.value === null || p.value === undefined ? null : [x(i), y(p.value), p, i]));
@@ -198,6 +200,7 @@
       T = 14,
       B = 28;
     const refs = spec.refLines || [];
+    const legendItems = spec.legend || [];
     const top = spec.max ?? Math.max(1, ...items.map((i) => i.value), ...refs.map((r) => r.value));
     const y = (v) => T + (1 - v / top) * (H - T - B);
     const format = spec.format || num;
@@ -215,6 +218,7 @@
     items.forEach((item, i) => {
       const cx = L + slot * i + slot / 2;
       const h = Math.max(item.value > 0 ? 2 : 0, (H - T - B) * (item.value / top));
+      if (item.value === 0) svg("text", { x: cx, y: H - B - 4, "text-anchor": "middle", fill: COLORS.axis, "font-size": 10 }, chart).textContent = "0";   // a real zero is shown, not left blank
       const rect = svg("rect", { x: cx - bar / 2, y: H - B - h, width: bar, height: h, rx: 3, fill: item.color || COLORS.biochemistry, class: "chart-bar" }, chart);
       bind(rect, f.readout, `${item.label}：${format(item.value)}${spec.unit ? " " + spec.unit : ""}${item.note ? "（" + item.note + "）" : ""}`);
       if (i % step === 0 || i === items.length - 1)
@@ -225,6 +229,15 @@
       svg("line", { x1: L, x2: W - R, y1: yy, y2: yy, stroke: ref.color || COLORS.warn, "stroke-width": 1.4, "stroke-dasharray": "5 4" }, chart);
       svg("text", { x: W - R, y: yy - 4, "text-anchor": "end", fill: ref.color || COLORS.warn, "font-size": 11, "font-weight": 700 }, chart).textContent = ref.label;
     });
+    // colours that carry a meaning are explained (legend: [{label, color}])
+    if (legendItems.length) {
+      const legend = html("div", undefined, f.body, "chart-legend");
+      legendItems.forEach((l) => {
+        const item = html("span", undefined, legend);
+        html("i", undefined, item).style.background = l.color;
+        item.append(l.label);
+      });
+    }
     return root;
   }
 

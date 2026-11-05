@@ -127,3 +127,56 @@ def test_no_conclusion_without_enough_answers(engine, live_app):
     page, _ = show(engine, live_app, "light", profile(thin, DAYS))
     expect(page.locator("#profile-data .chart-block", has_text="题型得分率").locator(".chart-conclusion")).to_have_text("")
     page.close()
+
+
+def rich(type_rates=RATES):
+    data = profile(type_rates, DAYS)
+    data["chapters"] = [dict(subject="biochemistry", chapter=c, rate=r, answers=a) for c, r, a in
+                        [("第一章 蛋白质的结构与功能", 0.0, 6), ("第二章 酶", 0.35, 8), ("第三章 糖代谢", 0.62, 12), ("第四章 脂代谢", 0.9, 9)]]
+    data["timing"] = {"papers": [], "recorded_questions": 90, "by_type": [
+        dict(question_type="single_choice", avg_seconds=40, questions=30, suggested_seconds=48),
+        dict(question_type="fill_blank", avg_seconds=70, questions=30, suggested_seconds=48),
+        dict(question_type="term", avg_seconds=95, questions=12, suggested_seconds=72),
+        dict(question_type="short_answer", avg_seconds=300, questions=6, suggested_seconds=144),
+        dict(question_type="essay", avg_seconds=500, questions=3, suggested_seconds=216)]}
+    data["reviews"] = {"due_now": 4, "mastered": 12, "next_7_days": [dict(day=(TODAY + timedelta(days=k)).isoformat(), count=c) for k, c in enumerate([4, 0, 2, 0, 0, 7, 1])]}
+    return data
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_every_chart_on_the_profile_page_stays_inside_its_card_and_is_labelled(engine, live_app, scheme):
+    page, errors = show(engine, live_app, scheme, rich())
+    assert page.evaluate("document.querySelector('.workspace, main.page') && document.querySelector('.workspace, main.page').scrollWidth <= innerWidth + 1")
+    assert inside(page, "#profile-data .chart-svg, #profile-data .chart-block, #profile-data .hbar-row, #profile-data .progress-line, #profile-data .chart-legend") == 0
+    assert inside(page, "#profile-data svg text", "svg") == 0                                # labels stay inside their own chart
+    # a chart that colours by meaning says what the colours mean
+    expect(page.locator("#profile-data .chart-block", has_text="平均每题用时").locator(".chart-legend")).to_contain_text("超出建议用时")
+    expect(page.locator("#profile-data")).to_contain_text("正确率低于 50%")
+    expect(page.locator("#profile-data .chart-block", has_text="未来 7 天").locator(".chart-legend")).to_contain_text("今天")
+    for i, section in enumerate(page.locator("#profile-data > section").all()):
+        section.scroll_into_view_if_needed()
+        section.screenshot(path=str(SHOTS / f"charts-profile-{i}-{engine[0]}-{scheme}.png"))
+    assert not errors, errors
+    page.close()
+
+
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_progress_page_charts_stay_inside_their_cards(engine, live_app, scheme):
+    from test_part4_ui import seed
+
+    client, dsn, _ = live_app
+    seed(client, dsn)
+    base = str(client.base_url).rstrip("/")
+    page, errors = open_page(engine, "safari", base, scheme=scheme)
+    page.goto(base + "/training#/progress")
+    page.wait_for_selector("#funnel .funnel-row")
+    assert page.evaluate("document.querySelector('.workspace, main.page').scrollWidth <= innerWidth + 1")
+    assert inside(page, "#funnel, .funnel-row, #spend-chart svg, #spend-chart .chart-block, #spend-split .split, .spend-legend", "section.card, .card") == 0
+    assert inside(page, "#spend-chart svg text", "svg") == 0
+    for i, sel in enumerate(["#funnel", "#spend-chart", "#spend-split"]):
+        node = page.locator(sel).first
+        if node.count():
+            node.locator("xpath=ancestor::section[1]").scroll_into_view_if_needed()
+            node.locator("xpath=ancestor::section[1]").screenshot(path=str(SHOTS / f"charts-progress-{i}-{engine[0]}-{scheme}.png"))
+    assert not errors, errors
+    page.close()
