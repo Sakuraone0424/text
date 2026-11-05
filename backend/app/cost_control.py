@@ -96,12 +96,13 @@ MONTH_START = "(date_trunc('month',clock_timestamp() AT TIME ZONE 'Asia/Shanghai
 DAY_START = "(date_trunc('day',clock_timestamp() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai')"
 
 
-def month_split(conn, uid):
-    """(reserved-group spend, writing/review spend) this Shanghai month, by what each attempt counts (cny_billing.COUNTED)."""
+def month_split(conn, uid, start=None):
+    """(reserved-group spend, writing/review spend) since `start` (default: the start of this Shanghai month), by what each
+    attempt counts (cny_billing.COUNTED)."""
     row = conn.execute(
         f"SELECT COALESCE(sum({cny_billing.COUNTED}) FILTER(WHERE j.kind=ANY(%(rf)s)),0) AS reserved, "
         f"COALESCE(sum({cny_billing.COUNTED}) FILTER(WHERE NOT j.kind=ANY(%(rf)s)),0) AS other "
-        f"{cny_billing._ATTEMPTS} WHERE j.user_id=%(uid)s AND r.created_at>={MONTH_START}",
+        f"{cny_billing._ATTEMPTS} WHERE j.user_id=%(uid)s AND r.created_at>={start or MONTH_START}",
         {"rf": list(RESERVED_FOR), "uid": uid, "med": cny_billing.medians(conn, uid)},
     ).fetchone()
     return Decimal(row["reserved"]), Decimal(row["other"])
@@ -118,6 +119,70 @@ def cap_reason(conn, uid, kind, amount):
         # Keep back whatever part of the grading reserve is still unused.
         limit = cap - max(Decimal(0), reserve - reserved)
     return "budget_exceeded" if total + Decimal(amount) > limit else None
+
+
+# ---- daily pace ---------------------------------------------------------------------
+#
+# Writing and review money is spread over the month: today's allowance = (what is left for writing this month, the unused
+# grading reserve already taken out) / (days left including today). When today's allowance is spent, writing/review jobs wait
+# in the queue until Beijing midnight. If tomorrow's paper cannot be put together from the stock (some bucket below one paper's
+# worth), today may overspend by up to 50% as an exception.
+
+PACE_EXCEPTION = Decimal("1.5")
+
+
+def _day_numbers(at=None):
+    import calendar
+
+    local = (at or datetime.now(timezone.utc)).astimezone(cny_billing.SHANGHAI)
+    days_in_month = calendar.monthrange(local.year, local.month)[1]
+    return local, days_in_month - local.day + 1, days_in_month
+
+
+def tomorrow_short(conn, uid):
+    """Can tomorrow's paper NOT be put together: is some (subject, type) bucket below one paper's worth of usable stock?"""
+    from app import auto_generation, training_spec_v4
+
+    return any(
+        auto_generation.eligible_reserve_count(conn, uid, subject, kind, cached=True) < need
+        for subject in training_spec_v4.SUBJECTS for kind, need in training_spec_v4.COUNTS.items()
+    )
+
+
+def pace(conn, uid, at=None, short=None):
+    """Today's writing/review allowance and use (CNY), and how far this month's money goes at the current speed."""
+    cap, reserve = caps()
+    reserved, other = month_split(conn, uid)
+    limit = cap - max(Decimal(0), reserve - reserved)             # what writing/review may spend this month in all
+    _, today_other = month_split(conn, uid, DAY_START)
+    before_today = other - today_other
+    local, days_left, days_in_month = _day_numbers(at)
+    left_before_today = max(Decimal(0), limit - before_today)
+    quota = (left_before_today / days_left).quantize(Decimal("0.0001"))
+    if short is None:
+        short = tomorrow_short(conn, uid)
+    allowed = quota * PACE_EXCEPTION if short else quota
+    remaining = max(Decimal(0), limit - other)
+    elapsed = max(1, local.day - 1 + (local.hour * 60 + local.minute) / 1440)
+    per_day = other / Decimal(str(elapsed))
+    covers = None if per_day <= 0 else float(remaining / per_day)
+    runs_out = None
+    if covers is not None and covers < days_left:
+        from datetime import timedelta
+
+        runs_out = (local + timedelta(days=covers)).date().isoformat()
+    return dict(
+        quota_cny=str(quota), allowed_cny=str(allowed.quantize(Decimal("0.0001"))), used_cny=str(today_other.quantize(Decimal("0.0001"))),
+        exceeded=today_other >= allowed, exception=bool(short), days_left=days_left, remaining_cny=str(remaining.quantize(Decimal("0.01"))),
+        runs_out_on=runs_out, lasts_to_month_end=runs_out is None,
+    )
+
+
+def pace_exhausted(conn, uid):
+    """Today's writing/review allowance is used up (jobs wait until Beijing midnight)."""
+    p = pace(conn, uid)
+    # (a month that is already used up is the monthly cap's business: it blocks with budget_exceeded)
+    return bool(p["exceeded"]) and Decimal(p["remaining_cny"]) > 0
 
 
 # ---- report ---------------------------------------------------------------------------

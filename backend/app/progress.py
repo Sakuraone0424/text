@@ -470,5 +470,6 @@ def report(conn, uid):
         worker=worker_status(conn, now),
         platform=platform_status(conn),
         prices=cny_prices.status(conn),
+        pace=cost_control.pace(conn, uid),
         next_paper=next_paper(conn, rows, now),
     )

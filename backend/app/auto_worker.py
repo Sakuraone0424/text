@@ -286,10 +286,14 @@ class CallPool:
         self.overran = False
 
     def _room_for_another_call(self):
-        if self.start_cutoff is not None:
-            return self.clock() - self.t0 < self.start_cutoff
+        """A call starts only if it can be expected to END before the deadline (the slowest call of this run so far, or the
+        usual length, plus a safety margin) and, with a start cutoff, only before that. A call that still does not come back
+        by the deadline is given up on: estimated at the median of recent calls, and queued again."""
         expected = max(EXPECTED_CALL_SECONDS, self.longest)
-        return self.clock() + expected <= self.deadline - SAFETY_SECONDS
+        fits = self.clock() + expected <= self.deadline - SAFETY_SECONDS
+        if self.start_cutoff is not None:
+            return fits and self.clock() - self.t0 < self.start_cutoff
+        return fits
 
     def _worker(self):
         while True:
@@ -461,6 +465,9 @@ def _plan_queue(conn, report, users, private, first):
                 diagnosis = auto_generation.gap_diagnosis(conn, user["user_id"])
                 report["gap"], report["short_buckets"] = diagnosis["gap"], diagnosis["buckets"]
                 report["avail"], report["gap_detail"] = diagnosis["avail"], diagnosis["gap_detail"]
+                report["on_way"] = diagnosis["on_way"]
+                if diagnosis["gap"]:
+                    report["stuck"] = auto_generation.short_bucket_report(conn, user["user_id"])   # per short bucket: first blocked step + funnel       # queued/running write+review+repair jobs per bucket
                 if cost_control.is_peak() and diagnosis["gap"]:
                     # computed in peak hours too; only the calls themselves wait
                     report["plan_note"] = f"高峰暂停，低峰时将规划{diagnosis['gap']}个"
@@ -491,7 +498,8 @@ def batch_exit_reason(pool, limit, busy_calls):
         if code == "run_time_budget":
             return "time_cutoff"
         if code.startswith("no_claimable_job"):
-            return "peak_hours" if pool.last_claim.get("held_back") else "queue_empty"
+            held = str(pool.last_claim.get("held_back") or "")
+            return "daily_quota" if held == "daily_quota" else "peak_hours" if held else "queue_empty"
         if "budget" in code:
             return "budget_exhausted"
         if code.startswith("blocked:automation_stopped"):
@@ -592,6 +600,7 @@ def _locked_run(report, run_began):
     report["adaptive"] = adaptive
     report["concurrency"] = workers
     cutoff, hard = start_cutoff_seconds(), run_seconds()
+    report["pre_s"] = f"{time.monotonic() - run_began:.1f}"     # everything before the first call (planning, prices, balance)
     calls, ran, claimed, peak, overran = 0, 0, [], 0, False
     exit_reason, pool = None, None
     try:
@@ -626,6 +635,7 @@ def _locked_run(report, run_began):
                 exit_reason = "max_batches"
                 break
     finally:
+        report["pool_end_s"] = f"{time.monotonic() - run_began:.1f}"   # when the last call batch was over, since the run began
         report["calls"] = calls
         report["batches"] = ran
         report["exit_reason"] = exit_reason or "error"

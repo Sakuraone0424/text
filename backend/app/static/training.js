@@ -481,7 +481,7 @@ function renderProgress() {
   $("progress").textContent =
     `已答 ${done} / ${total} · 剩余 ${total - done}` +
     (reported.size ? ` · 已反馈${reported.size}题不计分` : "") +
-    (paper?.includes_reused ? " · 含复用题" : "");
+    (paper?.includes_reused ? " · 含复用题" : "") + (paper?.relaxed_rules?.length ? " · 组卷规则已放宽" : "");
   emitUI();
 }
 function render() {
@@ -729,6 +729,7 @@ async function showResult() {
   renderedResultSignature = signature;
   $("result").replaceChildren();
   const excludedCount = result.excluded?.question_ids?.length || 0;
+  if (result.relaxed_rules?.length) element("p", relaxedText(result.relaxed_rules), $("result")).className = "notice";
   if (result.includes_reused) element("p", "本卷含复用题：新题不足时，用14天前出现过的已审核旧题补齐。", $("result")).className = "notice";
   element(
     "h2",
@@ -1345,6 +1346,13 @@ $("memory").onclick = async () => {
    nothing to check (recall questions) all four are open. After the rating the next question comes by itself; the last
    one ends with a short summary. */
 const NORMALIZE = (text) => String(text || "").replace(/[\s\u3000，。、；;,.]/g, "").toLowerCase();
+function relaxedText(rules) {
+  const what = { chapter_cap: "同一章节题数不超过该科 25%", difficulty_mix: "难度搭配约 3:5:2（基础:核心:拔高）" };
+  const subject = { biochemistry: "生化", cell_biology: "细胞" };
+  const parts = rules.map((r) => { const [k, s] = r.split(":"); return `${subject[s] || s}：${what[k] || k}`; });
+  return "题库题目不够，本卷放宽了组卷规则——" + parts.join("；") + "。";
+}
+
 function reviewSession(items) {
   const root = $("learning");
   root.dataset.owner = location.hash || "#/mistakes";

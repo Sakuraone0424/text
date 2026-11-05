@@ -201,6 +201,8 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     ).fetchall()
     seed = secrets.token_hex(16)
     chapter_counts = Counter()
+    difficulty_counts = Counter()
+    relaxed_rules = set()      # paper rules the bank could not keep (chapter cap, difficulty mix): said on the paper
     decisions = []
     audit = []
     # Also reject semantically close stems already seen by this user; no revision recycling.
@@ -394,6 +396,9 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     kind,
                     decisions,
                     due,
+                    difficulty_counts=difficulty_counts,
+                    relaxed=relaxed_rules,
+                    subject_total=sum(spec_counts.values()),
                 )
             )
     if shortages:
@@ -420,6 +425,7 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         item["selected"] = item["question_id"] in selected_ids
         if not item["selected"] and not item["excluded_reasons"]:
             item["excluded_reasons"] = ["not_drawn_in_fixed_quota"]
+    context["relaxed_rules"] = sorted(relaxed_rules)
     conn.execute(
         "INSERT INTO selection_runs(paper_id,user_id,seed,algorithm_version,policy_id,as_of,config,context,candidates,decisions) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
         (
@@ -458,7 +464,7 @@ def load_paper(conn, user_id, paper_id):
 
     timing = state(conn, user_id, paper_id)
     run = conn.execute(
-        "SELECT candidates FROM selection_runs WHERE paper_id=%s", (paper_id,)
+        "SELECT candidates,context->'relaxed_rules' AS relaxed FROM selection_runs WHERE paper_id=%s", (paper_id,)
     ).fetchone()
     review_tags = (
         {
@@ -493,6 +499,7 @@ def load_paper(conn, user_id, paper_id):
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),
         "includes_reused": any(i.get("is_reused") for i in items),
+        "relaxed_rules": list((run or {}).get("relaxed") or []),
         "reported_question_ids": sorted(reported_question_ids(conn, paper_id)),
         "photo_answers_enabled": photo_answers_enabled(),
         "duration_seconds": 3600,
@@ -739,6 +746,7 @@ def result(conn, user_id, paper_id):
         "max_points": excluded["max_points"],
         "nominal_max_points": excluded["nominal_max_points"],
         "includes_reused": any(reused.values()),
+        "relaxed_rules": list((conn.execute("SELECT context->'relaxed_rules' AS r FROM selection_runs WHERE paper_id=%s", (paper_id,)).fetchone() or {}).get("r") or []),
         "excluded": {"question_ids": excluded["question_ids"], "points": excluded["excluded_points"]},
         "answers": [
             {

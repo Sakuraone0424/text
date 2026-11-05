@@ -68,3 +68,28 @@ def test_jobs_blocked_earlier_for_a_missing_price_go_back_to_the_queue(db, setup
     report = {}
     auto_worker._plan_queue(db, report, [{"user_id": setup_ai, "stopped": False}], False, False)
     assert db.execute("SELECT state FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()["state"] == "retrying"
+
+
+def test_the_funnel_says_where_a_short_bucket_gets_stuck(db, corpus, setup_ai):
+    d = gen.bucket_funnel(db, "biochemistry", "essay")
+    assert set(d) == {"jobs", "failed_jobs", "states", "top_reason", "past"}
+    assert gen.why_nothing_is_written(db, "biochemistry", "single_choice") in ("writable", "no_exam_style", "no_textbook_paragraph")
+    line = gen.short_bucket_report(db, setup_ai)
+    assert "bioc:essay=" in line and "|jobs" in line and "|q:" in line and "|top:" in line and "|past:" in line
+
+
+def test_a_bucket_without_any_exam_style_is_named(db, corpus, setup_ai, monkeypatch):
+    monkeypatch.setattr(gen, "select_exam_style", lambda *a, **k: None)
+    assert gen.why_nothing_is_written(db, "biochemistry", "essay") == "no_exam_style"
+
+
+def test_a_small_gap_is_not_starved_by_big_ones(db, corpus, setup_ai):
+    from app import ai_jobs
+    # 20 recent requests, none for biochemistry essay, which has a gap of 1 among gaps of 40+
+    for i in range(20):
+        db.execute("INSERT INTO ai_jobs(job_key,user_id,kind,settings_snapshot,payload) VALUES (%s,%s,'generation','{}',%s)",
+                   (f"old-{i}", setup_ai, __import__("psycopg").types.json.Jsonb({"subject": "biochemistry", "question_type": "fill_blank"})))
+    gaps = [("biochemistry", "fill_blank", 40), ("biochemistry", "single_choice", 30), ("biochemistry", "essay", 1)]
+    first = gen.allocate_order(db, gaps)[0]
+    assert first[:2] == ("biochemistry", "essay") or first[:2] == ("biochemistry", "single_choice")   # single-choice floor may go first
+    assert gen.allocate_order(db, [("biochemistry", "fill_blank", 40), ("biochemistry", "essay", 1)])[0][1] == "essay"

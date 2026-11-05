@@ -1,3 +1,4 @@
+import os
 """Budgeted leased jobs. Reservations survive uncertain calls and crash recovery."""
 
 import hashlib
@@ -221,21 +222,39 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
     for lost in expired:
         if lost["settings_snapshot"].get("billing_currency") == "CNY":
             cny_billing.settle(conn, lost, None, TimeoutError())
-    from app import cost_control
+    from app import auto_generation, cost_control
 
+    # A bucket whose usable stock already covers the two-day reserve needs no more questions: its writing, review and repair
+    # jobs stay in the queue (not dropped) until the bucket has a gap again. Grading and the rest are not touched.
+    satisfied = []
+    if os.environ.get("AI_SKIP_SATISFIED_BUCKETS", "1") != "0":
+        owners = conn.execute(
+            "SELECT DISTINCT user_id FROM ai_jobs WHERE state IN ('pending','retrying') AND kind=ANY(%s)", (list(cost_control.OFF_PEAK_ONLY),)
+        ).fetchall()
+        for owner in owners:
+            satisfied += auto_generation.satisfied_keys(conn, owner["user_id"])
+    # Today's writing/review allowance used up: those jobs of that user wait until Beijing midnight (grading is not held).
+    paced = []
+    if os.environ.get("AI_DAILY_PACE", "1") != "0":
+        paced = [o["user_id"] for o in conn.execute(
+            "SELECT DISTINCT user_id FROM ai_jobs WHERE state IN ('pending','retrying') AND kind=ANY(%s)", (list(cost_control.OFF_PEAK_ONLY),)
+        ).fetchall() if cost_control.pace_exhausted(conn, o["user_id"])]
     # Question writing, review and repair wait for off-peak hours; grading never does.
     job = conn.execute(
         "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp()"
         + scope_filter
         + " AND NOT kind=ANY(%s)"
+        + " AND NOT (kind=ANY(%s) AND (COALESCE(payload->>'subject',payload->'question'->>'subject') || '|' "
+        "|| COALESCE(payload->>'question_type',payload->'question'->>'question_type'))=ANY(%s))"
+        + " AND NOT (kind=ANY(%s) AND user_id=ANY(%s) AND NOT settings_snapshot ?| ARRAY['limited_trial','review_campaign','qa_automation'])"
         # one question is never written/reviewed/repaired by two calls at once
         + " AND NOT (payload ? 'question_id' AND EXISTS(SELECT 1 FROM ai_jobs r WHERE r.state='running' AND r.id<>ai_jobs.id"
         " AND r.payload->>'question_id'=ai_jobs.payload->>'question_id'))"
         + " ORDER BY " + CLAIM_ORDER_SQL + " FOR UPDATE SKIP LOCKED LIMIT 1",
-        ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(),),
+        ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(), list(cost_control.OFF_PEAK_ONLY), satisfied, list(cost_control.OFF_PEAK_ONLY), paced),
     ).fetchone()
     if not job:
-        _note("no_claimable_job", held_back=",".join(cost_control.held_back_kinds()))
+        _note("no_claimable_job", held_back=",".join(cost_control.held_back_kinds() or (["daily_quota"] if paced else [])))
         return None
     uid = job["user_id"]
     conn.execute("SELECT pg_advisory_xact_lock(%s)", (810000 + uid,))

@@ -482,9 +482,79 @@ def bucket_detail(conn, uid):
     return out
 
 
+_SATISFIED = {}   # uid -> (monotonic time, keys): the stock check is not repeated for every claim of a run
+SATISFIED_TTL_SECONDS = 30
+
+
+def satisfied_keys(conn, uid, cached=True):
+    """The buckets that need nothing more: usable stock >= the two-day reserve. 'subject|type' strings.
+
+    Questions of such a bucket are neither written nor reviewed (a job of the queue waits until the bucket has a gap again)."""
+    import time as _time
+
+    now = _time.monotonic()
+    hit = _SATISFIED.get(uid)
+    if cached and hit and now - hit[0] < SATISFIED_TTL_SECONDS:
+        return hit[1]
+    keys = []
+    for subject in SUBJECTS:
+        for kind, required in COUNTS.items():
+            if eligible_reserve_count(conn, uid, subject, kind, cached=True) >= cost_control.reserve_target(required, STARTUP_RESERVE_DAYS):
+                keys.append(f"{subject}|{kind}")
+    _SATISFIED[uid] = (now, keys)
+    return keys
+
+
 def bucket_gaps(conn, uid):
     """Buckets still short of the two-day reserve, in fair-attempt order: (subject, type, missing)."""
     return [(d["subject"], d["kind"], d["gap"]) for d in bucket_detail(conn, uid) if d["gap"] > 0]
+
+
+def bucket_funnel(conn, subject, kind):
+    """Where the questions of one bucket end up: requests written, and the states their questions are in, with the most
+    common reason for the blocked / retired ones. Numbers and fixed codes only."""
+    jobs = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' "
+        "AND payload->>'subject'=%s AND payload->>'question_type'=%s", (subject, kind)).fetchone()["n"]
+    failed = conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' "
+        "AND payload->>'subject'=%s AND payload->>'question_type'=%s AND state IN ('failed','blocked')", (subject, kind)).fetchone()["n"]
+    states = {
+        r["status"]: r["n"] for r in conn.execute(
+            "SELECT st.status,count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+            "WHERE q.content->>'subject'=%s AND q.content->>'question_type'=%s GROUP BY 1", (subject, kind)).fetchall()}
+    top = conn.execute(
+        "SELECT st.reason,count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
+        "WHERE q.content->>'subject'=%s AND q.content->>'question_type'=%s AND st.status IN ('blocked','retired') "
+        "AND st.reason IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 1", (subject, kind)).fetchone()
+    past = conn.execute(
+        "SELECT status,count(*) AS n FROM past_exam_items WHERE subject=%s AND question_type=%s GROUP BY 1", (subject, kind)).fetchall()
+    return dict(jobs=jobs, failed_jobs=failed, states=states, top_reason=(top["reason"], top["n"]) if top else None,
+                past={r["status"]: r["n"] for r in past})
+
+
+def why_nothing_is_written(conn, subject, kind):
+    """The first step at which a short bucket gets no new writing request, as a fixed code (or 'writable')."""
+    if not select_exam_style(conn, subject, kind):
+        return "no_exam_style"            # no clean genuine past question of this type to imitate (neither 论述/问答 nor 简答)
+    if not paragraph_pool(conn, subject):
+        return "no_textbook_paragraph"
+    return "writable"
+
+
+def short_bucket_report(conn, uid):
+    """For the worker log: for every bucket that has a gap, 'subject:type=<step>/<funnel>' (one line each, joined by ',')."""
+    parts = []
+    for d in bucket_detail(conn, uid):
+        if d["gap"] <= 0:
+            continue
+        f = bucket_funnel(conn, d["subject"], d["kind"])
+        top = f"{f['top_reason'][0]}x{f['top_reason'][1]}" if f["top_reason"] else "-"
+        states = "/".join(f"{k}{v}" for k, v in sorted(f["states"].items())) or "-"
+        past = "/".join(f"{k}{v}" for k, v in sorted(f["past"].items())) or "-"
+        parts.append(f"{d['subject'][:4]}:{d['kind']}={why_nothing_is_written(conn, d['subject'], d['kind'])}"
+                     f"|jobs{f['jobs']}|failed{f['failed_jobs']}|q:{states}|top:{top}|past:{past}")
+    return ";".join(parts) or "-"
 
 
 def gap_diagnosis(conn, uid):
@@ -492,7 +562,16 @@ def gap_diagnosis(conn, uid):
     (avail) and the gap (gap_detail), as 'subject:type=n' lists."""
     detail = bucket_detail(conn, uid)
     label = lambda d: f"{d['subject'][:4]}:{d['kind']}"
+    waiting = {
+        (r["s"], r["t"]): r["n"]
+        for r in conn.execute(
+            "SELECT COALESCE(payload->>'subject',payload->'question'->>'subject') AS s,"
+            "COALESCE(payload->>'question_type',payload->'question'->>'question_type') AS t,count(*) AS n FROM ai_jobs "
+            "WHERE kind=ANY(%s) AND state IN ('pending','running','retrying') GROUP BY 1,2", (list(cost_control.OFF_PEAK_ONLY),)
+        ).fetchall()
+    }
     return dict(
+        on_way=",".join(f"{label(d)}={waiting.get((d['subject'], d['kind']), 0)}" for d in detail),
         gap=sum(d["gap"] for d in detail if d["gap"] > 0), buckets=sum(1 for d in detail if d["gap"] > 0),
         avail=",".join(f"{label(d)}={d['avail']}" for d in detail),
         gap_detail=",".join(f"{label(d)}={max(d['gap'], 0)}" for d in detail),
@@ -552,6 +631,39 @@ def chapter_weights(pool, frequency, used):
     return by_chapter, weights
 
 
+WEAK_RATE = 0.6          # a chapter answered below this accuracy counts as weak
+WEAK_BOOST = 2.0         # ... and is chosen this much more often
+WEAK_MIN_PAPERS = 2      # graded papers needed before the learner's results steer the writing
+WEAK_FLOOR = 0.25        # no chapter's weight falls below this share of the average: every chapter keeps a minimum of questions
+
+
+def weak_chapter_names(conn, uid, subject):
+    """Chapter names (of one subject) the learner answers below WEAK_RATE; empty until WEAK_MIN_PAPERS papers are graded
+    or when the learner has switched the feature off."""
+    from app import learning_stats, model_router
+
+    if model_router.settings(conn, uid).get("weak_focus") is False:
+        return set()
+    rows = learning_stats.graded_rows(conn, uid)
+    if len(learning_stats.papers(rows)) < WEAK_MIN_PAPERS:
+        return set()
+    table = learning_stats.chapter_table(rows, learning_stats.practice_rows(conn, uid))
+    return {c["chapter"] for c in table
+            if c["subject"] == subject and c["answers"] >= learning_stats.MIN_CHAPTER_ANSWERS and c["rate"] is not None and c["rate"] < WEAK_RATE}
+
+
+def apply_weak_focus(weights, weak):
+    """Weak chapters count double; and no chapter falls below WEAK_FLOOR of the average weight."""
+    if not weights:
+        return weights
+    out = dict(weights)
+    for key in out:
+        if key.split("|", 1)[-1] in weak:
+            out[key] *= WEAK_BOOST
+    floor = WEAK_FLOOR * (sum(out.values()) / len(out))
+    return {k: max(v, floor) for k, v in out.items()}
+
+
 def pick_paragraph(by_chapter, weights, used, rng, skip=()):
     """Weighted choice: chapter by examined frequency, then a less-used paragraph."""
     chapters = sorted(c for c, units in by_chapter.items() if any(u not in skip for u in units))
@@ -577,6 +689,7 @@ def _enqueue_gap(conn, uid, subject, kind):
         return None
     used = used_paragraphs(conn)
     by_chapter, weights = chapter_weights(pool, past_exam_import.chapter_frequency(conn, subject), used)
+    weights = apply_weak_focus(weights, weak_chapter_names(conn, uid, subject))
     prior = conn.execute(
         "SELECT count(*) AS n FROM ai_jobs WHERE user_id=%s AND kind='generation' "
         "AND payload->>'subject'=%s AND payload->>'question_type'=%s",
@@ -645,6 +758,11 @@ def allocate_order(conn, gaps):
         return g[2] / total_gap - (recent[(g[0], g[1])] / seen if seen else 0)
 
     ordered = sorted(gaps, key=lambda g: -deficit(g))
+    # No bucket with a gap may starve: one that got none of the last ALLOCATION_WINDOW requests goes first (a gap of 1 against
+    # a total gap of 90 earns a share of about 1%, so a bucket like biochemistry essay was almost never chosen).
+    starved = [g for g in ordered if seen >= ALLOCATION_WINDOW // 2 and recent[(g[0], g[1])] == 0]
+    if starved:
+        ordered = starved[:1] + [g for g in ordered if g is not starved[0]]
     single = [g for g in ordered if g[1] == "single_choice"]
     share = sum(v for (s_, t_), v in recent.items() if t_ == "single_choice") / seen if seen else 0
     if single and share < SINGLE_CHOICE_MIN_SHARE:
