@@ -163,8 +163,38 @@ def test_the_real_pool_starts_no_call_after_the_cutoff_and_ignores_the_old_room_
     assert FakePool_old.calls == 4                                              # without a cutoff the old rule (room for one more call) applies
 
 
+def test_no_call_starts_that_cannot_be_expected_to_end_before_the_deadline(monkeypatch):
+    """329 s runs: a call started inside the start cutoff but too late to finish by the hard end is not started at all."""
+    now = [0.0]
+
+    def behaviour(executor):
+        ai_jobs.LAST_CLAIM.clear()
+        ai_jobs.LAST_CLAIM.update(outcome="claimed", job_id=1, kind="generation")
+        now[0] += 45
+        return True
+
+    monkeypatch.setattr(auto_worker, "dispatch_completed", lambda conn, **kw: None)
+    fake_run_once(monkeypatch, behaviour)
+    pool = auto_worker.CallPool(lambda: Nothing(), lambda job: None, 1, 50, 120, clock=lambda: now[0], start_cutoff=100).run()
+    assert pool.calls == 2 and pool.stopped_because == "run_time_budget"        # 0 and 45; at 90 a 60 s call would end at 150 > 105
+    # a slow call raises the bar for the next one: after a 100 s call there is no room for another of that length
+    now[0] = 0
+
+    def slow(executor):
+        ai_jobs.LAST_CLAIM.clear()
+        ai_jobs.LAST_CLAIM.update(outcome="claimed", job_id=1, kind="quality_review")
+        now[0] += 100
+        return True
+
+    fake_run_once(monkeypatch, slow)
+    pool = auto_worker.CallPool(lambda: Nothing(), lambda job: None, 1, 50, 270, clock=lambda: now[0], start_cutoff=210).run()
+    assert pool.calls == 2                                                       # 0 and 100; at 200: 200+100 > 255
+
+
 def test_a_call_started_just_before_the_cutoff_is_given_up_at_the_hard_end(monkeypatch):
     release = threading.Event()
+    monkeypatch.setattr(auto_worker, "EXPECTED_CALL_SECONDS", 0)     # (a 0.4 s run is far shorter than a usual call)
+    monkeypatch.setattr(auto_worker, "SAFETY_SECONDS", 0)
     monkeypatch.setattr(auto_worker, "dispatch_completed", lambda conn, **kw: None)
 
     def behaviour(executor):

@@ -286,10 +286,14 @@ class CallPool:
         self.overran = False
 
     def _room_for_another_call(self):
-        if self.start_cutoff is not None:
-            return self.clock() - self.t0 < self.start_cutoff
+        """A call starts only if it can be expected to END before the deadline (the slowest call of this run so far, or the
+        usual length, plus a safety margin) and, with a start cutoff, only before that. A call that still does not come back
+        by the deadline is given up on: estimated at the median of recent calls, and queued again."""
         expected = max(EXPECTED_CALL_SECONDS, self.longest)
-        return self.clock() + expected <= self.deadline - SAFETY_SECONDS
+        fits = self.clock() + expected <= self.deadline - SAFETY_SECONDS
+        if self.start_cutoff is not None:
+            return fits and self.clock() - self.t0 < self.start_cutoff
+        return fits
 
     def _worker(self):
         while True:
@@ -592,6 +596,7 @@ def _locked_run(report, run_began):
     report["adaptive"] = adaptive
     report["concurrency"] = workers
     cutoff, hard = start_cutoff_seconds(), run_seconds()
+    report["pre_s"] = f"{time.monotonic() - run_began:.1f}"     # everything before the first call (planning, prices, balance)
     calls, ran, claimed, peak, overran = 0, 0, [], 0, False
     exit_reason, pool = None, None
     try:
@@ -626,6 +631,7 @@ def _locked_run(report, run_began):
                 exit_reason = "max_batches"
                 break
     finally:
+        report["pool_end_s"] = f"{time.monotonic() - run_began:.1f}"   # when the last call batch was over, since the run began
         report["calls"] = calls
         report["batches"] = ran
         report["exit_reason"] = exit_reason or "error"
