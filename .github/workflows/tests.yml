@@ -28,7 +28,7 @@ jobs:
   #     first parent is the base that run was tested against, so merging added nothing the run had not seen.
   # Anything else (squash, a base that moved, a hand-made commit, an ordinary pull request head) runs the full tests.
   reuse:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest moved to 26.04, whose sudo rejects the bwrap fd policy below
     outputs:
       skip: ${{ steps.look.outputs.skip }}
     steps:
@@ -63,7 +63,7 @@ jobs:
     name: shard ${{ matrix.shard }}
     needs: reuse
     if: needs.reuse.outputs.skip != 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest moved to 26.04, whose sudo rejects the bwrap fd policy below
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -144,7 +144,7 @@ jobs:
     name: test
     needs: [reuse, tests]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest moved to 26.04, whose sudo rejects the bwrap fd policy below
     steps:
       - name: All shards passed (or this exact commit already did)
         env:
