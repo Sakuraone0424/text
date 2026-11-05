@@ -54,6 +54,7 @@
   --chart-axis: #556070;
   --chart-track: #e5e9f0;
   --heat-0: #e5e9f0;
+  --heat-0: color-mix(in srgb, var(--ink) 10%, var(--card));
   --heat-1: #dbeafe;
   --heat-2: #93c5fd;
   --heat-3: #3b82f6;
@@ -106,6 +107,7 @@
     --chart-axis: #a3a9b5;
     --chart-track: #262b35;
     --heat-0: #262b35;
+    --heat-0: color-mix(in srgb, var(--ink) 14%, var(--card));
     --heat-1: #1e3a8a;
     --heat-2: #1d4ed8;
     --heat-3: #3b82f6;

@@ -419,3 +419,26 @@
   html.standalone .training-app.focus-mode .status-message { bottom: calc(64px + 30px + 12px); }
   html.standalone .training-app.focus-mode .shell { padding-bottom: 110px; }
 }
+
+/* ---- 刷题日历：网格自适应宽度，格子不会超出卡片 ---- */
+.training-app .heat-wrap { position: relative; }
+.training-app .heat-grid { display: grid; grid-template-columns: 1.4em repeat(var(--weeks, 9), minmax(0, 1fr)); grid-template-rows: auto repeat(7, auto); gap: 3px; width: 100%; max-width: 100%; }
+.training-app .heat-month { font-size: 10px; line-height: 14px; color: var(--muted); white-space: nowrap; overflow: visible; }
+.training-app .heat-day { font-size: 10px; color: var(--muted); align-self: center; justify-self: start; line-height: 1; }
+.training-app .heat-cell { aspect-ratio: 1 / 1; align-self: start; width: 100%; min-height: 0; height: auto; min-width: 0; padding: 0; border: 0; border-radius: 3px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent); cursor: pointer; }
+.training-app .heat-cell.today { box-shadow: none; outline: 1.5px dashed var(--chart-bio); outline-offset: -1.5px; }
+.training-app .heat-cell.on { outline: 2px solid var(--ink); outline-offset: 1px; }
+.training-app .heat-cell:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.training-app .heat-tip { position: absolute; transform: translate(-50%, calc(-100% - 6px)); padding: 3px 8px; border-radius: 8px; background: var(--ink); color: var(--card); font-size: 12px; line-height: 1.4; white-space: nowrap; pointer-events: none; z-index: 3; }
+.training-app .heat-legend { margin-top: 2px; }
+.training-app .heat-legend i { width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 9%, transparent); }
+
+/* ---- 横条图：每条自带「生化 / 细胞」标签和数值 ---- */
+.training-app .hbar-line { display: block; }
+.training-app .hbar-line.sub { display: grid; grid-template-columns: 3em minmax(0, 1fr) 3.4em; align-items: center; gap: 8px; margin-top: 4px; }
+.training-app .hbar-line.sub .hbar-track { margin-top: 0; }
+.training-app .hbar-name { font-size: 12px; color: var(--ink); white-space: nowrap; }
+.training-app .hbar-name::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); margin-right: 4px; vertical-align: 0; }
+.training-app .hbar-num { font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+.training-app .hbar-num.none { color: var(--muted); }
+.training-app .hbar-track.none { background: repeating-linear-gradient(90deg, var(--tag) 0 6px, transparent 6px 10px); }
