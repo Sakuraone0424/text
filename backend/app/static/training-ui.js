@@ -61,8 +61,14 @@
   let currentKey = null;
   const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", exam: "home", profile: "home" };
   const NAV_FOR = { stats: "profile", progress: "profile", model: "profile" };
+  // how deep a route is: the four tabs are 0, their sub-pages 1, a sub-page's own sub-page 2
+  const TABS = ["home", "exam", "mistakes", "profile"];
+  const depthOf = (name, sub) => (TABS.includes(name) ? 0 : 1) + (sub ? 1 : 0);
+  const pageOf = (name) => document.querySelector(`[data-page="${name}"]`);
+  const hashSub = (key) => (/^#\/[a-z]+\/([a-z-]+)/.exec(key || "") || [])[1] || null;
   function renderView(next, key) {
     if (currentKey && scroller()) scrollMemory[currentKey] = scroller().scrollTop;
+    const before = { view, key: currentKey };
     view = next;
     currentKey = key || "#/" + next;
     document.body.dataset.view = next; // the install hint belongs to the home page only
@@ -93,6 +99,14 @@
     if (view === "progress") window.ProgressView?.show();
     if (view === "model") window.ModelView?.show();
     if (scroller()) scroller().scrollTop = scrollMemory[currentKey] || 0;
+    // motion: a sub-page slides in from the right, going back fades the page below in (the one above slid out first),
+    // moving between the four tabs cross-fades. Nothing plays when the same route is merely re-applied.
+    if (window.Motion && before.key && before.key !== currentKey && !document.hidden) {
+      const from = depthOf(before.view, hashSub(before.key)), to = depthOf(next, hashSub(currentKey));
+      const kind = TABS.includes(before.view) && TABS.includes(next) ? "tab" : to > from ? "push" : to < from ? "pop" : "tab";
+      window.Motion.enter(pageOf(next), kind);
+    }
+    window.Motion?.cards(pageOf(next));
   }
 
   /* ---- routes: one shell, hash URLs, the browser's own back stack ---- */
@@ -133,11 +147,22 @@
       apply();
     } else location.hash = target;
   }
-  function back() {
+  function backNow() {
     // the previous page of this session if there is one (its scroll position and filters are still there), else its parent
     if (routeChanges > 1 && history.length > 1) history.back();
     else go(PARENT[view] || "home", null, { replace: true });
   }
+  // the in-app back button: the navigation is immediate; a picture of the page slides out to the right over the one below
+  function back() {
+    const node = pageOf(view);
+    if (window.Motion && node && !TABS.includes(view)) window.Motion.leave(node, 0);
+    backNow();
+  }
+  window.Motion?.edgeSwipe({
+    canGoBack: () => !TABS.includes(view) || !!hashSub(location.hash),
+    pageNode: () => pageOf(view),
+    back: backNow,
+  });
   window.addEventListener("hashchange", apply);
   window.addEventListener("signed-in", apply);
   window.addEventListener("shell-ready", apply);
@@ -155,7 +180,14 @@
     }
     const question = questions[position];
     document.querySelectorAll("#questions > article").forEach((article) => {
-      article.hidden = Number(article.dataset.id) !== question.id;
+      const show = Number(article.dataset.id) === question.id;
+      if (show && article.hidden && !window.Motion?.reduced()) {
+        // moving between questions: a 120 ms fade-in only (no sliding, no page turn)
+        article.classList.remove("motion-fade");
+        void article.offsetWidth;
+        article.classList.add("motion-fade");
+      }
+      article.hidden = !show;
     });
     byId("current-number").textContent = String(position + 1);
     byId("current-subject").textContent =
@@ -255,6 +287,7 @@
       "green-pill",
       timing?.status === "submitted",
     );
+    if (timing) window.Insights?.startReady?.();       // today's paper exists: its own state is known
     byId("prepare").firstChild.textContent = active()
       ? "继续作答"
       : timing?.status === "submitted"

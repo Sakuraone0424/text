@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="/static/app.css" />
     <link rel="stylesheet" href="/static/training.css" />
     <link rel="stylesheet" href="/static/views.css" />
+    <link rel="stylesheet" href="/static/motion.css" />
   </head>
   <body class="training-app">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -94,7 +95,7 @@
               <div class="thin-bar" role="img" aria-label="题库进度"><i id="bank-bar"></i></div>
             </div>
             <p id="today-result" class="today-result" hidden></p>
-            <button id="prepare" class="primary hero-action">开始</button>
+            <button id="prepare" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
             <p id="prepare-note" class="micro-note">先准备试卷，确认后才开始60分钟计时</p>
           </section>
           <section class="stat-row" aria-label="近期成绩">
@@ -443,7 +444,7 @@
     </div>
     <dialog
       id="question-dialog"
-      class="question-dialog"
+      class="question-dialog sheet"
       aria-labelledby="map-title"
     >
       <div class="dialog-heading">
@@ -471,7 +472,7 @@
     </dialog>
     <dialog
       id="submit-dialog"
-      class="submit-dialog"
+      class="submit-dialog sheet"
       aria-labelledby="submit-title"
     >
       <span class="eyebrow">交卷前检查</span>
@@ -489,6 +490,7 @@
         ><button id="confirm-submit" class="primary">确认统一交卷</button>
       </div>
     </dialog>
+    <script src="/static/motion.js" defer></script>
     <script src="/static/data.js" defer></script>
     <script src="/static/live.js" defer></script>
     <script src="/static/charts.js" defer></script>

@@ -94,46 +94,106 @@
   });
   window.addEventListener("hashchange", () => setTimeout(tick, 0));
 
-  /* Pull down from the top of `view` to refresh. */
+  /* Pull down from the top of `view` to refresh, the iOS way: the content follows the finger with damping (the further, the
+     harder), a small round indicator fills as you pull and says 松开刷新 at the threshold; on release the indicator spins and the
+     content settles at the refresh position; when done the indicator fades and the content returns. The last data stays on
+     screen the whole time. One implementation for every page that refreshes. */
+  let ptrNode = null;
+  function indicator() {
+    if (ptrNode) return ptrNode;
+    const wrap = document.createElement("div");
+    wrap.className = "ptr";
+    wrap.setAttribute("aria-hidden", "true");
+    wrap.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"></circle></svg>';
+    const label = document.createElement("div");
+    label.className = "ptr-label";
+    label.setAttribute("aria-live", "polite");
+    document.body.append(wrap, label);
+    ptrNode = { wrap, label, circle: wrap.querySelector("circle") };
+    return ptrNode;
+  }
+  const PTR_READY = 54;      // damped distance (px) at which releasing refreshes (about the 70 px of finger travel it always took)
+  const PTR_HOLD = 52;       // where the content rests while refreshing
+  const PTR_MAX = 120;
+  const damp = (raw) => PTR_MAX * (1 - Math.exp(-raw / PTR_MAX));      // rubber band: ever harder to pull
   function pullToRefresh(view, onRefresh) {
     const scroller = () => view.closest(".workspace, main.page") || document.scrollingElement;
-    const hint = document.createElement("div");
-    hint.className = "pull-hint";
-    hint.setAttribute("aria-live", "polite");
-    hint.hidden = true;
-    view.prepend(hint);
+    const reduce = () => window.Motion?.reduced?.() || false;
     let startY = null;
-    let pulled = 0;
+    let moved = 0;
+    let busy = false;
+    const show = (d) => {
+      const ptr = indicator();
+      view.style.transform = d ? `translateY(${d}px)` : "";
+      ptr.wrap.style.opacity = String(Math.min(1, d / 36));
+      ptr.wrap.style.transform = `translateY(${Math.max(0, d - 40) * 0.4}px)`;
+      ptr.circle.style.strokeDashoffset = String(1 - Math.min(1, d / PTR_READY));
+      ptr.label.style.opacity = d >= 28 ? "1" : "0";
+      ptr.label.textContent = d >= PTR_READY ? "松开刷新" : "下拉刷新";
+    };
+    const settle = (to, ms) => {
+      view.style.transition = reduce() ? "none" : `transform ${ms}ms ${window.Motion?.EASE_OUT || "ease-out"}`;
+      view.style.transform = to ? `translateY(${to}px)` : "";
+      setTimeout(() => { view.style.transition = ""; }, ms + 20);
+    };
     view.addEventListener("touchstart", (e) => {
-      startY = scroller().scrollTop <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null;
-      pulled = 0;
+      startY = !busy && scroller().scrollTop <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null;
+      moved = 0;
+      view.style.transition = "";
     }, { passive: true });
     view.addEventListener("touchmove", (e) => {
       if (startY === null) return;
-      pulled = e.touches[0].clientY - startY;
-      if (pulled > 8 && scroller().scrollTop <= 0) {
-        hint.hidden = false;
-        hint.textContent = pulled > 70 ? "松开刷新" : "下拉刷新";
-      } else hint.hidden = true;
-    }, { passive: true });
+      const raw = e.touches[0].clientY - startY;
+      if (raw > 4 && scroller().scrollTop <= 0) {
+        if (e.cancelable) e.preventDefault();          // no native rubber band on top of ours
+        moved = damp(raw);
+        show(moved);
+      } else if (raw <= 0 && moved) {
+        moved = 0;
+        show(0);
+      }
+    }, { passive: false });
     const finish = async () => {
-      const go = startY !== null && pulled > 70;
+      const go = startY !== null && moved >= PTR_READY;
+      const was = moved;
       startY = null;
+      moved = 0;
+      const ptr = indicator();
       if (!go) {
-        hint.hidden = true;
+        if (was) {
+          settle(0, 200);
+          ptr.wrap.style.opacity = "0";
+          ptr.label.style.opacity = "0";
+        }
         return;
       }
-      hint.hidden = false;
-      hint.textContent = "更新中…";
+      busy = true;
+      settle(PTR_HOLD, 180);
+      ptr.circle.style.strokeDashoffset = "0";
+      ptr.wrap.classList.add("spin");
+      ptr.label.textContent = "正在刷新";
+      window.Motion?.topline?.start();
       try {
-        await onRefresh();
+        await Promise.all([onRefresh(), new Promise((r) => setTimeout(r, reduce() ? 0 : 450))]);   // (no blink on a fast answer)
       } finally {
-        hint.hidden = true;
+        window.Motion?.topline?.done();
+        ptr.wrap.classList.remove("spin");
+        ptr.wrap.style.opacity = "0";
+        ptr.label.style.opacity = "0";
+        settle(0, 220);
+        busy = false;
       }
     };
     view.addEventListener("touchend", finish);
-    view.addEventListener("touchcancel", () => { startY = null; hint.hidden = true; });
-    return hint;
+    view.addEventListener("touchcancel", () => {
+      if (moved) {
+        settle(0, 200);
+        indicator().wrap.style.opacity = "0";
+        indicator().label.style.opacity = "0";
+      }
+      startY = null;
+      moved = 0;
+    });
   }
 
   // a view that has just loaded itself by hand counts as refreshed (no second read a tick later)

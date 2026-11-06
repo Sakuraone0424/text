@@ -170,7 +170,10 @@ def overview(conn, uid):
     same = [p for p in last7 if done and p["max"] == done[-1]["max"]]
     objective = [0, 0]
     subjective = [0, 0]
-    window = {p["paper_id"] for p in last7}
+    # A paper that is handed in but still being graded is not "no data": its objective answers are already marked, so the rates
+    # use them (and the cards say 判分中 instead of "after your first paper")
+    pending_ids = {r["paper_id"] for r in rows if r["points"] is None}
+    window = {p["paper_id"] for p in last7} | pending_ids
     for r in rows:
         if r["paper_id"] in window and r["points"] is not None:
             bucket = objective if r["qtype"] in OBJECTIVE else subjective
@@ -192,6 +195,7 @@ def overview(conn, uid):
         reviews=due_reviews(conn, uid, today),
         tomorrow=tomorrow_ready(conn, uid),
         has_data=bool(done),
+        pending_papers=len(pending_ids),
     )
 
 

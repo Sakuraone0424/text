@@ -54,7 +54,21 @@
         cachedOnly = false;
       }
     }
-    await loader();
+    // with a kept copy on screen the refresh happens in the background: only a hair-thin line at the top says so
+    const background = paths.every((path) => Data.peek(path));
+    if (background) window.Motion?.topline.start();
+    try {
+      await loader();
+    } finally {
+      if (background) window.Motion?.topline.done();
+    }
+  }
+  /* First visit, nothing kept: grey placeholders with the light sweep (never an empty-state sentence before the data arrived). */
+  function skeleton(root, count = 3) {
+    root.replaceChildren();
+    const stack = el("div", undefined, root, "skeleton-stack");
+    stack.setAttribute("aria-hidden", "true");
+    for (let i = 0; i < count; i += 1) el("div", undefined, stack, "skeleton card-sk" + (i === 0 ? " tall" : ""));
   }
   const send = (path, body) => Data.fetchJSON(path, { method: "POST", body: JSON.stringify(body) });
   const dateLabel = (iso) => {
@@ -145,12 +159,24 @@
   }
   /* While the bank is short and no paper is prepared the start button is grey and says why. */
   let lock = null;
+  /* The start button is a grey placeholder until the real state is known (never a clickable primary button next to
+     "状态待载入"); after that it shows the true state: ready, bank still filling, or the paper's own state. */
+  function startReady() {
+    const button = $("prepare");
+    button.removeAttribute("data-loading");
+    if (button.dataset.locked !== "1") {
+      button.disabled = false;
+      button.removeAttribute("aria-disabled");
+    }
+  }
   function applyLock() {
     const button = $("prepare");
     if (!lock || window.__hasPaper?.()) {
       button.dataset.locked = "0";
+      startReady();
       return;
     }
+    button.removeAttribute("data-loading");
     button.dataset.locked = "1";
     button.disabled = !lock.complete;
     button.setAttribute("aria-disabled", String(!lock.complete));
@@ -161,6 +187,7 @@
   }
   async function loadHomeNow() {
     a2hsHint();
+    if (!Data.peek("/v2/stats/overview") && !cachedOnly) $("home-view").setAttribute("data-loading", "1");
     const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", {
       timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", weekday: "short",
     }).formatToParts(new Date()).map((p) => [p.type, p.value]));
@@ -171,7 +198,9 @@
       banner.textContent = spend.value.message;
       banner.hidden = false;
     } else banner.hidden = true;
+    $("home-view").removeAttribute("data-loading");
     if (overview.status !== "fulfilled") {
+      startReady();                      // the state is unknown, not "loading": clicking tries the real thing and says what happened
       $("stat-avg-note").textContent = "统计暂时读取失败，未将未知数据当作0。";
       let retry = $("home-retry");
       if (!retry) {
@@ -187,9 +216,9 @@
     }
     $("home-retry")?.remove();
     const o = overview.value;
-    $("days-left").textContent = o.days_left > 0 ? String(o.days_left) : "0";
+    window.Motion.num($("days-left"), o.days_left > 0 ? o.days_left : 0);
     $("exam-label").textContent = o.days_left > 0 ? "距 12 月 19 日初试" : "12 月 19 日初试已到";
-    $("streak-days").textContent = String(o.streak.current);
+    window.Motion.num($("streak-days"), o.streak.current);
     $("streak-days").classList.toggle("zero", o.streak.current === 0);
     const today = o.today_paper;
     const result = $("today-result");
@@ -202,13 +231,24 @@
     paintBank(bank, today.state);
     bankStamp = new Date();
     paintBankStamp();
-    const none = (id, value, noteId, empty, shown) => {
-      $(id).textContent = value === null || value === undefined ? "—" : shown;
-      $(id).classList.toggle("none", value === null || value === undefined);
-      $(noteId).textContent = value === null || value === undefined ? empty : "";
+    // A stat with no value yet: while a handed-in paper is still being graded it says so (it is not "no data"); only
+    // with nothing handed in does it say when it will fill. Numbers roll from 0 the first time and from the old value after.
+    const pending = (o.pending_papers || 0) > 0;
+    const none = (id, value, noteId, empty, number, suffix = "") => {
+      const node = $(id);
+      const missing = value === null || value === undefined;
+      node.classList.toggle("none", missing);
+      if (missing) {
+        node.textContent = pending ? "判分中" : "—";
+        $(noteId).textContent = pending ? "判分完成后显示" : empty;
+        delete node.dataset.rollValue;
+      } else {
+        window.Motion.num(node, number, { suffix });
+        $(noteId).textContent = "";
+      }
     };
     const last7 = o.last7;
-    none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", String(Math.round(last7.avg_points)));
+    none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", Math.round(last7.avg_points));
     const note = $("stat-avg-note");
     note.className = "";
     if (last7.avg_points !== null) {
@@ -218,9 +258,9 @@
         note.className = last7.delta_points >= 0 ? "up" : "down";
       }
     }
-    none("stat-objective", o.objective_rate, "stat-objective-note", "做完首套后显示", pct(o.objective_rate));
-    if (o.objective_rate !== null) $("stat-objective-note").textContent = "单选 + 填空";
-    none("stat-subjective", o.subjective_rate, "stat-subjective-note", "判分后显示", pct(o.subjective_rate));
+    none("stat-objective", o.objective_rate, "stat-objective-note", "做完首套后显示", Math.round((o.objective_rate ?? 0) * 100), "%");
+    if (o.objective_rate !== null) $("stat-objective-note").textContent = pending ? "单选 + 填空（含判分中的卷子）" : "单选 + 填空";
+    none("stat-subjective", o.subjective_rate, "stat-subjective-note", "判分后显示", Math.round((o.subjective_rate ?? 0) * 100), "%");
     if (o.subjective_rate !== null) $("stat-subjective-note").textContent = "AI 判分";
     weak($("weak-chapters"), o.weak_chapters);
     $("weak-practice").hidden = !o.weak_chapters.length;
@@ -251,6 +291,7 @@
   async function loadProfileNow() {
     const root = $("profile-data");
     let data;
+    if (!Data.peek("/v2/stats/profile") && !cachedOnly && !root.childElementCount) skeleton(root);
     try {
       data = await read("/v2/stats/profile");
     } catch (error) {
@@ -703,7 +744,8 @@
     el("span", "总分", total, "stat-label");
     const big = el("p", undefined, total, "total-score");
     // while the subjective answers are still being graded there is no total yet: not a big 0, but what is known
-    big.append(data.score === null ? "判分中" : String(data.score));
+    const totalNode = el("span", data.score === null ? "判分中" : undefined, big);
+    if (data.score !== null) window.Motion.num(totalNode, data.score, { key: "result-total-" + data.paper_id });
     if (data.score === null) big.classList.add("grading");
     el("small", data.score === null ? ` 已确定 ${data.graded_points} 分 / 满分 ${data.max_points}` : `/ ${data.max_points}`, big);
     const compare = el("div", undefined, line, "compare");
@@ -794,6 +836,9 @@
 
   window.Live.register("home", { visible: () => !$("home-view").hidden, load: refreshBank });
   window.Live.pullToRefresh($("home-view"), () => Promise.all([loadHome(), refreshBank().catch(() => {})]));
+  // the same pull-to-refresh and the same refresh behaviour (last data stays on screen) on every page that refreshes
+  window.Live.pullToRefresh($("mistakes-view"), () => { facetsLoaded = false; return Promise.all([loadMistakes(), loadDue()]); });
+  window.Live.pullToRefresh($("profile-view"), () => loadProfile());
 
-  window.Insights = { applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
+  window.Insights = { startReady, applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
 })();
