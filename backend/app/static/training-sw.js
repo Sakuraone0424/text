@@ -11,6 +11,8 @@ const ASSETS = [
   "/static/views.css",
   "/static/motion.css",
   "/static/motion.js",
+  "/static/pages.css",
+  "/static/pages.js",
   "/static/data.js",
   "/static/live.js",
   "/static/progress.js",

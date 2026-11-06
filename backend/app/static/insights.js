@@ -160,32 +160,18 @@
   /* While the bank is short and no paper is prepared the start button is grey and says why. */
   let lock = null;
   /* The start button is a grey placeholder until the real state is known (never a clickable primary button next to
-     "状态待载入"); after that it shows the true state: ready, bank still filling, or the paper's own state. */
+     "状态待载入"); after that both today-paper cards (home and practice) show the one true state: Pages.paintToday(). */
   function startReady() {
-    const button = $("prepare");
-    button.removeAttribute("data-loading");
-    if (button.dataset.locked !== "1") {
-      button.disabled = false;
-      button.removeAttribute("aria-disabled");
-    }
+    window.Pages?.todayLoaded();
   }
+  let lastToday = null;
   function applyLock() {
     const button = $("prepare");
-    if (!lock || window.__hasPaper?.()) {
-      button.dataset.locked = "0";
-      startReady();
-      return;
-    }
-    button.removeAttribute("data-loading");
-    button.dataset.locked = "1";
-    button.disabled = !lock.complete;
-    button.setAttribute("aria-disabled", String(!lock.complete));
-    // short bank: how many are missing and, when it can be estimated, when the paper can start (no old question fills a paper)
-    const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clock(lock.eta_at)} 可开始` : "，暂不能开始";
-    button.firstChild.textContent = lock.complete ? "开始" : `题库还差 ${lock.missing} 道${when}`;
-    $("paper-state").textContent = lock.complete ? "已就绪" : "题库准备中";
-    $("paper-state").classList.toggle("green-pill", lock.complete);
-    $("prepare-note").hidden = !lock.complete;
+    button.dataset.locked = !lock || window.__hasPaper?.() ? "0" : "1";
+    if (!lock || window.__hasPaper?.()) startReady();
+    else window.Pages?.todayLoaded();
+    window.Pages?.paintToday();
+    $("prepare-note").hidden = !(lock && lock.complete) && !!lock;
   }
   async function loadHomeNow() {
     a2hsHint();
@@ -223,6 +209,7 @@
     window.Motion.num($("streak-days"), o.streak.current);
     $("streak-days").classList.toggle("zero", o.streak.current === 0);
     const today = o.today_paper;
+    lastToday = today;
     const result = $("today-result");
     result.hidden = !(today.state === "submitted");
     if (today.state === "submitted")
@@ -518,85 +505,6 @@
   const filter = { subject: "", question_type: "", chapter: "", offset: 0 };
   let facets = { subject: [], question_type: [], chapter: [] };
   let facetsLoaded = false;
-  async function loadMistakes(append = false) {
-    if (!append) filter.offset = 0;
-    const query = new URLSearchParams();
-    ["subject", "question_type", "chapter"].forEach((k) => filter[k] && query.set(k, filter[k]));
-    query.set("limit", "20");
-    query.set("offset", String(filter.offset));
-    let data;
-    try {
-      data = await read("/v2/mistakes?" + query);
-    } catch (error) {
-      if (error.name === "AuthRequired") return;
-      $("mistake-count").textContent = error.message;
-      if (!$("mistake-retry")) {
-        const retry = el("button", "重试", $("mistake-count").parentElement, "secondary");
-        retry.id = "mistake-retry";
-        retry.type = "button";
-        retry.onclick = () => {
-          retry.remove();
-          loadMistakes();
-        };
-      }
-      return;
-    }
-    $("mistake-retry")?.remove();
-    if (!facetsLoaded) {
-      facetsLoaded = true;
-      facets = data.facets;
-      drawFilters();
-    }
-    $("mistake-count").textContent = `共 ${data.total} 道`;
-    const list = $("mistake-list");
-    if (!append) list.replaceChildren();
-    data.items.forEach((item) => {
-      const li = el("li", undefined, list);
-      const top = el("div", undefined, li, "mistake-top");
-      el("span", [SHORT[item.subject], TYPE[item.question_type], item.chapter].filter(Boolean).join(" · "), top);
-      el("span", `错 ${item.wrong_times} 次`, top, "times" + (item.wrong_times >= 2 ? " hot" : ""));
-      el("span", item.stem || "（题干不可用）", li, "mistake-stem");
-    });
-    $("mistake-empty").hidden = data.total > 0;
-    $("mistake-empty").querySelector("span").textContent = facetsLoaded && facets.subject.length ? "没有符合条件的错题" : "还没有错题，判分后失分的题会出现在这里";
-    filter.offset += data.items.length;
-    $("mistake-more").hidden = filter.offset >= data.total;
-    $("chapter-practice").hidden = !(filter.subject && filter.chapter);
-  }
-  function chips(root, values, current, onPick) {
-    root.replaceChildren();
-    [["", "全部"], ...values].forEach(([value, label]) => {
-      const button = el("button", label, root);
-      button.type = "button";
-      button.setAttribute("aria-pressed", String(current === value));
-      button.onclick = () => onPick(value);
-    });
-  }
-  function drawFilters() {
-    // The full set of choices is always shown, even with no mistakes yet; counts are added where there are any.
-    const count = (list, value) => list.find((f) => f.value === value)?.count;
-    const label = (name, n) => (n ? `${name} ${n}` : name);
-    chips($("filter-subject"), Object.keys(SHORT).map((v) => [v, label(SHORT[v], count(facets.subject, v))]), filter.subject, (v) => {
-      filter.subject = v;
-      filter.chapter = "";
-      drawFilters();
-      loadMistakes();
-    });
-    chips($("filter-type"), TYPES.map((v) => [v, label(TYPE[v], count(facets.question_type, v))]), filter.question_type, (v) => {
-      filter.question_type = v;
-      drawFilters();
-      loadMistakes();
-    });
-    const select = $("filter-chapter");
-    select.replaceChildren();
-    el("option", "全部章节", select).value = "";
-    facets.chapter.filter((f) => !filter.subject || f.subject === filter.subject).forEach((f) => {
-      const option = el("option", `${SHORT[f.subject]} · ${f.value}（${f.count}）`, select);
-      option.value = f.value;
-      option.dataset.subject = f.subject;
-    });
-    select.value = filter.chapter;
-  }
   /* The key card: how many reviews are due today, and the next 7 days as tiny bars. */
   async function loadDue() {
     let o;
@@ -616,30 +524,20 @@
     box.replaceChildren();
     const days = o.reviews.next_7_days;
     const top = Math.max(1, ...days.map((d) => d.count));
+    const weekday = (iso) => "日一二三四五六"[new Date(iso + "T00:00:00").getDay()];
     days.forEach((d, i) => {
-      const bar = el("i", undefined, box, i === 0 ? "today" : "");
-      // zero days draw nothing but the baseline (the container's bottom line); other days at least 4px tall
-      bar.style.height = d.count ? Math.max(4, Math.round((d.count / top) * 34)) + "px" : "0";
-      bar.title = `${i === 0 ? "今天" : dateLabel(d.day)}：${d.count} 道`;
+      const col = el("div", undefined, box, "wk-col" + (i === 0 ? " today" : ""));
+      el("span", d.count ? String(d.count) : "", col, "wk-n");                          // the count above the bar; a 0 draws only the baseline
+      const bar = el("i", undefined, col);
+      bar.style.height = d.count ? Math.max(6, Math.round((d.count / top) * 36)) + "px" : "0";
+      el("span", i === 0 ? "今天" : i === 1 ? "明天" : "周" + weekday(d.day), col, "wk-d");
     });
     box.setAttribute("aria-label", "未来 7 天每天到期：" + days.map((d, i) => `${i === 0 ? "今天" : dateLabel(d.day)} ${d.count} 道`).join("，"));
     $("due-note").textContent = days.reduce((s2, d) => s2 + d.count, 0) ? "" : "答错的题会自动进入复习安排";
   }
-  const overviewCharts = () => {};
-  $("filter-chapter").onchange = (event) => {
-    const option = event.target.selectedOptions[0];
-    filter.chapter = event.target.value;
-    if (filter.chapter && option?.dataset.subject) filter.subject = option.dataset.subject;
-    drawFilters();
-    loadMistakes();
-  };
-  $("mistake-more").onclick = () => loadMistakes(true);
-  $("chapter-practice").onclick = () => chapterPractice(filter.subject, filter.chapter);
-  drawFilters(); // the full set of choices is there before (and without) any data
-
   /* short practice: objective questions only, checked at once, not part of the daily paper */
   async function startPractice(body) {
-    window.TrainingUI?.showView("mistakes");
+    window.TrainingUI?.showView("practice");
     const panel = $("practice-panel");
     panel.hidden = false;
     panel.replaceChildren();
@@ -668,10 +566,11 @@
       const again = el("button", "再练一套薄弱题", panel, "primary");
       again.onclick = () => startPractice({ mode: "weak", size: 10 });
       const close = el("button", "关闭", panel, "secondary");
+      const review = el("button", "查看这套的解析", panel, "secondary");
+      review.onclick = () => { location.hash = "#/review/s" + set.set_id; };
       close.onclick = () => {
         panel.hidden = true;
-        facets = null;
-        loadMistakes();
+        window.Pages?.loadPractice();
       };
     };
     const show = () => {
@@ -829,18 +728,14 @@
   const loadProfile = () => swrLoad(loadProfileNow, ["/v2/stats/profile"]);
   function onView(view) {
     if (view === "profile") loadProfile();
-    if (view === "mistakes") {
-      facetsLoaded = false; // counts refresh; the chosen filters stay as they were
-      loadMistakes();
-      loadDue();
-    }
+    if (view === "mistakes") loadDue();      // the list itself is Pages.loadMistakes (pages.js), started by the router
   }
 
   window.Live.register("home", { visible: () => !$("home-view").hidden, load: refreshBank });
   window.Live.pullToRefresh($("home-view"), () => Promise.all([loadHome(), refreshBank().catch(() => {})]));
   // the same pull-to-refresh and the same refresh behaviour (last data stays on screen) on every page that refreshes
-  window.Live.pullToRefresh($("mistakes-view"), () => { facetsLoaded = false; return Promise.all([loadMistakes(), loadDue()]); });
+  window.Live.pullToRefresh($("mistakes-view"), () => Promise.all([window.Pages.loadMistakes(), loadDue()]));
   window.Live.pullToRefresh($("profile-view"), () => loadProfile());
 
-  window.Insights = { startReady, applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
+  window.Insights = { startReady, lockState: () => lock, todayPaper: () => lastToday, applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
 })();

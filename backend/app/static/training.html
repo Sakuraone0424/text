@@ -22,6 +22,7 @@
     <link rel="stylesheet" href="/static/training.css" />
     <link rel="stylesheet" href="/static/views.css" />
     <link rel="stylesheet" href="/static/motion.css" />
+    <link rel="stylesheet" href="/static/pages.css" />
   </head>
   <body class="training-app">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
@@ -31,7 +32,7 @@
       </div>
       <nav class="primary-nav" aria-label="学习导航">
         <button data-view="home" aria-current="page"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9h12v-9"/></svg><span>首页</span></button>
-        <button data-view="exam"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg><span>练习</span></button>
+        <button data-view="practice"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg><span>练习</span></button>
         <button data-view="mistakes"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5"/><path d="M12 10v2.5l1.5 1"/></svg><span>错题</span></button>
         <button data-view="profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.6-3.6 3.4-5.5 7-5.5s6.4 1.9 7 5.5"/></svg><span>我的</span></button>
       </nav>
@@ -119,7 +120,30 @@
           </section>
         </section>
 
-<section data-page="exam" id="exam-view" hidden>
+<section data-page="practice" id="practice-view" hidden>
+          <header class="page-head"><h1>练习</h1></header>
+          <section class="card key-card today-card" id="practice-today" aria-label="今日训练卷">
+            <div class="today-block"><h2>今日训练卷</h2><span id="practice-paper-state" class="pill">状态待载入</span></div>
+            <p class="muted spec-line" id="practice-spec">生化 30 + 细胞 30 · 300 分 · 60 分钟</p>
+            <p id="practice-today-note" class="note"></p>
+            <button id="practice-today-btn" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
+            <details class="paper-info"><summary>卷面说明</summary>
+              <p class="muted small">60 题 · 生物化学、细胞生物学各 30 题 · 共 300 分 · 作答 60 分钟。每科 10 道单选、14 道填空、4 道名词解释、1 道简答、1 道问答。</p>
+            </details>
+          </section>
+          <section aria-labelledby="practice-grid-title">
+            <div class="card-heading"><h2 id="practice-grid-title">专项练习</h2><span class="muted small">不计入每日成绩和连续天数</span></div>
+            <div id="practice-grid" class="practice-grid"></div>
+          </section>
+          <section id="practice-panel" class="card practice-panel" hidden aria-live="polite"></section>
+          <section class="card" aria-labelledby="recent-title">
+            <div class="card-heading"><h2 id="recent-title">最近训练</h2></div>
+            <ul id="recent-list" class="recent-list"></ul>
+            <button id="recent-all" class="text-button" type="button" hidden>查看全部 →</button>
+          </section>
+        </section>
+
+        <section data-page="exam" id="exam-view" hidden>
           <div id="exam-intro" class="card exam-intro">
             <span class="eyebrow">今日训练</span>
             <h1>为这60分钟，留一点专注。</h1>
@@ -128,7 +152,7 @@
               <span>每科10道单选</span><span>14道填空</span><span>4道名词解释</span><span>1道简答</span><span>1道问答</span>
             </div>
             <p id="intro-state">请先在首页准备试卷。准备与正式开始计时是两个独立步骤。</p>
-            <button id="start" class="primary" hidden>确认开始 · 60分钟</button>
+            <button class="primary" id="open-start" type="button" hidden>开始（60 分钟）</button>
             <button class="secondary" data-prepare-proxy>准备今日试卷</button>
             <p class="card-footnote">正式开始后，切换页面或离线均不会暂停计时。</p>
           </div>
@@ -173,25 +197,35 @@
           <section class="card key-card due-card" aria-label="今日到期复习">
             <div class="due-row">
               <div><span class="stat-label">今日到期复习</span><p><span id="due-number" class="due-number zero">0</span><span class="unit">道</span></p></div>
-              <div class="due-side"><span class="stat-label">未来 7 天</span><div id="due-mini" class="mini-bars" role="img" aria-label="未来 7 天每天到期的数量"></div></div>
+              <div class="due-side"><span class="stat-label">未来 7 天</span><div id="due-mini" class="week-bars" role="img" aria-label="未来 7 天每天到期的数量"></div></div>
             </div>
             <p id="due-note" class="muted small"></p>
             <button id="memory" class="primary full-width" disabled aria-disabled="true">今日没有到期复习</button>
           </section>
           <div id="mistakes-content"></div>
           <section class="card" aria-labelledby="mistake-list-title">
-            <div class="card-heading"><h2 id="mistake-list-title">错题本</h2><span id="mistake-count" class="muted small"></span></div>
-            <div class="filter-bar" id="mistake-filters" role="group" aria-label="错题筛选">
-              <div class="filter-row"><span>科目</span><div class="chips" id="filter-subject" role="group" aria-label="科目"></div></div>
-              <div class="filter-row"><span>题型</span><div class="chips" id="filter-type" role="group" aria-label="题型"></div></div>
-              <div class="filter-row"><span>章节</span><select id="filter-chapter" aria-label="章节"><option value="">全部章节</option></select></div>
+            <div class="card-heading"><h2 id="mistake-list-title">错题本</h2>
+              <div class="segmented" id="mistake-mode" role="group" aria-label="分组方式"><button type="button" data-mode="due" aria-pressed="true">按到期</button><button type="button" data-mode="chapter" aria-pressed="false">按章节</button></div></div>
+            <div class="filter-line" id="mistake-filter-line">
+              <div class="chips" id="filter-subject" role="group" aria-label="科目"></div>
+              <button id="filter-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="filter-more">筛选 ▾</button>
             </div>
-            <ul id="mistake-list" class="mistake-list"></ul>
-            <div id="mistake-empty" class="empty-line" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></svg><span>没有符合条件的错题</span></div>
-            <button id="mistake-more" class="secondary full-width" type="button" hidden>显示更多</button>
-            <button id="chapter-practice" class="primary full-width" type="button" hidden>只练这一章</button>
+            <div id="filter-more" class="filter-more" hidden>
+              <div class="chip-scroll"><div class="chips" id="filter-type" role="group" aria-label="题型"></div></div>
+              <label class="filter-row"><span>章节</span><select id="filter-chapter" aria-label="章节"><option value="">全部章节</option></select></label>
+            </div>
+            <div id="mistake-groups" class="mistake-groups"></div>
+            <div id="mistake-empty" class="empty-line" hidden><span>还没有错题，判分后失分的题会出现在这里</span></div>
           </section>
-          <section id="practice-panel" class="card practice-panel" hidden aria-live="polite"></section>
+        </section>
+        <section data-page="mistake" id="mistake-view" hidden>
+          <div class="subbar"><button class="icon-button" data-back aria-label="返回错题"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>错题详情</h1><span></span></div>
+          <div id="mistake-detail"></div>
+          <div class="sticky-action" id="mistake-action" hidden><button id="mistake-review" class="primary full-width" type="button">复习这道</button></div>
+        </section>
+        <section data-page="review" id="review-view" hidden>
+          <div class="subbar"><button class="icon-button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="review-title">整卷回看</h1><span></span></div>
+          <div id="review-body"></div>
         </section>
         <section data-page="stats" id="stats-view" hidden>
           <div class="subbar">
@@ -476,6 +510,11 @@
       <p id="map-summary" class="card-footnote"></p>
       <button id="map-submit" class="primary full-width">检查并交卷</button>
     </dialog>
+    <dialog id="start-dialog" class="start-dialog sheet" aria-labelledby="start-title">
+      <h2 id="start-title">开始今日训练卷</h2>
+      <p>开始后计时不会暂停。</p>
+      <div class="button-row"><button id="cancel-start" class="secondary" type="button">再等等</button><button id="start" class="primary" type="button">确认开始 · 60 分钟</button></div>
+    </dialog>
     <dialog
       id="submit-dialog"
       class="submit-dialog sheet"
@@ -504,6 +543,7 @@
     <script src="/static/insights.js" defer></script>
     <script src="/static/progress.js" defer></script>
     <script src="/static/model.js" defer></script>
+    <script src="/static/pages.js" defer></script>
     <script src="/static/shell.js" defer></script>
     <script src="/static/training.js" defer></script>
   </body>

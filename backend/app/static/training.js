@@ -163,7 +163,7 @@ $("login").onsubmit = async (e) => {
     status(e.status === 401 ? "密码不正确，请重新输入。" : e.message);
   }
 };
-async function prepare() {
+async function prepare(stay = false) {
   if (startup) await startup;
   await identity();
   const saved = cachedPaper(username);
@@ -172,7 +172,7 @@ async function prepare() {
       paper = await api(`/v2/papers/${saved.paper.paper_id}`);
       serverConfirmed = true;
       sessionStorage.removeItem("quiz-v2-auth-blocked");
-      await restore();
+      await restore(!stay);
     } catch (error) {
       if (!recoverable(error)) throw error;
       await restoreOffline(saved);
@@ -189,7 +189,7 @@ async function prepare() {
   });
   serverConfirmed = true;
   sessionStorage.removeItem("quiz-v2-auth-blocked");
-  await restore();
+  await restore(!stay);
 }
 // A prepared paper is metadata only. Never merge pre-start local answers or photos.
 async function clearUnstartedCache() {
@@ -305,7 +305,11 @@ async function restore(show = true) {
   }
   persist();
 }
-$("prepare").onclick = () => prepare().catch((e) => status(e.message));
+window.TodayPaper = {
+  prepare: () => prepare(true).catch((e) => status(e.message)),   // prepares today's paper and stays on the page
+  start: () => $("start").click(),
+  review: (items) => reviewSession(items),
+};
 $("start").onclick = async () => {
   try {
     $("start").disabled = true;
@@ -319,6 +323,7 @@ $("start").onclick = async () => {
       throw new Error("服务端尚未确认开始，请联网后重试。");
     paper = started;
     serverConfirmed = true;
+    $("start-dialog")?.close();
     await restore();
     status("计时已开始。答题自动保存；上传图片也计入60分钟。");
   } catch (e) {
@@ -881,6 +886,11 @@ async function showResult() {
       for (const evidence of answer.evidence) element("blockquote", evidence.excerpt, sources);
     }
   }
+  const wholePaper = element("button", "查看整卷", $("result"));
+  wholePaper.type = "button";
+  wholePaper.className = "secondary full-width";
+  wholePaper.id = "view-whole-paper";
+  wholePaper.onclick = () => { location.hash = "#/review/p" + paper.paper_id; };
   window.TrainingUI?.result(result);
   startGradingActivity(paper.paper_id);
   status("已交卷。选择题、填空题已出分；名词解释和简答由AI判分，判完自动刷新，判不了的显示原因，不会直接记0分。");
@@ -1474,7 +1484,7 @@ function reviewSession(items) {
         button.disabled = !allowed.includes(rating);
         button.onclick = () => {
           row.querySelectorAll("button").forEach((b) => (b.disabled = true));
-          const body = JSON.stringify({ rating, expected_version: card.version, event_key: crypto.randomUUID() });
+          const body = JSON.stringify({ rating, expected_version: card.version, event_key: crypto.randomUUID(), ...(card.early ? { early: true } : {}) });
           const send = () => api("/v2/memory/" + card.question_id + "/review", { method: "POST", body });
           // saved in the background (the same event key makes a retry harmless); the next card does not wait for it
           send().catch(() => send()).catch((e) => status("这道题的复习结果没有保存成功：" + e.message + "。请稍后再复习一次。"));
@@ -1773,22 +1783,8 @@ $("history").onclick = async () => {
         `${item.mode === "reviewed_60" ? "60 题" : "28 题 · 旧版"} · ${item.paper_date} · ${item.score === null ? "待判分" : item.score + "/" + (item.max_points || 150) + "分"}${split}${item.excluded ? ` · 已扣除${item.excluded}道反馈题` : ""}`,
         $("learning"),
       );
-      const button = element("button", "查看已提交结果", article);
-      button.onclick = async () => {
-        try {
-          const result = await api(`/v2/papers/${item.paper_id}/result`);
-          element(
-            "p",
-            result.score === null
-              ? `待判分${result.pending}题`
-              : `得分${result.score}/${result.max_points}`,
-            article,
-          );
-          renderAnalysis(result.selection_analysis, article);
-        } catch (e) {
-          status(e.message);
-        }
-      };
+      const button = element("button", "整卷回看", article);
+      button.onclick = () => { location.hash = "#/review/p" + item.paper_id; };
     }
     for (const item of data.legacy) {
       const article = element(

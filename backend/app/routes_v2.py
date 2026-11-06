@@ -402,6 +402,7 @@ class MemoryRating(StrictModel):
     rating: StrictInt = Field(ge=1, le=4)
     expected_version: StrictInt = Field(ge=0)
     event_key: str = Field(min_length=1, max_length=200)
+    early: bool = Field(default=False, strict=True)          # reviewing a card before it is due, at the learner's own request
 
 
 @router.get("/memory/due")
@@ -409,6 +410,13 @@ def memory_due(username: str = Depends(require_auth)):
     from app.memory import due
 
     return operation(lambda c, u: {"items": due(c, u)}, username)
+
+
+@router.get("/memory/{question_id}/item")
+def memory_item(question_id: int, username: str = Depends(require_auth)):
+    from app.memory import item
+
+    return operation(lambda c, u: item(c, u, question_id), username)
 
 
 @router.post("/memory/{question_id}/review")
@@ -425,6 +433,7 @@ def memory_review(
             payload.rating,
             payload.event_key,
             payload.expected_version,
+            require_due=not payload.early,
         ),
         username,
     )

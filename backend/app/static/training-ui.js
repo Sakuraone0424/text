@@ -59,13 +59,17 @@
   const scroller = () => document.querySelector(".workspace");
   const scrollMemory = {};
   let currentKey = null;
-  const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", exam: "home", profile: "home" };
-  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile" };
+  const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", practice: "home", exam: "practice", profile: "home", review: "stats", mistake: "mistakes" };
+  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile", exam: "practice", review: "profile", mistake: "mistakes" };
   // how deep a route is: the four tabs are 0, their sub-pages 1, a sub-page's own sub-page 2
-  const TABS = ["home", "exam", "mistakes", "profile"];
+  const TABS = ["home", "practice", "mistakes", "profile"];
   const depthOf = (name, sub) => (TABS.includes(name) ? 0 : 1) + (sub ? 1 : 0);
   const pageOf = (name) => document.querySelector(`[data-page="${name}"]`);
-  const hashSub = (key) => (/^#\/[a-z]+\/([a-z-]+)/.exec(key || "") || [])[1] || null;
+  const PARAM_VIEWS = ["review", "mistake"];          // their last part is a parameter (p123 = paper 123, m7 = mistake 7), not a sub-page
+  const hashSub = (key) => {
+    const m = /^#\/([a-z]+)\/([a-z0-9-]+)/.exec(key || "");
+    return m && !PARAM_VIEWS.includes(m[1]) ? m[2] : null;
+  };
   function renderView(next, key) {
     if (currentKey && scroller()) scrollMemory[currentKey] = scroller().scrollTop;
     const before = { view, key: currentKey };
@@ -110,13 +114,13 @@
   }
 
   /* ---- routes: one shell, hash URLs, the browser's own back stack ---- */
-  const VIEWS = ["home", "exam", "mistakes", "stats", "profile", "progress", "model"];
+  const VIEWS = ["home", "practice", "exam", "mistakes", "mistake", "review", "stats", "profile", "progress", "model"];
   const SUBS = ["weekly", "history", "insights", "archive", "source-status"];
   let routeChanges = 0;
   let suppressRoute = false;
   let alreadyLoaded = null; // the hash whose page content was just loaded by the click that navigated to it
   const parseHash = () => {
-    const m = /^#\/([a-z]+)(?:\/([a-z-]+))?/.exec(location.hash);
+    const m = /^#\/([a-z]+)(?:\/([a-z0-9-]+))?/.exec(location.hash);
     return m ? { view: VIEWS.includes(m[1]) ? m[1] : "home", sub: m[2] || null } : { view: "home", sub: null };
   };
   function apply() {
@@ -129,6 +133,7 @@
     routeChanges += 1;
     window.Data?.setUser(account);
     renderView(next, key);
+    window.Pages?.show(next, sub);                      // the pages built in pages.js (practice centre, mistake book, review)
     if (sub && SUBS.includes(sub)) {
       byId("learning").dataset.owner = key;
       if (alreadyLoaded === key) alreadyLoaded = null;
@@ -276,31 +281,17 @@
     const count = latest.paper?.count || 60;
     const totalIndicator = document.querySelector("#current-number + .muted");
     if (totalIndicator) totalIndicator.textContent = " / " + count;
-    byId("paper-state").textContent = timing
-      ? {
-          not_started: "尚未开始",
-          in_progress: "正在作答",
-          submitted: "已提交",
-        }[timing.status] || "状态待确认"
-      : "尚未准备";
-    byId("paper-state").classList.toggle(
-      "green-pill",
-      timing?.status === "submitted",
-    );
     if (timing) window.Insights?.startReady?.();       // today's paper exists: its own state is known
-    byId("prepare").firstChild.textContent = active()
-      ? "继续作答"
-      : timing?.status === "submitted"
-        ? "查看成绩"
-        : "开始";
+    window.Pages?.paintToday();                        // the home card and the practice card show one state, from one place
     byId("prepare-note").textContent = active()
       ? "考试计时继续，已存答案不会丢失"
       : "先准备试卷，确认后才开始60分钟计时";
     byId("exam-intro").hidden = !!timing && timing.status !== "not_started";
     byId("intro-state").textContent =
       timing?.status === "not_started"
-        ? "试卷已准备，尚未开始计时。请确认可以连续作答60分钟。"
-        : "请先准备试卷，再确认开始计时。";
+        ? "试卷已准备好，开始后计时不会暂停。"
+        : "请先准备试卷。";
+    byId("open-start").hidden = timing?.status !== "not_started";
     document.querySelector("[data-prepare-proxy]").hidden = !!latest.paper;
     byId("result").hidden = timing?.status !== "submitted";
     byId("result-bar").hidden = timing?.status !== "submitted";
@@ -559,6 +550,8 @@
   });
   document.querySelector("[data-prepare-proxy]").onclick = () =>
     byId("prepare").click();
+  byId("open-start").onclick = () => byId("start-dialog").showModal();
+  byId("cancel-start").onclick = () => byId("start-dialog").close();
   ["memory", "weekly", "history", "insights", "archive", "source-status"].forEach((id) =>
     byId(id).addEventListener("click", () => {
       if (suppressRoute) return; // a back/forward navigation re-opening this page: the URL is already right
@@ -684,6 +677,12 @@
     showView,
     go,
     back,
+    today: () => ({
+      status: latest.paper?.timing?.status || null,
+      hasPaper: !!latest.paper,
+      clock: byId("clock")?.textContent || "",
+      paperId: latest.paper?.paper_id || null,
+    }),
   };
   apply();
 })();

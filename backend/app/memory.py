@@ -182,3 +182,15 @@ def record_practice_failure(conn, uid, question_id, set_id):
         (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now),
     )
     review(conn, uid, question_id, 1, f"practice-failure:{set_id}:{question_id}", None, require_due=False)
+
+
+def item(conn, user_id, question_id):
+    """One card in the shape the review screen takes (`due` rows), whether or not it is due: the learner asked to review it now."""
+    row = conn.execute(
+        "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem,q.content->>'question_type' AS question_type,q.content->'options' AS options "
+        "FROM fsrs_cards c JOIN reviewed_questions q ON q.id=c.question_id WHERE c.user_id=%s AND c.question_id=%s",
+        (user_id, question_id),
+    ).fetchone()
+    if not row:
+        raise LookupError("Review card not found")
+    return dict(row, early=True)
