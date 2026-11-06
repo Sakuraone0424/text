@@ -37,6 +37,12 @@ def seed(client, dsn):
             paper(conn, uid, day, items, when=datetime(day.year, day.month, day.day, 13, 0, tzinfo=timezone.utc), minutes=48 + k)
         paper(conn, uid, today - timedelta(days=20), [item(points=2, got=1)] * 6, spec="xiaohan-60q-150pt-v2",
               when=datetime.now(timezone.utc) - timedelta(days=20))
+        # the rows above went in directly, so the review cards a real grading would have made are made here
+        from app import memory
+
+        for row in conn.execute("SELECT a.attempt_id,a.question_id FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
+                                "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id WHERE p.user_id=%s AND a.points < (i.snapshot->>'max_points')::int", (uid,)).fetchall():
+            memory.record_failure(conn, row["attempt_id"], row["question_id"])
         qid = item  # keep linters quiet
         del qid
 
@@ -98,14 +104,15 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     page.locator("#profile-data .chapter-row").first.click()
     expect(page.locator("#practice-panel")).to_contain_text("暂时没有可练的已入库客观题")
     # ---- mistakes with filters
-    expect(page.locator("#mistake-list li").first).to_be_visible()
-    total = page.locator("#mistake-count").inner_text()
+    page.locator('nav.primary-nav [data-view="mistakes"]').click()
+    expect(page.locator("#mistake-groups .mistake-card").first).to_be_visible()
+    total = page.locator("#mistake-groups .mistake-card").count()
+    page.locator("#filter-toggle").click()
     page.locator("#filter-type button", has_text="问答").click()
-    expect(page.locator("#mistake-count")).not_to_have_text(total)
-    page.locator("#filter-type button", has_text="全部").click()
+    assert page.locator("#mistake-groups .mistake-card").count() < total
+    page.locator("#filter-type button", has_text="全部题型").click()
     page.locator("#filter-subject button", has_text="细胞").click()
-    expect(page.locator("#mistake-list li .mistake-top .times").first).to_be_visible()
-    page.wait_for_function("() => { const l = [...document.querySelectorAll('#mistake-list li')]; return l.length > 0 && l.every((i) => i.textContent.includes('细胞')); }")
+    page.wait_for_function("() => { const l = [...document.querySelectorAll('#mistake-groups .mistake-card')]; return l.length > 0 && l.every((i) => i.dataset.subject === 'cell_biology'); }")
     assert not errors, errors
     no_overflow(page)
     shot(page, "part4-mistakes.png")

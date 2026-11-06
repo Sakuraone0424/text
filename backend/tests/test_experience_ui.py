@@ -29,6 +29,7 @@ def test_the_exam_screen_is_centred_and_says_things_once(live_app, browser):
     page, pid, active, errors = start_exam(client, blueprint, browser)
     page.evaluate("document.getElementById('a2hs-hint').hidden = false")        # even if the install hint wants to show
     expect(page.locator("#a2hs-hint")).to_be_hidden()
+    page.wait_for_function("document.getAnimations().every((a) => a.playState !== 'running')")        # the page has finished sliding in
     centre = page.evaluate("""() => { const b = document.getElementById('clock').getBoundingClientRect(); return [b.left + b.width / 2, innerWidth / 2]; }""")
     assert abs(centre[0] - centre[1]) <= 3, centre                               # the clock is in the middle of the screen
     title = page.locator("#questions article:visible h2").first.inner_text()

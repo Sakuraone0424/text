@@ -59,13 +59,13 @@
       const done = mine && mine.points !== undefined && mine.points !== null;
       return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : "查看成绩（判分中）", pill: "已提交", green: true };
     }
-    if (t.status === "not_started") return { kind: "start", label: "开始（60 分钟）", pill: "已就绪", green: true };
+    if (t.status === "not_started") return { kind: "start", label: "开始（60 分钟）", pill: "尚未开始", green: true };
     if (!loaded) return { kind: "loading", label: "开始", pill: "状态待载入" };
     if (lock && !lock.complete) {
       const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clockText(lock.eta_at)} 可开始` : "，暂不能开始";
       return { kind: "short", label: `题库还差 ${lock.missing} 道${when}`, pill: "题库准备中", reason: "新题还没出够一张卷子，不会用旧题凑。" };
     }
-    return { kind: "prepare", label: "准备今日试卷", pill: "可以准备" };
+    return { kind: "prepare", label: "准备今日试卷", pill: "已就绪" };
   }
   function clockText(iso) {
     const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
@@ -229,6 +229,7 @@
   function mistakeCard(item, today) {
     const card = el("a", undefined, null, "mistake-card");
     card.href = "#/mistake/m" + item.question_id;
+    card.dataset.subject = item.subject;
     card.style.setProperty("--bar", SUBJECT_COLOR[item.subject]);
     const top = el("div", undefined, card, "mc-top");
     el("span", TYPE[item.question_type], top, "mc-type");
@@ -270,7 +271,7 @@
     $("filter-toggle").setAttribute("aria-expanded", String(view.open));
     const types = $("filter-type");
     types.replaceChildren();
-    [["", "全部题型"], ...TYPES.filter((t) => data.types.some((x) => x.value === t)).map((t) => [t, `${TYPE[t]} ${data.types.find((x) => x.value === t).count}`])].forEach(([value, label]) => {
+    [["", "全部题型"], ...TYPES.map((t) => [t, `${TYPE[t]} ${(data.types.find((x) => x.value === t) || { count: 0 }).count}`])].forEach(([value, label]) => {
       const chip = el("button", label, types);
       chip.type = "button";
       chip.setAttribute("aria-pressed", String(view.type === value));
@@ -534,6 +535,7 @@
 
   /* ------------------------------------------------------------------------------------------------------------------ */
   function show(name, param) {
+    $("start-dialog")?.open && $("start-dialog").close();          // going somewhere else (back button, a link) leaves the start sheet
     if (name === "practice") loadPractice();
     else if (name === "mistakes") loadMistakes();
     else if (name === "mistake" && /^m\d+$/.test(param || "")) loadMistakeDetail(Number(param.slice(1)));

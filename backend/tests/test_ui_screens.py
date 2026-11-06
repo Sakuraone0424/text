@@ -58,6 +58,7 @@ def open_page(engine, mode, base, path="/training", logged_in=True, overview=Non
     if overview is not None:
         # The live fixture already prepared a paper for today; this is a learner without one.
         page.route("**/v2/stats/overview", lambda route: route.fulfill(json=overview))
+        page.route("**/v2/model/progress/bank", lambda route: route.fulfill(json=overview["tomorrow"]))        # the live refresh of the same card
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     if logged_in:
@@ -151,8 +152,8 @@ def test_empty_state_pages(engine, live_app, mode, scheme):
         fits(page)
         if view == "mistakes":
             # the full set of choices is there with no mistakes at all
-            expect(page.locator("#filter-subject button")).to_have_text(["全部", "生化", "细胞"])
-            expect(page.locator("#filter-type button")).to_have_text(["全部", "单选", "填空", "名词解释", "简答", "问答"])
+            expect(page.locator("#filter-subject button")).to_have_text(["全部 0", "生化 0", "细胞 0"])
+            expect(page.locator("#filter-type button")).to_have_text(["全部题型", "单选 0", "填空 0", "名词解释 0", "简答 0", "问答 0"])
             # zero days draw only the baseline: no little squares; the strip is named
             heights = page.locator("#due-mini i").evaluate_all("(els) => els.map((e) => e.getBoundingClientRect().height)")
             assert heights and all(h == 0 for h in heights), heights

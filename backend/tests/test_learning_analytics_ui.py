@@ -25,6 +25,8 @@ def test_dashboard_focus_navigation_and_two_step_start(live_app, browser, width,
     expect(page.locator("#stat-avg-note")).to_contain_text("做完首套后显示")
     expect(page.locator("#weak-chapters")).to_contain_text("做完首套后")
     page.locator("#prepare").click()
+    expect(page.locator("#prepare")).to_have_text("开始（60 分钟）")        # prepared; the start sheet comes next
+    page.locator("#prepare").click()
     expect(page.locator("#start")).to_be_visible()
     assert page.locator("#questions article").count() == 0
     assert "尚未开始" in page.locator("#paper-state").inner_text()
@@ -276,7 +278,7 @@ def test_offline_unstarted_cache_is_cleared_without_unlocking(live_app, browser)
     page.add_init_script("Object.defineProperty(navigator, 'onLine', {get: () => false})")
     page.reload()
     expect(page.locator("#exam-intro")).to_be_visible()
-    expect(page.locator("#start")).to_be_visible()
+    expect(page.locator("#prepare")).to_have_text("开始（60 分钟）")
     expect(page.locator("#questions")).to_be_hidden()
     assert page.locator("#questions article").count() == 0
     assert page.evaluate("Object.keys(localDrafts).length") == 0
