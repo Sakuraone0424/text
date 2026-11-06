@@ -140,14 +140,16 @@ def test_with_reduced_motion_everything_is_instant(engine, live_app):
 
 def test_numbers_roll_from_zero_the_first_time_and_from_the_old_value_afterwards(engine, live_app):
     page, _ = start(engine, live_app)
+    # (a long duration so a slow, loaded browser still catches it mid-roll)
     result = page.evaluate("""() => new Promise((resolve) => {
         const n = document.createElement('span'); document.body.append(n);
-        Motion.num(n, 100);
+        const waitDone = (next) => { const t = setInterval(() => { if (!n.dataset.rolling) { clearInterval(t); next(); } }, 30); };
+        Motion.num(n, 100, { duration: 1200 });
         const first = [n.textContent];
         requestAnimationFrame(() => requestAnimationFrame(() => { first.push(n.textContent);
-          setTimeout(() => { const settled = n.textContent; Motion.num(n, 120); const second = [n.textContent];
+          waitDone(() => { const settled = n.textContent; Motion.num(n, 120, { duration: 1200 }); const second = [n.textContent];
             requestAnimationFrame(() => requestAnimationFrame(() => { second.push(n.textContent);
-              setTimeout(() => resolve({ first, settled, second, final: n.textContent }), 600); })); }, 600); })); })""")
+              waitDone(() => resolve({ first, settled, second, final: n.textContent })); })); }); })); })""")
     assert result["first"][0] == "0" and float(result["first"][1]) < 100       # from 0 up to the value
     assert result["settled"] == "100"
     assert float(result["second"][0]) == 100 and 100 <= float(result["second"][1]) < 120 and result["final"] == "120"   # not from 0 again
