@@ -141,3 +141,9 @@ def test_recent_trainings_mix_papers_and_practice_newest_first(db, uid):
     out = paper_review.recent(db, uid, 5)
     assert [r["kind"] for r in out] == ["practice", "paper"] and out[0]["label"] == "随机快练" and out[0]["points"] == 4 and out[1]["label"] == "每日训练卷"
     assert out[1]["pending"] == 1 and out[1]["points"] is None
+
+
+def test_a_detail_says_who_graded_it(db, uid):
+    made = graded(db, uid, date.today(), [item("biochemistry", "single_choice", 4, 0)])
+    d = paper_review.detail(db, uid, made["paper_id"], made["question_ids"][0])
+    assert "graded_by" in d and d["points"] == 0

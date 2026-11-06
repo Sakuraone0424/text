@@ -24,7 +24,7 @@ def _paper_rows(conn, uid, paper_id):
     if not attempt:
         raise LookupError("paper_not_submitted")
     rows = conn.execute(
-        "SELECT i.position,i.question_id,i.snapshot,a.answer,a.points,a.feedback FROM paper_items_v2 i "
+        "SELECT i.position,i.question_id,i.snapshot,a.answer,a.points,a.feedback,a.graded_by FROM paper_items_v2 i "
         "LEFT JOIN answers_v2 a ON a.question_id=i.question_id AND a.attempt_id=%s WHERE i.paper_id=%s ORDER BY i.position",
         (attempt["id"], paper_id),
     ).fetchall()
