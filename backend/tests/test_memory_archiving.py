@@ -33,10 +33,9 @@ def test_fsrs_real_feedback_updates_memory_and_replays_once(db, running):
     )
 
 
-def test_retests_count_in_28_and_are_explicitly_labelled(db, running, blueprint):
+def test_mistakes_are_reviewed_on_the_mistake_page_never_mixed_into_a_new_paper(db, running, blueprint):
     uid, paper = running
     pid = paper["paper_id"]
-    # All answered incorrectly -> all are genuinely due FSRS cards.
     answers = {
         i["id"]: "B" if i["question_type"] == "single_choice" else "wrong"
         for i in paper["questions"]
@@ -46,20 +45,11 @@ def test_retests_count_in_28_and_are_explicitly_labelled(db, running, blueprint)
         if item["question_type"] not in ("single_choice", "fill_blank"):
             q.grade(db, pid, item["id"], [0], "Incorrect observed answer", "expert")
     db.execute("UPDATE fsrs_cards SET due=clock_timestamp()")
-    next_paper = q.create_paper(
-        db,
-        uid,
-        blueprint,
-        __import__("app.common", fromlist=["today_cn"]).today_cn() + timedelta(days=1),
-    )
-    sessions.start(db, uid, next_paper["paper_id"])
-    restored = q.load_paper(db, uid, next_paper["paper_id"])
-    assert len(restored["questions"]) == 28 and all(
-        i["is_retest"] for i in restored["questions"]
-    )
-    assert restored["max_points"] == 150
-
-
+    assert memory.due(db, uid)                                              # the mistakes are due on the mistake page ...
+    tomorrow = __import__("app.common", fromlist=["today_cn"]).today_cn() + timedelta(days=1)
+    with pytest.raises(q.BankShortage):                                     # ... and the used questions do not come back as a paper
+        q.create_paper(db, uid, blueprint, tomorrow)
+    assert db.execute("SELECT count(*) AS n FROM papers_v2 WHERE user_id=%s AND paper_date=%s", (uid, tomorrow)).fetchone()["n"] == 0
 def test_chatgpt_adapter_contract_uses_actual_v2_api(client, bank):
     from app.chatgpt_adapter import TrainingAdapter
 

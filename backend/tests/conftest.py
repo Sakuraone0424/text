@@ -237,3 +237,14 @@ def fresh_progress_cache():
     model_api._PROGRESS.invalidate()
     yield
     model_api._PROGRESS.invalidate()
+
+
+@pytest.fixture(autouse=True)
+def forget_module_caches():
+    """In-process caches (stock check, chapter names, readiness) must not leak from one test's database into the next."""
+    from app import auto_generation, auto_quality, chapters
+
+    auto_generation._SATISFIED.clear()
+    chapters.clear_cache()
+    getattr(auto_quality, "_READY_SEEN", {}).clear()
+    yield

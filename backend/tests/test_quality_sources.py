@@ -97,8 +97,8 @@ def test_questions_with_a_literature_list_source_are_retired_and_withdrawn(db, b
     assert {r["status"] for r in db.execute("SELECT status FROM reviewed_questions WHERE id=ANY(%s)", (bank,)).fetchall()} == {"withdrawn"}
 
 
-# ---- stock = never used, or last used 14+ days ago ----------------------------------------------------------------
-def test_stock_is_unused_or_last_used_long_ago(db, running, blueprint):
+# ---- stock = never used (for good: a used question never returns) -------------------------------------------------------
+def test_stock_is_only_what_has_never_been_used(db, running, blueprint):
     from app import auto_generation as gen
     uid, paper = running
     kind_ids = {}
@@ -108,13 +108,10 @@ def test_stock_is_unused_or_last_used_long_ago(db, running, blueprint):
         for qid in ids:
             db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x') ON CONFLICT DO NOTHING", (qid,))
     subject, kind = "biochemistry", "single_choice"
-    ids = kind_ids[(subject, kind)]
-    # nothing is available right after the paper: it holds every question of the bucket
-    assert gen.UNUSED_SQL and cost_control.bucket_supply(db, subject, kind) == 0
-    # fourteen days later the paper is old enough to reuse them
+    assert gen.UNUSED_SQL and cost_control.bucket_supply(db, subject, kind) == 0       # the paper holds every question of the bucket
     db.execute("ALTER TABLE papers_v2 DISABLE TRIGGER USER")
-    db.execute("UPDATE papers_v2 SET paper_date = paper_date - 14")
-    assert cost_control.bucket_supply(db, subject, kind) == len(ids)
+    db.execute("UPDATE papers_v2 SET paper_date = paper_date - 400")                  # however long ago: they never come back
+    assert cost_control.bucket_supply(db, subject, kind) == 0
 
 
 def test_planning_resumes_after_a_paper_has_used_the_stock(db, bank, blueprint, setup_ai, monkeypatch, tmp_path):
