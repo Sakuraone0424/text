@@ -202,7 +202,7 @@ input, textarea, select, .training-app input, .training-app textarea, .training-
 .training-app.keyboard-open.focus-mode .shell { padding-bottom: 24px; }
 
 /* ---- the practice answer page: full screen, its own top bar and bottom bar ---- */
-.training-app .drill { position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); z-index: 35; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top, 0px); }
+.training-app .drill { box-sizing: border-box; position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); z-index: 35; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top, 0px); }
 .training-app .drill[hidden] { display: none; }
 .training-app .drill-top { display: flex; align-items: center; gap: 8px; padding: 6px 8px; flex: none; }
 .training-app .drill-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.3; }
