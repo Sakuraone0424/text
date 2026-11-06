@@ -184,8 +184,9 @@ def test_dialogs_are_bottom_sheets_that_slide_up_and_down(engine, live_app):
     box = page.evaluate("(() => { const r = document.getElementById('question-dialog').getBoundingClientRect(); return [r.bottom, innerHeight]; })()")
     assert abs(box[0] - box[1]) < 2                                              # sitting on the bottom edge
     page.evaluate("document.getElementById('question-dialog').close()")
-    assert page.evaluate("document.getElementById('question-dialog').classList.contains('closing')")
-    page.wait_for_function("!document.getElementById('question-dialog').open")
+    assert not page.evaluate("document.getElementById('question-dialog').open")          # closed at once: focus and events as before
+    assert page.evaluate("document.querySelectorAll('dialog[inert]').length") == 1        # while its picture slides down
+    page.wait_for_function("document.querySelectorAll('dialog[inert]').length === 0", timeout=2000)
     page.close()
 
 

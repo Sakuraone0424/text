@@ -63,6 +63,7 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     page.locator("#login").wait_for(state="hidden")
     # ---- home
     expect(page.locator("#days-left")).not_to_have_text("—")
+    page.wait_for_function("!document.querySelector('#days-left').dataset.rolling")      # the number rolls in for 400 ms
     days = int(page.locator("#days-left").inner_text())
     assert days == max(0, (date(2026, 12, 19) - datetime.now(timezone(timedelta(hours=8))).date()).days)
     assert int(page.locator("#streak-days").inner_text()) >= 10

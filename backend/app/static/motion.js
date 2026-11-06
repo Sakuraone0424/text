@@ -76,6 +76,7 @@
     const from = seen === undefined ? 0 : Number(seen);
     if (reduced() || from === to || !Number.isFinite(from) || !Number.isFinite(to)) {
       node.textContent = finalText;
+      delete node.dataset.rolling;
       return;
     }
     const began = performance.now();
@@ -86,10 +87,12 @@
       if (t < 1) rolling.set(node, requestAnimationFrame(step));
       else {
         node.textContent = finalText;
+        delete node.dataset.rolling;
         rolling.delete(node);
       }
     };
     node.textContent = prefix + from.toFixed(decimals) + suffix;
+    node.dataset.rolling = "1";
     rolling.set(node, requestAnimationFrame(step));
   }
 
@@ -140,16 +143,29 @@
     });
   }
 
-  /* ---------- 7. dialogs slide down when they close (the stylesheet slides them up when they open) ---------- */
+  /* ---------- 7. sheets slide down when they close (the stylesheet slides them up when they open) ----------
+     The dialog itself closes at once, exactly as before (focus, inert and `close` events all behave the same); a picture of
+     it slides down and fades with the backdrop, then disappears. Nothing waits for the animation. */
   if (window.HTMLDialogElement) {
     const nativeClose = HTMLDialogElement.prototype.close;
     HTMLDialogElement.prototype.close = function (value) {
-      if (!this.open || reduced() || this.classList.contains("closing")) return nativeClose.call(this, value);
-      this.classList.add("closing");
-      setTimeout(() => {
-        this.classList.remove("closing");
-        nativeClose.call(this, value);
-      }, 160);
+      if (!this.open || reduced() || !this.classList.contains("sheet") || typeof this.animate !== "function") return nativeClose.call(this, value);
+      const rect = this.getBoundingClientRect();
+      const ghost = this.cloneNode(true);
+      ghost.removeAttribute("id");
+      ghost.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+      ghost.setAttribute("open", "");
+      ghost.setAttribute("inert", "");
+      ghost.setAttribute("aria-hidden", "true");
+      Object.assign(ghost.style, { position: "fixed", margin: "0", left: rect.left + "px", top: rect.top + "px", width: rect.width + "px", height: rect.height + "px", zIndex: "100", pointerEvents: "none", animation: "none" });
+      const shade = document.createElement("div");
+      shade.setAttribute("aria-hidden", "true");
+      Object.assign(shade.style, { position: "fixed", inset: "0", zIndex: "99", pointerEvents: "none", background: "var(--scrim, rgba(0,0,0,.4))" });
+      document.body.append(shade, ghost);
+      nativeClose.call(this, value);
+      const out = ghost.animate([{ transform: "translateY(0)" }, { transform: "translateY(100%)" }], { duration: 160, easing: EASE_IN, fill: "forwards" });
+      const fade = shade.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, easing: EASE_IN, fill: "forwards" });
+      Promise.allSettled([out.finished, fade.finished]).then(() => { ghost.remove(); shade.remove(); });
     };
   }
 

@@ -42,8 +42,6 @@
 .training-app dialog.sheet { margin: auto auto 0; width: 100%; max-width: 520px; border-radius: 16px 16px 0 0; border-bottom: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
 .training-app dialog.sheet[open] { animation: sheet-up var(--t-base) var(--ease-out); }
 .training-app dialog[open]::backdrop { animation: backdrop-in var(--t-base) var(--ease-out); }
-.training-app dialog.closing { animation: sheet-down var(--t-fast) var(--ease-in) forwards; }
-.training-app dialog.closing::backdrop { animation: backdrop-out var(--t-fast) var(--ease-in) forwards; }
 @keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @keyframes sheet-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
 @keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
