@@ -101,7 +101,8 @@ def test_the_answer_page_keeps_its_bars_and_the_field_inside_the_visible_part_wh
     boxes = page.evaluate("""() => { const f = document.querySelector('#drill-view input.drill-answer').getBoundingClientRect(),
         a = document.querySelector('.drill-actions').getBoundingClientRect(), t = document.querySelector('.drill-top').getBoundingClientRect();
         const d = document.querySelector('#drill-view').getBoundingClientRect();
-        return { fieldTop: f.top, fieldBottom: f.bottom, actionsTop: a.top, actionsBottom: a.bottom, topBottom: t.bottom, drillTop: d.top, drillBottom: d.bottom, vh: 430 }; }""")
+        const parts = ['.drill-top', '.drill-progress', '.drill-body', '.drill-actions'].map((q) => { const r = document.querySelector(q).getBoundingClientRect(); return q + ':' + Math.round(r.top) + '-' + Math.round(r.bottom); }).join(' ');
+        return { fieldTop: f.top, fieldBottom: f.bottom, actionsTop: a.top, actionsBottom: a.bottom, topBottom: t.bottom, parts, drillPad: getComputedStyle(document.querySelector('#drill-view')).paddingTop, drillTop: d.top, drillBottom: d.bottom, vh: 430 }; }""")
     # the page is the visible part (WebKit may offset a fixed page by a pixel or two while the keyboard animates), the bars are inside it, the field is clear of both
     assert abs((boxes["drillBottom"] - boxes["drillTop"]) - boxes["vh"]) <= 3 and boxes["actionsBottom"] <= boxes["drillBottom"] + 1, boxes
     assert boxes["fieldBottom"] <= boxes["actionsTop"] and boxes["fieldTop"] >= boxes["topBottom"], boxes     # nothing covers the field

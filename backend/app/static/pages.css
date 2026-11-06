@@ -202,15 +202,15 @@ input, textarea, select, .training-app input, .training-app textarea, .training-
 .training-app.keyboard-open.focus-mode .shell { padding-bottom: 24px; }
 
 /* ---- the practice answer page: full screen, its own top bar and bottom bar ---- */
-.training-app .drill { box-sizing: border-box; position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); z-index: 35; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top, 0px); }
+.training-app .drill { box-sizing: border-box; overflow: hidden; position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); z-index: 35; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top, 0px); }
 .training-app .drill[hidden] { display: none; }
 .training-app .drill-top { display: flex; align-items: center; gap: 8px; padding: 6px 8px; flex: none; }
 .training-app .drill-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.3; }
 .training-app .drill-title b { font-size: 16px; }
 .training-app .drill-title span { font-size: 12px; color: var(--muted); }
 .training-app .drill-top::after { content: ""; width: 44px; flex: none; }
-.training-app .drill-progress { flex: none; width: calc(100% - 24px); margin: 0 12px; height: 4px; }
-.training-app .drill-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 16px; width: 100%; max-width: 720px; margin: 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; }
+.training-app .drill-progress { flex: none; display: block; -webkit-appearance: none; appearance: none; width: calc(100% - 24px); margin: 0 12px; height: 4px; min-height: 4px; border: 0; }
+.training-app .drill-body { flex: 1 1 0; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 16px; width: 100%; max-width: 720px; margin: 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; }
 .training-app .drill-body .question-stem { margin: 0; font-size: 17px; line-height: 1.6; }
 .training-app .drill-actions { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--card); border-top: 1px solid var(--line); }
 .training-app.keyboard-open .drill-actions { padding-bottom: 8px; }
