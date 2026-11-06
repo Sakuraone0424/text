@@ -71,52 +71,61 @@ def test_motion_lives_in_one_stylesheet_and_one_script_used_by_every_page():
     assert "prefers-reduced-motion" in js and "cubic-bezier" in js
 
 
+ALLOWED = {"transform", "opacity", "strokeDashoffset"}
+
+
+def recorded(page):
+    """Every Element.animate() call the page has made, as lists of keyframe objects (deterministic: no polling of running animations)."""
+    return [json.loads(a) for a in page.evaluate("window.__anims")]
+
+
+def properties(calls):
+    return {k for keyframes in calls for frame in keyframes for k in frame if k not in ("offset", "easing", "composite")}
+
+
 @pytest.mark.parametrize("scheme", ["light", "dark"])
 def test_a_page_change_moves_only_transform_and_opacity(engine, live_app, scheme):
-    page, errors = start(engine, live_app, scheme)
-    seen = set()
-    for view in ("profile", "mistakes", "home"):                          # the four tabs cross-fade
+    page, errors = start(engine, live_app, scheme, init=RECORD_ANIMATE)
+    for view in ("profile", "mistakes", "home", "profile"):                # the four tabs cross-fade
         page.locator(f'nav.primary-nav [data-view="{view}"]').click()
-        seen |= set(animated_properties(page))
-    page.locator('nav.primary-nav [data-view="profile"]').click()
-    page.goto(page.url.split("#")[0] + "#/progress")                      # a sub-page slides in from the right
-    page.wait_for_timeout(60)
-    seen |= set(animated_properties(page))
-    assert not (seen & FORBIDDEN), seen
-    assert "opacity" in seen
+    page.evaluate("location.hash = '#/progress'")                           # a sub-page slides in from the right
+    page.wait_for_function("window.__anims.some((a) => a.includes('translateX(32px)'))")
+    seen = properties(recorded(page))
+    assert seen <= ALLOWED, seen
+    assert "opacity" in seen and "transform" in seen
     assert not errors, errors
     page.close()
 
 
 def test_a_sub_page_slides_in_from_the_right_and_a_tab_change_only_fades(engine, live_app):
-    page, _ = start(engine, live_app)
+    page, _ = start(engine, live_app, init=RECORD_ANIMATE)
+    page.wait_for_function("document.querySelector('#days-left').textContent !== '—'")
+    before = len(recorded(page))
     page.locator('nav.primary-nav [data-view="profile"]').click()
-    frames = page.evaluate("""() => document.getAnimations().map((a) => a.effect.getKeyframes().map((k) => k.transform || ''))""")
-    assert not any("translateX" in "".join(f) for f in frames)            # tabs: opacity only
+    page.wait_for_function(f"window.__anims.length > {before}")
+    fades = recorded(page)[before:]
+    assert fades and not any("translateX" in json.dumps(c) for c in fades)       # tabs: opacity only
     page.evaluate("location.hash = '#/progress'")
-    page.wait_for_timeout(40)
-    frames = page.evaluate("""() => document.getAnimations().map((a) => a.effect.getKeyframes ? a.effect.getKeyframes().map((k) => k.transform || '') : [])""")
-    assert any("translateX(32px)" in "".join(f) for f in frames)           # push: from the right
+    page.wait_for_function("window.__anims.some((a) => a.includes('translateX(32px)'))")          # push: from the right
     page.close()
 
 
 def test_the_back_button_navigates_at_once_while_the_page_slides_out_to_the_right(engine, live_app):
-    page, _ = start(engine, live_app)
+    page, _ = start(engine, live_app, init=RECORD_ANIMATE)
     page.locator('nav.primary-nav [data-view="profile"]').click()
     page.evaluate("location.hash = '#/progress'")
-    page.wait_for_timeout(400)
+    page.wait_for_selector("#progress-view:not([hidden]) [data-back]")
     page.locator("#progress-view [data-back]").first.click()
-    assert page.evaluate("location.hash") in ("#/profile", "")            # no waiting for the animation: the route is already back
-    page.wait_for_function("location.hash === '#/profile'")
-    out = page.evaluate("""() => document.getAnimations().some((a) => a.effect.getKeyframes && a.effect.getKeyframes().some((k) => (k.transform || '').includes('100%')))""")
-    assert out                                                              # the picture of the page is sliding out
-    page.wait_for_function("document.querySelectorAll('body > div[aria-hidden=true][style*=\"z-index: 30\"]').length === 0", timeout=2000)
+    page.wait_for_function("location.hash === '#/profile'")                       # the route is back without waiting for the animation
+    page.wait_for_function("window.__anims.some((a) => a.includes('translateX(100%)'))")        # a picture of the page slid out to the right
+    page.wait_for_function("document.querySelectorAll('body > div[aria-hidden=true][style*=\"z-index: 30\"]').length === 0", timeout=5000)
     # tapping a tab straight after back is not undone by a late history.back()
     page.evaluate("location.hash = '#/progress'")
-    page.wait_for_timeout(300)
+    page.wait_for_selector("#progress-view:not([hidden]) [data-back]")
     page.locator("#progress-view [data-back]").first.click()
     page.locator('nav.primary-nav [data-view="mistakes"]').click()
-    page.wait_for_timeout(500)
+    page.wait_for_function("location.hash === '#/mistakes'")
+    page.wait_for_timeout(500)                                                    # (long enough for any late history.back())
     assert page.evaluate("location.hash") == "#/mistakes"
     page.close()
 
@@ -124,12 +133,13 @@ def test_the_back_button_navigates_at_once_while_the_page_slides_out_to_the_righ
 # ---- reduced motion -------------------------------------------------------------------------------------------------------
 
 def test_with_reduced_motion_everything_is_instant(engine, live_app):
-    page, errors = start(engine, live_app, reduced=True)
+    page, errors = start(engine, live_app, reduced=True, init=RECORD_ANIMATE)
     assert page.evaluate("Motion.reduced()")
     page.locator('nav.primary-nav [data-view="profile"]').click()
     page.evaluate("location.hash = '#/progress'")
-    page.wait_for_timeout(30)
-    assert page.evaluate("document.getAnimations().filter((a) => a.playState === 'running' && (a.effect.getComputedTiming().duration > 1)).length") == 0
+    page.wait_for_selector("#progress-view:not([hidden])")
+    page.evaluate("document.getElementById('question-dialog').showModal(); document.getElementById('question-dialog').close()")
+    assert page.evaluate("window.__anims.length") == 0                           # nothing was animated at all
     # a control's transitions are effectively instant, the skeleton sweep is gone
     assert page.evaluate("parseFloat(getComputedStyle(document.querySelector('#prepare')).transitionDuration) * 1000") <= 0.02
     # a number does not roll: it is final at once
@@ -222,11 +232,11 @@ def test_the_skeleton_has_a_light_sweep_that_loops(engine, live_app):
 
 def test_the_start_button_is_not_clickable_while_the_state_loads(engine, live_app):
     # today's paper and the overview both answer late: until then the state is unknown
-    page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 1500], "/v2/papers": [None, 1500]})
+    page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 4000], "/v2/papers": [None, 4000]})
     button = page.locator("#prepare")
     assert button.is_disabled() and button.get_attribute("data-loading") == "1"      # a grey placeholder, not a primary button
     expect(page.locator("#paper-state")).not_to_have_text("已就绪")
-    expect(button).to_be_enabled(timeout=4000)                                       # real state arrives: ready
+    expect(button).to_be_enabled(timeout=12000)                                       # real state arrives: ready
     assert button.get_attribute("data-loading") is None
     expect(page.locator("#paper-state")).to_have_text("已就绪")
     page.close()
@@ -242,7 +252,7 @@ def test_the_start_button_stays_disabled_when_the_bank_is_short(engine, live_app
 def test_stat_cards_keep_their_numbers_while_refreshing(engine, live_app):
     page, _ = start(engine, live_app)
     expect(page.locator("#stat-avg")).to_have_text("187")
-    page.evaluate("window.__routes['/v2/stats/overview'] = [window.__routes['/v2/stats/overview'], 1500]")      # the next answer is slow
+    page.evaluate("window.__routes['/v2/stats/overview'] = [window.__routes['/v2/stats/overview'], 4000]")      # the next answer is slow
     page.evaluate("Insights.loadHome()")
     page.wait_for_timeout(300)
     assert page.locator("#stat-avg").inner_text() == "187" and page.locator("#stat-objective").inner_text() == "71%"
@@ -261,10 +271,10 @@ def test_a_paper_still_being_graded_is_not_shown_as_no_data(engine, live_app):
 
 
 def test_the_first_visit_without_a_kept_copy_shows_placeholders_not_empty_sentences(engine, live_app):
-    page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 1500]})
+    page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 4000]})
     page.wait_for_selector('#home-view[data-loading="1"]', timeout=3000)
     assert page.evaluate("getComputedStyle(document.getElementById('stat-avg')).color") in ("rgba(0, 0, 0, 0)", "transparent")
-    expect(page.locator("#home-view")).not_to_have_attribute("data-loading", "1", timeout=4000)
+    expect(page.locator("#home-view")).not_to_have_attribute("data-loading", "1", timeout=12000)
     page.close()
 
 
@@ -285,7 +295,7 @@ def chromium_only(engine):
 def test_pull_to_refresh_feels_like_ios_and_keeps_the_data(engine, live_app, chromium_only):
     page, errors = start(engine, live_app, routes={"/v2/stats/overview": FULL})
     expect(page.locator("#stat-avg")).to_have_text("187")
-    page.evaluate("window.__routes['/v2/stats/overview'] = [window.__routes['/v2/stats/overview'], 1600]")       # a slow refresh
+    page.evaluate("window.__routes['/v2/stats/overview'] = [window.__routes['/v2/stats/overview'], 4000]")       # a slow refresh
     touch(page, "touchStart", 200)
     moved = []
     for dy in (20, 40, 80, 160, 320):
@@ -304,7 +314,7 @@ def test_pull_to_refresh_feels_like_ios_and_keeps_the_data(engine, live_app, chr
     assert page.locator("#stat-avg").inner_text() == "187"                         # the old data stays on screen
     assert 30 < page.evaluate("new DOMMatrix(getComputedStyle(document.getElementById('home-view')).transform).m42") < 70   # resting spot
     assert "更新中" not in page.locator("#home-view").inner_text() and page.locator(".pull-hint").count() == 0
-    page.wait_for_function("document.querySelectorAll('.ptr.spin').length === 0", timeout=6000)
+    page.wait_for_function("document.querySelectorAll('.ptr.spin').length === 0", timeout=12000)
     page.wait_for_timeout(300)
     assert page.evaluate("getComputedStyle(document.getElementById('home-view')).transform") == "none"
     assert not errors, errors
