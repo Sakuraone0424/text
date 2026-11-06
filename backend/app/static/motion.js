@@ -35,7 +35,7 @@
     const rect = node.getBoundingClientRect();
     const frame = document.createElement("div");
     frame.setAttribute("aria-hidden", "true");
-    Object.assign(frame.style, { position: "fixed", left: clip.left + "px", top: clip.top + "px", width: clip.width + "px", height: Math.max(0, Math.min(clip.height, window.innerHeight - clip.top)) + "px", overflow: "hidden", pointerEvents: "none", zIndex: "30", background: "var(--bg, #fff)" });
+    Object.assign(frame.style, { position: "fixed", left: clip.left + "px", top: clip.top + "px", width: clip.width + "px", height: Math.max(0, Math.min(clip.height, window.innerHeight - clip.top)) + "px", overflow: "hidden", pointerEvents: "none", zIndex: "30", background: "var(--bg)" });
     const ghost = node.cloneNode(true);
     ghost.hidden = false;
     ghost.removeAttribute("id");
@@ -178,7 +178,7 @@
       Object.assign(ghost.style, { position: "fixed", margin: "0", left: rect.left + "px", top: rect.top + "px", width: rect.width + "px", height: rect.height + "px", zIndex: "100", pointerEvents: "none", animation: "none" });
       const shade = document.createElement("div");
       shade.setAttribute("aria-hidden", "true");
-      Object.assign(shade.style, { position: "fixed", inset: "0", zIndex: "99", pointerEvents: "none", background: "var(--scrim, rgba(0,0,0,.4))" });
+      Object.assign(shade.style, { position: "fixed", inset: "0", zIndex: "99", pointerEvents: "none", background: "var(--scrim)" });
       document.body.append(shade, ghost);
       nativeClose.call(this, value);
       const out = ghost.animate([{ transform: "translateY(0)" }, { transform: "translateY(100%)" }], { duration: 160, easing: EASE_IN, fill: "forwards" });

@@ -188,7 +188,7 @@ def test_dialogs_are_bottom_sheets_that_slide_up_and_down(engine, live_app):
     page, _ = start(engine, live_app)
     page.evaluate("document.getElementById('question-dialog').showModal()")
     assert page.evaluate("getComputedStyle(document.getElementById('question-dialog')).animationName") == "sheet-up"
-    page.wait_for_timeout(320)                                                   # (once it has slid up)
+    page.wait_for_function("document.getElementById('question-dialog').getAnimations().length === 0")      # (once it has slid up)
     box = page.evaluate("(() => { const r = document.getElementById('question-dialog').getBoundingClientRect(); return [r.bottom, innerHeight]; })()")
     assert abs(box[0] - box[1]) < 2                                              # sitting on the bottom edge
     page.evaluate("document.getElementById('question-dialog').close()")
