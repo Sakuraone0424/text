@@ -121,7 +121,7 @@ def detail(conn, uid, paper_id, question_id):
         rubric=[dict(description=c["description"], points=c["points"]) for c in snap.get("rubric") or []],
         blank_points=feedback.get("blank_points"), comment=feedback.get("comment"),
         concept_errors=feedback.get("concept_errors") or [], imprecisions=feedback.get("imprecisions") or [], suggestions=feedback.get("suggestions") or [],
-        evidence=sources_of(snap),
+        evidence=sources_of(snap), graded_by=row["graded_by"],
         pending_text=next((q.get("pending_text") for q in grading_activity.progress(conn, uid, paper_id)["questions"] if q["question_id"] == question_id), None) if row["points"] is None and not reported else None,
     )
 

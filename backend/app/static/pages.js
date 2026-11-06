@@ -137,18 +137,24 @@
     { mode: "year", name: "真题按年份", desc: "选年份练真题", icon: "M7 3v3M17 3v3M4 8h16M5 5h14v15H5z" },
   ];
   /* a bottom sheet with a list of choices; resolves with the chosen value, or null */
-  function choose(title, options, note) {
+  function choose(title, options, note, current) {
     return new Promise((resolve) => {
       const dialog = el("dialog", undefined, document.body, "pick-dialog sheet");
       el("h2", title, dialog);
       if (note) el("p", note, dialog, "muted small");
       const list = el("div", undefined, dialog, "pick-list");
       let picked = null;
+      let group = null;
       options.forEach((o) => {
+        if (o.group && o.group !== group) {
+          group = o.group;
+          el("h3", group, list, "pick-group");
+        }
         const button = el("button", undefined, list, "pick-option");
         button.type = "button";
         button.disabled = Boolean(o.disabled);
-        el("span", o.label, button);
+        if (current !== undefined && current === o.value) button.setAttribute("aria-pressed", "true");
+        el("span", o.label, button, "pick-label");
         if (o.sub) el("small", o.sub, button);
         button.onclick = () => { picked = o.value; dialog.close(); };
       });
@@ -162,7 +168,8 @@
   async function pickAndStart(kind, data) {
     const body = { mode: kind.mode, size: 10 };
     if (kind.mode === "chapter") {
-      const value = await choose("选一个章节", data.chapter.chapters.map((c) => ({ label: c.chapter, sub: `${SHORT[c.subject]} · 可练 ${c.available} 题`, value: c })));
+      // grouped by subject (生化 / 细胞), each in the textbook's chapter order (the server sends them so)
+      const value = await choose("选一个章节", data.chapter.chapters.map((c) => ({ group: SHORT[c.subject], label: c.chapter, sub: `可练 ${c.available} 题`, value: c })));
       if (!value) return;
       Object.assign(body, { subject: value.subject, chapter: value.chapter });
     } else if (kind.mode === "type") {
@@ -554,6 +561,14 @@
       target.className = "rq-body";
       if (d.reported) el("p", "已反馈 · 不计分", target, "notice");
       drawQuestion(target, d);
+      if (!d.reported) {
+        if (d.graded_by === "手动判分" || d.graded_by === "已手动调整") el("span", d.graded_by, target, "grader-tag");
+        if (reviewKey[0] === "p") {
+          const edit = el("button", d.points === null ? "手动判分" : "修改分数", target, "secondary");
+          edit.type = "button";
+          edit.onclick = () => window.Manual?.open({ paperId: Number(reviewKey.slice(1)), questionId: item.question_id, onDone: () => loadReview(reviewKey) });
+        }
+      }
       if (d.points === null && !d.reported) {
         el("p", d.pending_text || "待判分", target, "notice");
         const again = el("button", "重新判分", target, "secondary");
@@ -592,11 +607,12 @@
 
   /* ------------------------------------------------------------------------------------------------------------------ */
   function show(name, param) {
-    if (!["home", "practice", "exam"].includes(name)) $("start-dialog")?.close();          // going somewhere else (back button, a link) leaves the start sheet
+    if (!["home", "practice", "exam", "drill"].includes(name)) $("start-dialog")?.close();          // going somewhere else (back button, a link) leaves the start sheet
     if (name === "practice") loadPractice();
     else if (name === "mistakes") loadMistakes();
     else if (name === "mistake" && /^m\d+$/.test(param || "")) loadMistakeDetail(Number(param.slice(1)));
     else if (name === "review" && /^[ps]\d+$/.test(param || "")) loadReview(param);
+    else if (name === "drill") window.Drill?.show(param);
   }
   window.Pages = { show, paintToday, todayLoaded, loadPractice, loadMistakes, loadReview, todayState };
 })();

@@ -298,7 +298,11 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         return None
     totals = cny_billing.totals(conn, uid)
     budget_scope = None  # which limit stopped it: daily | monthly | trial | task | cap
-    if live.get("daily_limit_enabled", True) and totals["day"] + amount > live["daily_cny"]:
+    if job["kind"] == "grading":
+        # Grading is bound by the monthly TOTAL cap alone (cost_control.cap_reason below): never by the daily setting, the writing
+        # stop line, the trial or the per-task limit. Its reserve is exactly what keeps it going when writing has used its share.
+        pass
+    elif live.get("daily_limit_enabled", True) and totals["day"] + amount > live["daily_cny"]:
         budget_scope = "daily"
     elif live.get("monthly_limit_enabled", True) and totals["month"] + amount > live["monthly_cny"]:
         budget_scope = "monthly"

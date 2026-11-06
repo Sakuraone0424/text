@@ -196,3 +196,24 @@ def item(conn, user_id, question_id):
     if not row:
         raise LookupError("Review card not found")
     return dict(row, early=True)
+
+
+def sync_score_card(conn, uid, attempt_id, question_id):
+    """After a score was set or changed by hand: the review card follows the score (rates 60 % / 85 % for written answers, right / wrong
+    otherwise). A new mistake makes a card (rated Again / Hard as usual); an existing card only changes its status; a score that is now
+    mastered leaves the cards and the mistake book (history stays)."""
+    row = conn.execute(
+        "SELECT a.points,(i.snapshot->>'max_points')::int AS max_points,i.snapshot->>'question_type' AS question_type FROM answers_v2 a "
+        "JOIN attempts_v2 t ON t.id=a.attempt_id JOIN paper_items_v2 i ON i.paper_id=t.paper_id AND i.question_id=a.question_id "
+        "WHERE a.attempt_id=%s AND a.question_id=%s", (attempt_id, question_id)).fetchone()
+    if not row or row["points"] is None:
+        return None
+    kind = classify(row["question_type"], row["points"], row["max_points"], *lines(conn, uid))
+    if kind in ("mistake", "consolidate"):
+        if conn.execute("SELECT 1 FROM fsrs_cards WHERE user_id=%s AND question_id=%s", (uid, question_id)).fetchone():
+            conn.execute("UPDATE fsrs_cards SET status=%s WHERE user_id=%s AND question_id=%s", (kind, uid, question_id))
+        else:
+            record_failure(conn, attempt_id, question_id)
+    else:
+        conn.execute("UPDATE fsrs_cards SET status='mastered' WHERE user_id=%s AND question_id=%s", (uid, question_id))
+    return kind

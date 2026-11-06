@@ -747,6 +747,7 @@ def result(conn, user_id, paper_id):
                 "answer": r["answer"],
                 "points": r["points"],
                 "feedback": r["feedback"],
+                "graded_by": r["graded_by"],
                 "stem": r["snapshot"]["stem"],
                 "subject": r["snapshot"]["subject"],
                 "question_type": r["snapshot"]["question_type"],

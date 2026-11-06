@@ -546,118 +546,18 @@
   }
   /* short practice: objective questions only, checked at once, not part of the daily paper */
   async function startPractice(body) {
+    // the set is answered on its own full-screen page (drill.js); a reason it cannot start is said here, on the practice page
     window.TrainingUI?.showView("practice");
     const panel = $("practice-panel");
-    panel.hidden = false;
-    panel.replaceChildren();
-    el("p", "正在准备练习…", panel, "muted");
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
-    let set;
-    try {
-      set = await send("/v2/practice", body);
-    } catch (error) {
+    panel.hidden = true;
+    await window.Drill.start(body, (error) => {
+      panel.hidden = false;
       panel.replaceChildren();
       el("h2", "暂时无法开始练习", panel);
       el("p", PRACTICE_REASON[error.message] || error.message, panel, "muted");
-      return;
-    }
-    runPractice(panel, set);
+    });
   }
   const chapterPractice = (subject, chapter) => startPractice({ mode: "chapter", subject, chapter, size: 10 });
-  function runPractice(panel, set) {
-    let index = 0, correct = 0, waiting = 0;
-    const questions = set.questions;
-    const finish = () => {
-      panel.replaceChildren();
-      el("h2", "练习完成", panel);
-      el("p", waiting ? `${questions.length} 道：答对 ${correct} 道，${waiting} 道写作题等 AI 判分。` : `${questions.length} 道里答对 ${correct} 道。`, panel, "grade-title");
-      el("p", "练习成绩不计入每日成绩，但会更新章节正确率。", panel, "muted");
-      const again = el("button", "再练一套薄弱题", panel, "primary");
-      again.onclick = () => startPractice({ mode: "weak", size: 10 });
-      const close = el("button", "关闭", panel, "secondary");
-      const review = el("button", "查看这套的解析", panel, "secondary");
-      review.onclick = () => { location.hash = "#/review/s" + set.set_id; };
-      close.onclick = () => {
-        panel.hidden = true;
-        window.Pages?.loadPractice();
-      };
-    };
-    const show = () => {
-      if (index >= questions.length) return finish();
-      const q = questions[index];
-      const started = Date.now();
-      panel.replaceChildren();
-      const head = el("div", undefined, panel, "card-heading");
-      el("h2", `练习 ${index + 1} / ${questions.length}`, head);
-      el("span", `${SHORT[q.subject]} · ${TYPE[q.question_type]} · ${q.max_points} 分`, head, "pill");
-      el("p", "不计入每日成绩", panel, "muted small");
-      el("p", q.stem, panel, "question-stem");
-      let chosen = "";
-      const fields = [];
-      if (q.question_type === "single_choice") {
-        const box = el("div", undefined, panel);
-        Object.entries(q.options).forEach(([letter, text]) => {
-          const option = el("button", undefined, box, "option");
-          option.type = "button";
-          el("span", letter, option, "option-letter");
-          el("span", text, option);
-          option.onclick = () => {
-            chosen = letter;
-            box.querySelectorAll(".option").forEach((x) => x.classList.toggle("chosen", x === option));
-          };
-        });
-      } else if (["term", "short_answer", "essay"].includes(q.question_type)) {
-        // written answers: the AI grades them after they are handed in (the score shows in the practice review)
-        const area = el("textarea", undefined, panel);
-        area.rows = q.question_type === "essay" ? 9 : 5;
-        area.setAttribute("aria-label", "作答");
-        area.placeholder = "写下你的作答，交卷后由 AI 判分";
-        fields.push(area);
-      } else {
-        for (let i = 0; i < q.blank_count; i++) {
-          const input = el("input", undefined, panel);
-          input.setAttribute("aria-label", q.blank_count > 1 ? `第${i + 1}空` : "答案");
-          input.placeholder = q.blank_count > 1 ? `第${i + 1}空` : "填写答案";
-          fields.push(input);
-        }
-      }
-      const submit = el("button", "提交答案", panel, "primary");
-      const feedback = el("div", undefined, panel);
-      submit.onclick = async () => {
-        submit.disabled = true;
-        const seconds = Math.min(7200, Math.round((Date.now() - started) / 1000));
-        const body = ["term", "short_answer", "essay"].includes(q.question_type) ? { question_id: q.id, text: fields[0].value, seconds } : q.question_type === "single_choice" ? { question_id: q.id, text: chosen, seconds } : q.blank_count > 1 ? { question_id: q.id, blanks: fields.map((f) => f.value), seconds } : { question_id: q.id, text: fields[0].value, seconds };
-        try {
-          const r = await send(`/v2/practice/${set.set_id}/answer`, body);
-          if (r.pending) {
-            waiting++;
-            feedback.className = "practice-feedback";
-            el("strong", "已交，AI 判分中", feedback);
-            el("p", r.queued ? "分数出来后会显示在这套的练习回看里；低于合格线的会进入错题本。" : "暂时无法发送给 AI 判分，分数会在可判时补上（不会记 0 分）。", feedback, "muted small");
-            if (r.answer) el("p", "参考答案：" + r.answer, feedback);
-            r.why.forEach((w) => el("p", "得分点：" + w, feedback, "muted small"));
-          } else {
-          if (r.correct) correct++;
-          feedback.className = "practice-feedback " + (r.correct ? "ok" : "bad");
-          el("strong", r.correct ? "回答正确" : `未答对（${r.points}/${r.max_points} 分）`, feedback);
-          el("p", "参考答案：" + [r.answer, ...r.accepted_answers.filter((x) => x !== r.answer)].join(" / "), feedback);
-          r.why.forEach((w) => el("p", "得分点：" + w, feedback, "muted small"));
-          }
-          const next = el("button", index + 1 >= questions.length ? "查看结果" : "下一题", panel, "primary");
-          next.onclick = () => {
-            index++;
-            show();
-          };
-          next.focus();
-        } catch (error) {
-          submit.disabled = false;
-          feedback.className = "practice-feedback bad";
-          feedback.textContent = error.message;
-        }
-      };
-    };
-    show();
-  }
   $("weak-practice").onclick = () => startPractice({ mode: "weak", size: 10 });
 
   /* ---------------- result extras ---------------- */

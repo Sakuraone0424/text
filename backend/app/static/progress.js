@@ -307,6 +307,12 @@ function paceLine(report) {
   if (!p) return;
   const yuan = (v) => "¥" + Number(v).toFixed(2);
   const day = (iso) => { const d = new Date(iso + "T00:00:00"); return (d.getMonth() + 1) + " 月 " + d.getDate() + " 日"; };
+  if (p.enabled === false) {
+    // the day-by-day split is off: writing and review are bound by the month's limit and by the gap, grading by the total cap
+    line.textContent = `本月出题已用 ${yuan(p.month_writing_used_cny)} / 上限 ${yuan(p.month_writing_limit_cny)}；判分预留还剩 ${yuan(p.grading_reserve_left_cny)}，判分只受本月总上限约束。`;
+    line.classList.toggle("warn", Number(p.month_writing_used_cny) >= Number(p.month_writing_limit_cny));
+    return;
+  }
   const used = `今日出题额度 已用 ${yuan(p.used_cny)} / 可用 ${yuan(p.allowed_cny)}` + (p.exception ? "（明天的卷子还凑不齐，今天可多用 50%）" : "");
   const month = p.lasts_to_month_end ? "按当前速度，本月额度够用到月底。" : `按当前速度，本月额度可用到 ${day(p.runs_out_on)}。`;
   line.textContent = used + (p.exceeded ? "，今天的额度已用完，出题与审核停到次日 0 点。" : "。") + month;
@@ -702,7 +708,8 @@ function gradingCard(g) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "secondary";
-    b.textContent = `第 ${p.paper_id} 号卷重新判分（${p.count} 题）`;
+    const [, month, day] = (p.date || "").split("-");
+    b.textContent = `${month ? `${Number(month)} 月 ${Number(day)} 日卷` : "这套卷"} · 重新判分（${p.count} 题）`;
     b.onclick = async () => {
       b.disabled = true;
       try {

@@ -776,11 +776,23 @@ async function showResult() {
       `第 ${number} 题 · ${answer.excluded ? "已反馈 · 不计分" : answer.points === null ? "待判分" : answer.points + " / " + answer.max_points + " 分"}`,
       article,
     );
+    if (!answer.excluded && answer.points !== null) {
+      // any scored answer can be changed by hand; a manual score says so (and the AI's original stays viewable in the sheet)
+      if (answer.graded_by === "手动判分" || answer.graded_by === "已手动调整") element("span", answer.graded_by, article).className = "grader-tag";
+      const change = element("button", "修改分数", article);
+      change.type = "button";
+      change.className = "secondary manual-one";
+      change.onclick = () => window.Manual?.open({ paperId: result.paper_id, questionId: answer.question_id, onDone: () => showResult().catch((e) => status(e.message)) });
+    }
     if (!answer.excluded && answer.points === null) {
       const waiting = element("p", "判分中……", article);
       waiting.className = "grading-status";
       waiting.dataset.qid = answer.question_id;
       waiting.setAttribute("role", "status");
+      const byHand = element("button", "手动判分", article);
+      byHand.type = "button";
+      byHand.className = "secondary manual-one";
+      byHand.onclick = () => window.Manual?.open({ paperId: result.paper_id, questionId: answer.question_id, onDone: () => showResult().catch((e) => status(e.message)) });
       const again = element("button", "重新判分", article);
       again.type = "button";
       again.className = "secondary regrade-one";
@@ -1001,7 +1013,7 @@ function startGradingActivity(paperId) {
     ai_result_being_applied: "判分结果写入中",
     reassessing: "结果不确定，正在自动复判一次",
     uncertain_after_second_assessment: "复判后仍无法确定，暂不计分（不会记0分）",
-    ai_budget_exhausted: "本月 AI 额度已用完，额度恢复后继续判分",
+    ai_budget_exhausted: "本月 AI 总上限已用完，下月恢复后继续判分",
     ai_grading_stopped: "AI判分已暂停",
     answer_too_long_for_automatic_grading: "作答过长，无法自动判分",
     photo_answers_not_supported: "照片作答不支持自动判分",

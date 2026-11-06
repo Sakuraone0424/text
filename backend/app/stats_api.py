@@ -129,3 +129,29 @@ def practice_answer(set_id: int, data: PracticeAnswer, username: str = Depends(r
 @router.get("/practice/{set_id}")
 def practice_summary(set_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: practice.summary(c, u, set_id), username)
+
+
+class ManualScore(StrictModel):
+    criterion_points: list[StrictInt] = Field(min_length=1, max_length=50)
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/papers/{paper_id}/manual/{question_id}")
+def manual_view(paper_id: int, question_id: int, username: str = Depends(require_auth)):
+    from app import manual_grading
+
+    return operation(lambda c, u: manual_grading.view(c, u, paper_id, question_id), username)
+
+
+@router.put("/papers/{paper_id}/manual/{question_id}")
+def manual_save(paper_id: int, question_id: int, data: ManualScore, username: str = Depends(require_auth)):
+    from app import manual_grading
+
+    return operation(lambda c, u: manual_grading.save(c, u, paper_id, question_id, list(data.criterion_points), data.note), username)
+
+
+@router.post("/papers/{paper_id}/manual/{question_id}/ai")
+def manual_to_ai(paper_id: int, question_id: int, username: str = Depends(require_auth)):
+    from app import manual_grading
+
+    return operation(lambda c, u: manual_grading.hand_to_ai(c, u, paper_id, question_id), username)

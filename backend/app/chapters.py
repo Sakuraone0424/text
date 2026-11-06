@@ -122,7 +122,7 @@ class ChapterMap:
             self._seen[key] = self._map(subject, raw)
         if self._seen[key] == OTHER:
             self.unmapped[raw] += 1
-        return self._seen[key]
+        return canonical(self._seen[key])          # never a bare "14 糖类": always the textbook's way of writing a chapter
 
     def _map(self, subject, raw):
         chapters = textbook_chapters(self.conn, subject)

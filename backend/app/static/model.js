@@ -166,6 +166,8 @@ function drawUsage() {
   tile("bl-month", left(bill.remaining_monthly_cny));
   tile("bl-reserved", yuan(bill.reserved_cny.trial));
   tile("bl-unknown", yuan(bill.unknown_reserved_cny));
+  // the part of the month's cap kept for grading: grading is bound by the total cap only, so this is shown on its own
+  api("/v2/model/spend").then((sp) => tile("bl-grading", yuan(sp.remaining_grading_cny))).catch(() => {});
   tile("bl-calls", String(bill.call_attempts));
   tile("bl-invoice", bill.invoice_status === "has_invoice_events" ? "已对账" : "未对账");
   $("bl-period").textContent = "当前时段：" + (bill.period === "peak" ? "高峰（价格较高，出题暂缓）" : "低峰");

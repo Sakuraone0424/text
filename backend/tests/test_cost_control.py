@@ -216,6 +216,47 @@ def test_claim_blocks_writing_when_the_cap_is_reached_and_still_serves_grading(d
     assert ai_jobs.claim(db)["kind"] == "grading"
 
 
+def test_grading_is_not_stopped_by_the_daily_setting_the_writing_stop_line_or_the_task_limit(db, setup_ai, caps, monkeypatch):
+    from app import model_router
+
+    monkeypatch.setattr(cc, "is_peak", lambda at=None, calendar=None: False)
+    # writing has used up the day (the learner's daily setting is tiny) and the month's writing share, but not the total cap
+    model_router.configure(db, setup_ai, "deepseek-flash", "high", stopped=False, daily_cny=0.01, monthly_cny=500, task_cny=0.01, trial_cny=500)
+    spend(db, setup_ai, "generation", "75")
+    ai_jobs.enqueue(db, setup_ai, "w2", "generation", {"instructions": "x"})
+    assert ai_jobs.claim(db) is None
+    assert db.execute("SELECT error_code FROM ai_jobs WHERE job_key='w2'").fetchone()["error_code"] == "budget_exceeded"     # writing is held back
+    ai_jobs.enqueue(db, setup_ai, "g2", "grading", {"instructions": "x"})
+    claimed = ai_jobs.claim(db)
+    assert claimed and claimed["kind"] == "grading"                                      # grading still goes on
+
+
+def test_a_grading_task_blocked_only_by_a_daily_setting_goes_back_to_work(db, setup_ai, caps, monkeypatch):
+    from app import model_router
+
+    monkeypatch.setattr(cc, "is_peak", lambda at=None, calendar=None: False)
+    model_router.configure(db, setup_ai, "deepseek-flash", "high", stopped=False, daily_cny=500, monthly_cny=500, task_cny=500, trial_cny=500)
+    ai_jobs.enqueue(db, setup_ai, "gb", "grading", {"instructions": "x"})
+    db.execute("UPDATE ai_jobs SET state='blocked',error_code='budget_exceeded' WHERE job_key='gb'")
+    # (the worker's own housekeeping, the same statement, is what puts it back)
+    db.execute("UPDATE ai_jobs j SET state='retrying' FROM ai_settings s WHERE s.user_id=j.user_id AND NOT s.stopped AND j.state='blocked' AND j.error_code='budget_exceeded'")
+    assert ai_jobs.claim(db)["kind"] == "grading"
+
+
+def test_with_the_daily_split_off_writing_is_bound_by_the_month_and_grading_is_untouched(db, setup_ai, caps, monkeypatch):
+    monkeypatch.setenv("AI_DAILY_PACE", "0")
+    spend(db, setup_ai, "generation", "30")                     # far more than any single day's share
+    assert cc.pace_enabled() is False and cc.pace_exhausted(db, setup_ai) is False
+    p = cc.pace(db, setup_ai)
+    assert p["enabled"] is False and Decimal(p["month_writing_used_cny"]) == Decimal("30.00") and Decimal(p["month_writing_limit_cny"]) > 0
+    assert Decimal(p["grading_reserve_left_cny"]) == Decimal("15.00")
+    monkeypatch.setattr(cc, "is_peak", lambda at=None, calendar=None: False)
+    ai_jobs.enqueue(db, setup_ai, "g3", "grading", {"instructions": "x"})
+    assert ai_jobs.claim(db)["kind"] == "grading"
+    monkeypatch.setenv("AI_DAILY_PACE", "1")
+    assert cc.pace_enabled() is True
+
+
 # ---- spend report --------------------------------------------------------------------------------
 
 
