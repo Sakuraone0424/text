@@ -1,6 +1,7 @@
 """FSRS-6 scheduling; existing fixed-interval history is never fabricated."""
 
 import json
+from zoneinfo import ZoneInfo
 from datetime import timezone
 from fsrs import Card, Rating, Scheduler
 from psycopg.types.json import Jsonb
@@ -9,9 +10,34 @@ from app.training_sessions import server_now
 SCHEDULER = Scheduler(enable_fuzzing=False)
 
 
+SUBJECTIVE = ("term", "short_answer", "essay")
+DEFAULT_LINES = (0.60, 0.85)
+
+
+def lines(conn, user_id):
+    """(mistake_below, consolidate_below): the two score-rate lines for subjective answers (settings page)."""
+    row = conn.execute("SELECT mistake_below,consolidate_below FROM ai_settings WHERE user_id=%s", (user_id,)).fetchone()
+    return (float(row["mistake_below"]), float(row["consolidate_below"])) if row else DEFAULT_LINES
+
+
+def classify(question_type, points, max_points, mistake_below=0.60, consolidate_below=0.85):
+    """What one graded answer is: 'mistake' (review rating Again), 'consolidate' (rating Hard) or 'mastered' (no review card).
+
+    Single choice and fill-in-the-blank stay right or wrong (anything short of full marks is a mistake). The three subjective
+    types go by their score rate: below the first line a mistake, up to the second still to be consolidated, from there on mastered."""
+    if points is None or not max_points:
+        return None
+    if question_type not in SUBJECTIVE:
+        return "mastered" if points >= max_points else "mistake"
+    rate = points / max_points
+    if rate < mistake_below:
+        return "mistake"
+    return "consolidate" if rate < consolidate_below else "mastered"
+
+
 def record_failure(conn, attempt_id, question_id):
     row = conn.execute(
-        "SELECT p.user_id,a.answer,a.points,(i.snapshot->>'max_points')::int AS max_points FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id "
+        "SELECT p.user_id,a.answer,a.points,(i.snapshot->>'max_points')::int AS max_points,i.snapshot->>'question_type' AS question_type FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN answers_v2 a ON a.attempt_id=t.id JOIN paper_items_v2 i ON i.paper_id=t.paper_id AND i.question_id=a.question_id WHERE t.id=%s AND a.question_id=%s",
         (attempt_id, question_id),
     ).fetchone()
@@ -28,18 +54,23 @@ def record_failure(conn, attempt_id, question_id):
         or any(v.strip() for v in value.get("blanks", []))
         or value.get("image_ids")
     )
-    if not answered or row["points"] is None or row["points"] >= row["max_points"]:
+    if not answered or row["points"] is None:
         return
+    kind = classify(row["question_type"], row["points"], row["max_points"], *lines(conn, uid))
+    if kind in (None, "mastered"):
+        return                                                      # right, or a subjective answer at/above the second line: no card
+    if conn.execute("SELECT 1 FROM question_reports WHERE user_id=%s AND question_id=%s", (uid, question_id)).fetchone():
+        return  # the learner reported this question: no review card for it
     conn.execute(
-        "INSERT INTO fsrs_cards(user_id,question_id,card,due) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-        (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now),
+        "INSERT INTO fsrs_cards(user_id,question_id,card,due,status) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now, kind),
     )
     if answered:
         review(
             conn,
             uid,
             question_id,
-            1,
+            1 if kind == "mistake" else 2,                          # Again for a mistake, Hard for "to consolidate"
             f"graded-failure:{attempt_id}:{question_id}",
             None,
             require_due=False,
@@ -92,8 +123,97 @@ def review(
 
 def due(conn, user_id):
     return conn.execute(
-        "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem "
+        "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem, "
+        "q.content->>'question_type' AS question_type,q.content->'options' AS options "
         "FROM fsrs_cards c JOIN reviewed_questions q ON q.id=c.question_id "
-        "WHERE c.user_id=%s AND c.due<=clock_timestamp() ORDER BY c.due,c.question_id",
+        "WHERE c.user_id=%s AND c.due<=clock_timestamp() AND c.status<>'mastered' "
+        "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.user_id=c.user_id AND qr.question_id=c.question_id) "
+        "ORDER BY c.due,c.question_id",
         (user_id,),
     ).fetchall()
+
+
+SHANGHAI = ZoneInfo("Asia/Shanghai")
+STATE_KEY = "mistake_reclassify_v1"
+
+
+def reclassify_existing(conn):
+    """Once: sort the review cards that exist by the new rule, using the learner's latest graded answer to each question.
+    A card whose answer is now a mistake stays one, one at 60%-85% becomes 'consolidate', one above is marked 'mastered' (left out of
+    the reviews and the mistake list). Nothing is deleted: the cards and every review event stay. Returns the counts, or None
+    when it already ran."""
+    from collections import Counter
+
+    from app import legacy_reuse
+
+    if legacy_reuse._state(conn, STATE_KEY):
+        return None
+    before, after = Counter(), Counter()
+    thresholds = {}
+    for card in conn.execute(
+        "SELECT c.user_id,c.question_id,c.status,q.content->>'question_type' AS question_type FROM fsrs_cards c "
+        "JOIN reviewed_questions q ON q.id=c.question_id"
+    ).fetchall():
+        before[card["status"]] += 1
+        latest = conn.execute(
+            "SELECT a.points,(i.snapshot->>'max_points')::int AS max_points FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id "
+            "JOIN papers_v2 p ON p.id=t.paper_id JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
+            "WHERE p.user_id=%s AND a.question_id=%s AND a.points IS NOT NULL ORDER BY t.submitted_at DESC NULLS LAST,t.id DESC LIMIT 1",
+            (card["user_id"], card["question_id"]),
+        ).fetchone()
+        kind = card["status"]
+        if latest:
+            thresholds.setdefault(card["user_id"], lines(conn, card["user_id"]))
+            kind = classify(card["question_type"], latest["points"], latest["max_points"], *thresholds[card["user_id"]]) or kind
+        if kind != card["status"]:
+            conn.execute("UPDATE fsrs_cards SET status=%s WHERE user_id=%s AND question_id=%s", (kind, card["user_id"], card["question_id"]))
+        after[kind] += 1
+    result = dict(before=dict(before), after=dict(after))
+    legacy_reuse._set_state(conn, STATE_KEY, result)
+    return result
+
+
+def record_practice_failure(conn, uid, question_id, set_id, kind="mistake"):
+    """A practice question answered wrongly (or a subjective one scored below the lines) becomes a review card too: practice never
+    counts toward the daily score, but the mistake is real. kind 'mistake' is rated Again, 'consolidate' Hard."""
+    if conn.execute("SELECT 1 FROM question_reports WHERE user_id=%s AND question_id=%s", (uid, question_id)).fetchone():
+        return
+    now = server_now(conn).astimezone(timezone.utc)
+    conn.execute(
+        "INSERT INTO fsrs_cards(user_id,question_id,card,due,status) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now, kind),
+    )
+    review(conn, uid, question_id, 1 if kind == "mistake" else 2, f"practice-failure:{set_id}:{question_id}", None, require_due=False)
+
+
+def item(conn, user_id, question_id):
+    """One card in the shape the review screen takes (`due` rows), whether or not it is due: the learner asked to review it now."""
+    row = conn.execute(
+        "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem,q.content->>'question_type' AS question_type,q.content->'options' AS options "
+        "FROM fsrs_cards c JOIN reviewed_questions q ON q.id=c.question_id WHERE c.user_id=%s AND c.question_id=%s",
+        (user_id, question_id),
+    ).fetchone()
+    if not row:
+        raise LookupError("Review card not found")
+    return dict(row, early=True)
+
+
+def sync_score_card(conn, uid, attempt_id, question_id):
+    """After a score was set or changed by hand: the review card follows the score (rates 60 % / 85 % for written answers, right / wrong
+    otherwise). A new mistake makes a card (rated Again / Hard as usual); an existing card only changes its status; a score that is now
+    mastered leaves the cards and the mistake book (history stays)."""
+    row = conn.execute(
+        "SELECT a.points,(i.snapshot->>'max_points')::int AS max_points,i.snapshot->>'question_type' AS question_type FROM answers_v2 a "
+        "JOIN attempts_v2 t ON t.id=a.attempt_id JOIN paper_items_v2 i ON i.paper_id=t.paper_id AND i.question_id=a.question_id "
+        "WHERE a.attempt_id=%s AND a.question_id=%s", (attempt_id, question_id)).fetchone()
+    if not row or row["points"] is None:
+        return None
+    kind = classify(row["question_type"], row["points"], row["max_points"], *lines(conn, uid))
+    if kind in ("mistake", "consolidate"):
+        if conn.execute("SELECT 1 FROM fsrs_cards WHERE user_id=%s AND question_id=%s", (uid, question_id)).fetchone():
+            conn.execute("UPDATE fsrs_cards SET status=%s WHERE user_id=%s AND question_id=%s", (kind, uid, question_id))
+        else:
+            record_failure(conn, attempt_id, question_id)
+    else:
+        conn.execute("UPDATE fsrs_cards SET status='mastered' WHERE user_id=%s AND question_id=%s", (uid, question_id))
+    return kind

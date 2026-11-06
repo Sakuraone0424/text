@@ -6,6 +6,7 @@ from difflib import SequenceMatcher
 from typing import Literal
 
 from app.training_spec import POINTS, DURATION_SECONDS, validate_quotas
+from app import training_spec_v2 as v2, training_spec_v4 as v4
 
 from pydantic import (
     BaseModel,
@@ -87,7 +88,9 @@ class Blank(StrictModel):
 class Question(StrictModel):
     subject: Subject
     question_type: QuestionType
-    stem: str = Field(min_length=5, max_length=10000)
+    # A term question's stem is often only the term; the schema text stays as
+    # published so queued generation/repair payloads remain byte-identical.
+    stem: str = Field(max_length=10000, json_schema_extra={"minLength": 5})
     options: dict[str, str] = Field(default_factory=dict)
     answer: str = Field(min_length=1, max_length=10000)
     accepted_answers: list[str] = Field(default_factory=list, max_length=100)
@@ -101,14 +104,24 @@ class Question(StrictModel):
 
     @model_validator(mode="after")
     def fit(self):
+        if len(self.stem) < (2 if self.question_type == "term" else 5):
+            raise ValueError("Stem is too short")
         if any(
             not set(c.knowledge_tags).issubset(self.knowledge_tags) for c in self.rubric
         ):
             raise ValueError("Rubric knowledge tags must belong to the question")
         if sum(c.points for c in self.rubric) != self.max_points:
             raise ValueError("Rubric points must sum to max_points")
-        if self.max_points != POINTS[self.question_type]:
-            raise ValueError("max_points must match the custom 150-point specification")
+        permissible = {POINTS[self.question_type]}
+        for module in (v2, v4):
+            if self.question_type in module.POINTS:
+                permissible.add(module.POINTS[self.question_type])
+        if self.max_points not in permissible:
+            raise ValueError("max_points must match a supported versioned training specification")
+        if self.question_type == "essay" and self.max_points == v4.POINTS["essay"]:
+            low, high = v4.RUBRIC_ITEMS["essay"]
+            if not low <= len(self.rubric) <= high:
+                raise ValueError("Essay needs 4 to 6 scoring points")
         if self.question_type == "single_choice":
             if set(self.options) != set("ABCD") or self.answer not in self.options:
                 raise ValueError(
@@ -172,8 +185,21 @@ class Blueprint(StrictModel):
     specification: str = Field(min_length=1, max_length=300)
     quotas: dict[Subject, dict[QuestionType, StrictInt]]
 
+    @model_validator(mode="before")
+    @classmethod
+    def versioned_default_scoring(cls, value):
+        if isinstance(value, dict) and "points" not in value:
+            for module in (v2, v4):
+                if value.get("specification") == module.SPECIFICATION:
+                    return {**value, "points": dict(module.POINTS)}
+        return value
+
     @model_validator(mode="after")
     def total(self):
+        for module in (v2, v4):
+            if self.specification == module.SPECIFICATION:
+                module.validate_blueprint(self.model_dump())
+                return self
         if set(self.quotas) != {"biochemistry", "cell_biology"}:
             raise ValueError("Both subjects are required")
         if any(set(q) != set(TYPES) for q in self.quotas.values()):

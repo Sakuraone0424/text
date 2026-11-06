@@ -40,7 +40,8 @@ def https_app(live_app, tmp_path):
     origin = f'https://localhost:{port}'
     password = uuid.uuid4().hex
     env = {k:v for k,v in os.environ.items() if not k.startswith(('RAILWAY_', 'QUIZ_', 'DEEPSEEK_', 'AI_', 'NOTION_')) and k not in {'SESSION_SECRET', 'APP_PASSWORD', 'DATABASE_URL'}}
-    env.update(DATABASE_URL=dsn, QUIZ_USERNAME='test-owner', APP_PASSWORD=password, SESSION_SECRET=uuid.uuid4().hex, QUIZ_PUBLIC_ORIGIN=origin)
+    # These browser tests deliberately exercise the photo upload path, which is off by default.
+    env.update(DATABASE_URL=dsn, QUIZ_USERNAME='test-owner', APP_PASSWORD=password, SESSION_SECRET=uuid.uuid4().hex, QUIZ_PUBLIC_ORIGIN=origin, QUIZ_PHOTO_ANSWERS_ENABLED='1')
     for k in ('QUIZ_WORKER_ENABLED', 'AI_AUTOMATION_ENABLED', 'AI_QUEUE_AUTOPLAN', 'AI_FULL_CORPUS_ENABLED', 'QUIZ_DAILY_PREP_ENABLED', 'DEEPSEEK_API_AUTHORIZED', 'DEEPSEEK_PRIVATE_DATA_AUTHORIZED', 'NOTION_SYNC_ENABLED'):
         env[k] = '0'
     tls = ssl.create_default_context(cafile=str(root/'ca.crt'))

@@ -6,8 +6,33 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 from app.training_sessions import server_now
 from app.question_quality import Blueprint
-from app.training_spec import default_blueprint
+from app import training_spec_v4 as current_spec
 from app.quiz_v2 import create_paper, BankShortage, PreparationPaused
+
+
+def selected_daily_blueprint(env):
+    """New daily papers always use the 60q/300pt v4 specification.
+
+    An unset variable means v4. Any other value (including the retired 28q
+    and v2 IDs) fails closed rather than preparing an old exam. Stored 28q and
+    v2 papers keep their own blueprint and are never re-planned here.
+    """
+    spec = env.get("QUIZ_DAILY_SPECIFICATION", "") or current_spec.SPECIFICATION
+    if spec == current_spec.SPECIFICATION:
+        return Blueprint.model_validate(current_spec.default_blueprint())
+    raise ValueError("unknown_daily_training_specification")
+
+
+def verified_daily_paper_response(paper, blueprint):
+    """A preexisting historical 28q paper must never appear as a 60q success."""
+    if blueprint.specification != current_spec.SPECIFICATION:
+        return paper
+    if (paper.get("mode") != "reviewed_60"
+        or paper.get("blueprint", {}).get("specification") != current_spec.SPECIFICATION
+        or paper.get("count") != current_spec.TOTAL_QUESTIONS
+        or paper.get("max_points") != current_spec.TOTAL_POINTS):
+        raise ValueError("daily_60q_paper_not_proven")
+    return paper
 
 
 def prepare_daily(conn):
@@ -16,7 +41,7 @@ def prepare_daily(conn):
     now = server_now(conn).astimezone(ZoneInfo("Asia/Shanghai"))
     if now.hour < 20:
         return 0
-    blueprint = Blueprint.model_validate(default_blueprint())
+    blueprint = selected_daily_blueprint(os.environ)
     done = 0
     for user in conn.execute("SELECT id FROM users ORDER BY id LIMIT 100").fetchall():
         key = f"daily:{user['id']}:{now.date()}"
@@ -37,7 +62,10 @@ def prepare_daily(conn):
         try:
             with conn.transaction():
                 conn.execute("SET LOCAL statement_timeout='30s'")
-                paper = create_paper(conn, user["id"], blueprint, now.date())
+                paper = verified_daily_paper_response(
+                    create_paper(conn, user["id"], blueprint, now.date()),
+                    blueprint,
+                )
             conn.execute(
                 "UPDATE automation_jobs SET state='prepared',paper_id=%s,attempts=attempts+1,error=NULL WHERE job_key=%s",
                 (paper["paper_id"], key),

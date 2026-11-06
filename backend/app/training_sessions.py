@@ -1,12 +1,29 @@
 """Server-clock timed sessions. All writes lock the paper then its session."""
 
 import json
+import os
 from datetime import timedelta
 
 from psycopg.types.json import Jsonb
 
 from app.training_spec import DURATION_SECONDS, validate_items
+from app import training_spec_v2, training_spec_v4
 from app.question_quality import normalize_answer
+
+
+def validate_paper_items(conn, paper_id, items):
+    row = conn.execute("SELECT blueprint FROM papers_v2 WHERE id=%s", (paper_id,)).fetchone()
+    if not row:
+        raise LookupError("Paper not found")
+    for module in (training_spec_v4, training_spec_v2):
+        if row["blueprint"].get("specification") == module.SPECIFICATION:
+            return module.validate_items(items)
+    return validate_items(items)
+
+
+def photo_answers_enabled():
+    """Typed answers only: photographed answers cannot be graded, so the entry is off by default."""
+    return os.environ.get("QUIZ_PHOTO_ANSWERS_ENABLED") == "1"
 
 
 def server_now(conn):
@@ -28,7 +45,7 @@ def start(conn, user_id, paper_id):
         items = conn.execute(
             "SELECT snapshot FROM paper_items_v2 WHERE paper_id=%s", (paper_id,)
         ).fetchall()
-        validate_items([i["snapshot"] for i in items])
+        validate_paper_items(conn, paper_id, [i["snapshot"] for i in items])
         if conn.execute(
             "SELECT 1 FROM attempts_v2 WHERE paper_id=%s", (paper_id,)
         ).fetchone():
@@ -86,8 +103,12 @@ def valid_value(conn, paper_id, question_id, value):
         "blanks",
         "image_ids",
         "flagged",
+        "seconds",
     }:
         raise ValueError("Invalid draft shape")
+    seconds = value.get("seconds", 0)
+    if type(seconds) is not int or not 0 <= seconds <= 7200:
+        raise ValueError("Invalid time spent")
     text = value.get("text", "")
     blanks = value.get("blanks", [])
     images = value.get("image_ids", [])
@@ -110,6 +131,8 @@ def valid_value(conn, paper_id, question_id, value):
         or any(type(i) is not int for i in images)
     ):
         raise ValueError("At most five image IDs are allowed")
+    if images and not photo_answers_enabled():
+        raise ValueError("Photo answers are turned off; please type your answer")
     if images and q["question_type"] in ("single_choice", "fill_blank"):
         raise ValueError("Images are only supported for subjective answers")
     for image_id in images:
@@ -126,12 +149,19 @@ def valid_value(conn, paper_id, question_id, value):
         raise ValueError("Single choice answer must be A-D")
     if type(value.get("flagged", False)) is not bool:
         raise ValueError("Flag must be boolean")
-    return {
+    previous = conn.execute(
+        "SELECT value->>'seconds' AS s FROM answer_drafts WHERE paper_id=%s AND question_id=%s",
+        (paper_id, question_id),
+    ).fetchone()
+    # Time spent only ever grows: a stale tab or an older client cannot erase it.
+    spent = max(seconds, int(previous["s"]) if previous and (previous["s"] or "").isdigit() else 0)
+    kept = {
         "text": text,
         "blanks": blanks,
         "image_ids": images,
         "flagged": value.get("flagged", False),
     }
+    return {**kept, "seconds": spent} if spent else kept
 
 
 def assert_writable(conn, user_id, paper_id, expected_version):
@@ -210,7 +240,7 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
         "SELECT question_id,snapshot FROM paper_items_v2 WHERE paper_id=%s ORDER BY position",
         (paper_id,),
     ).fetchall()
-    validate_items([i["snapshot"] for i in items])
+    validate_paper_items(conn, paper_id, [i["snapshot"] for i in items])
     drafts = {
         r["question_id"]: r["value"]
         for r in conn.execute(
@@ -279,15 +309,31 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
                 Jsonb(feedback) if feedback else None,
             ),
         )
+        spent = value.get("seconds")
+        if type(spent) is int and 0 < spent <= 7200:
+            conn.execute(
+                "INSERT INTO answer_timings(attempt_id,question_id,seconds) VALUES (%s,%s,%s)",
+                (aid, qid, spent),
+            )
         if answered and points is not None and points < q["max_points"]:
             schedule_review(conn, aid, qid)
     conn.execute(
         "UPDATE training_sessions SET submitted_at=%s,version=version+1 WHERE paper_id=%s",
         (submitted_at, paper_id),
     )
-    from app.archiving import enqueue
+    from app.notion_sync import enqueue
 
     enqueue(conn, user_id, paper_id)
+    if timed_out:
+        # Timeout finalization can run from the expiry worker, a draft retry
+        # or a read-only API request. It must have the same conditional grading
+        # dispatch as an explicit submit, even when the learner is offline.
+        # try_queue enforces provider/private-data authorization and never
+        # performs a paid model call in this transaction. Job keys are
+        # idempotent; a later submit retry cannot duplicate accepted grades.
+        from app.grading_activity import try_queue
+
+        try_queue(conn, user_id, paper_id)
 
 
 def expire_due(conn):

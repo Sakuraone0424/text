@@ -2,50 +2,46 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width,initial-scale=1,viewport-fit=cover"
-    />
-    <meta name="theme-color" content="#F6F8FA" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#F4F6FA" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0E1014" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="研习空间" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-192.png" />
     <title>肖涵 · 中科大考研智能答题 · 研习空间</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" />
+    <link rel="stylesheet" href="/static/tokens.css" />
     <link rel="stylesheet" href="/static/app.css" />
     <link rel="stylesheet" href="/static/training.css" />
+    <link rel="stylesheet" href="/static/views.css" />
+    <link rel="stylesheet" href="/static/motion.css" />
+    <link rel="stylesheet" href="/static/pages.css" />
   </head>
   <body class="training-app">
     <a class="skip-link" href="#main-content">跳到主要内容</a>
     <aside class="sidebar" aria-label="主导航">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">研</span
-        ><span>研习空间<small>中科大考研</small></span>
+        <span class="brand-mark" aria-hidden="true">研</span><span>研习空间<small>中科大考研</small></span>
       </div>
       <nav class="primary-nav" aria-label="学习导航">
-        <button data-view="home" aria-current="page">
-          <span aria-hidden="true">▦</span>首页
-        </button>
-        <button data-view="exam"><span aria-hidden="true">▤</span>考试</button>
-        <button data-view="mistakes">
-          <span aria-hidden="true">▱</span>错题
-        </button>
-        <button data-view="stats"><span aria-hidden="true">▥</span>统计</button>
-        <button data-view="profile">
-          <span aria-hidden="true">○</span>我的
-        </button>
+        <button data-view="home" aria-current="page"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9h12v-9"/></svg><span>首页</span></button>
+        <button data-view="practice"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h3"/></svg><span>练习</span></button>
+        <button data-view="mistakes"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="5"/><path d="M12 10v2.5l1.5 1"/></svg><span>错题</span></button>
+        <button data-view="profile"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.6-3.6 3.4-5.5 7-5.5s6.4 1.9 7 5.5"/></svg><span>我的</span></button>
       </nav>
-      <div class="sidebar-note">以真实证据为基础<br />让练习积累成进步。</div>
     </aside>
     <div class="workspace">
       <header class="site-header">
-        <div class="mobile-brand">
-          <span class="brand-mark" aria-hidden="true">研</span
-          ><strong>研习空间</strong>
-        </div>
-        <span class="desktop-title">学习工作台</span>
-        <div class="header-actions">
-          <span id="connection-state" class="connection"><i></i>在线</span
-          ><button class="avatar" data-view="profile" aria-label="个人与设置">
-            我
-          </button>
-        </div>
+        <div class="mobile-brand"><span class="brand-mark" aria-hidden="true">研</span><strong>研习空间</strong></div>
+        <span class="desktop-title">学习数据</span>
+        <div class="header-actions"><span id="connection-state" class="connection"><i></i>在线</span></div>
       </header>
       <main id="main-content" class="shell" tabindex="-1">
         <form id="login" class="login-card">
@@ -54,271 +50,217 @@
           <p class="muted">登录后准备试卷；只有确认开始，才会启动计时。</p>
           <label for="password">访问密码</label>
           <div class="login-fields">
-            <input
-              type="password"
-              id="password"
-              autocomplete="current-password"
-              placeholder="输入你的独立登录密码"
-              required
-            /><button class="primary" type="submit">
-              进入学习空间 <span aria-hidden="true">→</span>
-            </button>
+            <input type="password" id="password" autocomplete="current-password" placeholder="输入你的独立登录密码" required />
+            <button class="primary" type="submit">进入学习空间 <span aria-hidden="true">→</span></button>
           </div>
         </form>
-        <p id="status" class="status-message" role="status" aria-live="polite">
-          正在确认登录状态…
-        </p>
+        <p id="status" class="status-message" role="status" aria-live="polite"></p>
         <section id="conflict" class="conflict-card" role="alert" hidden>
           <h2>发现另一台设备的较新答案</h2>
           <p>本机答案仍然保留，自动同步已暂停。请先核对，再选择保留的版本。</p>
           <div class="button-row">
-            <button id="remote" class="secondary">使用服务端版本</button
-            ><button id="local" class="primary">核对后同步本机答案</button>
+            <button id="remote" class="secondary">使用服务端版本</button><button id="local" class="primary">核对后同步本机答案</button>
           </div>
         </section>
+        <aside id="a2hs-hint" class="a2hs-hint" role="note" hidden>
+          <p><strong>添加到主屏幕</strong>：点 Safari 的「分享」→「添加到主屏幕」。添加后需要重新登录一次，之后像 App 一样打开。</p>
+          <button id="a2hs-dismiss" type="button" class="text-button">知道了</button>
+        </aside>
 
         <section data-page="home" id="home-view">
-          <div class="page-heading">
-            <div>
-              <p class="eyebrow" id="today-label">中科大考研 · 学习工作台</p>
-              <h1>每一次练习，<br class="mobile-only" />都离目标更近一步。</h1>
-              <p class="muted">专注当下，循证学习。</p>
+          <header class="page-head">
+            <p class="date-line" id="today-label">&nbsp;</p>
+            <h1>学习数据</h1>
+          </header>
+          <p id="quota-banner" class="notice" role="status" hidden></p>
+          <section class="card key-card hero-card" aria-label="倒计时与今日训练卷">
+            <div class="hero-top">
+              <div class="hero-stat">
+                <span class="stat-label" id="exam-label">距 12 月 19 日初试</span>
+                <p><strong id="days-left" class="countdown">—</strong><span class="unit">天</span></p>
+              </div>
+              <div class="hero-stat right">
+                <span class="stat-label">连续刷题</span>
+                <p><strong id="streak-days" class="streak">—</strong><span class="unit">天</span></p>
+              </div>
             </div>
-            <span class="quiet-badge">双科 · 正式28题</span>
-          </div>
-          <div class="dashboard-grid">
-            <section class="card today-card">
-              <div class="card-heading">
-                <div>
-                  <span class="eyebrow">TODAY'S PRACTICE</span>
-                  <h2>今日考试</h2>
-                </div>
-                <span id="paper-state" class="pill">状态待载入</span>
-              </div>
-              <div class="exam-spec">
-                <div>
-                  <strong>28<small>题</small></strong
-                  ><span>双科正式试卷</span>
-                </div>
-                <div>
-                  <strong>150<small>分</small></strong
-                  ><span>完整评分标准</span>
-                </div>
-                <div>
-                  <strong>60<small>分钟</small></strong
-                  ><span>服务端限时</span>
-                </div>
-              </div>
-              <div class="subject-tags">
-                <span><i class="dot blue"></i>生物化学 · 14题 / 75分</span
-                ><span><i class="dot green"></i>细胞生物学 · 14题 / 75分</span>
-              </div>
-              <button id="prepare" class="primary hero-action">
-                开始今日考试 <span aria-hidden="true">↗</span>
-              </button>
-              <p id="prepare-note" class="micro-note">
-                先准备试卷，确认后才开始60分钟计时
-              </p>
-            </section>
-            <section class="card overview-card">
-              <div class="card-heading">
-                <h2>学习概览</h2>
-                <span class="muted small">正式28题档案</span>
-              </div>
-              <div class="metrics">
-                <div>
-                  <strong id="metric-submitted">—</strong
-                  ><span>已提交试卷</span>
-                </div>
-                <div>
-                  <strong id="metric-graded">—</strong><span>完整判分</span>
-                </div>
-                <div>
-                  <strong id="metric-due">—</strong><span>到期复习</span>
-                </div>
-              </div>
-              <p id="overview-note" class="card-footnote">
-                登录后读取你的真实学习记录。
-              </p>
-              <button class="text-button" data-action="history">
-                查看历史档案 <span aria-hidden="true">→</span>
-              </button>
-            </section>
-            <section class="card">
-              <div class="card-heading">
-                <h2>科目表现</h2>
-                <span class="muted small">近7天</span>
-              </div>
-              <div id="subject-performance" class="subject-performance">
-                <p class="muted">登录后查看已判分数据。</p>
-              </div>
-              <p class="card-footnote">
-                已判分得分率：得分 ÷
-                已判分满分。包含未答0分，排除待批题；不等同知识掌握率。
-              </p>
-            </section>
-            <section class="card trend-card">
-              <div class="card-heading">
-                <h2>成绩趋势</h2>
-                <span class="muted small">最近完整判分试卷</span>
-              </div>
-              <div id="score-trend" class="empty-state">
-                <span class="empty-icon" aria-hidden="true">↗</span
-                ><strong>让进步留下轨迹</strong>
-                <p>完成考试后查看成绩趋势。</p>
-              </div>
-            </section>
-            <section class="card weak-card">
-              <div class="card-heading">
-                <h2>薄弱章节</h2>
-                <button class="text-button" data-action="weekly">
-                  查看分析 →
-                </button>
-              </div>
-              <div id="weak-chapters" class="empty-state compact">
-                <span class="empty-icon" aria-hidden="true">◎</span
-                ><strong>从第一份答卷开始积累</strong>
-                <p>有已判分失分记录后，展示需要关注的章节。</p>
-              </div>
-            </section>
-            <section class="card review-card">
-              <div class="card-heading">
-                <h2>复习安排</h2>
-                <span class="pill blue-pill">FSRS</span>
-              </div>
-              <p id="review-summary" class="muted">登录后读取当前到期复习。</p>
-              <button class="secondary full-width" data-action="memory">
-                进入错题复测 <span aria-hidden="true">→</span>
-              </button>
-              <p class="card-footnote">
-                复习安排来自实际卡片，不根据题库数量推算。
-              </p>
-            </section>
-          </div>
+            <hr class="divider" />
+            <div class="today-block">
+              <h2>今日训练卷</h2>
+              <span id="paper-state" class="pill">状态待载入</span>
+            </div>
+            <p id="spec-summary" class="muted spec-line">生化 30 + 细胞 30 · 300 分 · 60 分钟</p>
+            <div id="bank-block" class="bank-block" hidden>
+              <div class="bank-line"><span>已入库 <strong id="bank-ready">—</strong> / <span id="bank-needed">60</span></span><span id="bank-eta"></span></div>
+              <p id="bank-updated" class="note"></p>
+              <div class="thin-bar" role="img" aria-label="题库进度"><i id="bank-bar"></i></div>
+            </div>
+            <p id="today-result" class="today-result" hidden></p>
+            <button id="prepare" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
+            <p id="prepare-note" class="micro-note">先准备试卷，确认后才开始60分钟计时</p>
+          </section>
+          <section class="stat-row" aria-label="近期成绩">
+            <div class="card stat-card"><span class="stat-label">近 7 次均分</span><strong id="stat-avg" class="none">—</strong><small id="stat-avg-note">做完首套后显示</small></div>
+            <div class="card stat-card"><span class="stat-label">客观题正确率</span><strong id="stat-objective" class="none">—</strong><small id="stat-objective-note">做完首套后显示</small></div>
+            <div class="card stat-card"><span class="stat-label">主观题得分率</span><strong id="stat-subjective" class="none">—</strong><small id="stat-subjective-note">判分后显示</small></div>
+          </section>
+          <section class="card weak-card" aria-labelledby="weak-title">
+            <div class="card-heading"><h2 id="weak-title">薄弱章节</h2><span class="muted small">按正确率</span></div>
+            <div id="weak-chapters"></div>
+            <button id="weak-practice" class="text-button" type="button" hidden>再练一套薄弱题 →</button>
+            <button id="weak-all" class="text-button" type="button" hidden>查看全部 →</button>
+          </section>
+          <section class="quick-row" aria-label="快捷入口">
+            <button class="card quick-card" data-action="memory" id="quick-review" type="button">
+              <span class="quick-title">错题复习</span><span class="quick-line" id="quick-review-line">今日没有到期</span><b id="metric-due" hidden>0</b>
+            </button>
+            <a class="card quick-card" href="#/progress" id="open-progress">
+              <span class="quick-title">出题进度</span><span class="quick-line" id="quick-progress-line">已入库 <b id="tomorrow-ready">—</b></span>
+            </a>
+          </section>
+        </section>
+
+<section data-page="practice" id="practice-view" hidden>
+          <header class="page-head"><h1>练习</h1></header>
+          <section class="card key-card today-card" id="practice-today" aria-label="今日训练卷">
+            <div class="today-block"><h2>今日训练卷</h2><span id="practice-paper-state" class="pill">状态待载入</span></div>
+            <p class="muted spec-line" id="practice-spec">生化 30 + 细胞 30 · 300 分 · 60 分钟</p>
+            <p id="practice-today-note" class="note"></p>
+            <button id="practice-today-btn" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
+            <details class="paper-info"><summary>卷面说明</summary>
+              <p class="muted small">60 题 · 生物化学、细胞生物学各 30 题 · 共 300 分 · 作答 60 分钟。每科 10 道单选、14 道填空、4 道名词解释、1 道简答、1 道问答。</p>
+            </details>
+          </section>
+          <section aria-labelledby="practice-grid-title">
+            <div class="card-heading"><h2 id="practice-grid-title">专项练习</h2><span class="muted small">不计入每日成绩和连续天数</span></div>
+            <div id="practice-grid" class="practice-grid"></div>
+          </section>
+          <section id="practice-panel" class="card practice-panel" hidden aria-live="polite"></section>
+          <section class="card" aria-labelledby="recent-title">
+            <div class="card-heading"><h2 id="recent-title">最近训练</h2></div>
+            <ul id="recent-list" class="recent-list"></ul>
+            <button id="recent-all" class="text-button" type="button" hidden>查看全部 →</button>
+          </section>
         </section>
 
         <section data-page="exam" id="exam-view" hidden>
           <div id="exam-intro" class="card exam-intro">
-            <span class="eyebrow">FOCUS SESSION</span>
+            <span class="eyebrow">今日训练</span>
             <h1>为这60分钟，留一点专注。</h1>
-            <p class="muted">
-              唯一训练规格：28题 · 生物化学、细胞生物学各14题75分 · 共150分 ·
-              作答60分钟
-            </p>
+            <p class="muted">唯一新版训练规格：60题 · 生物化学、细胞生物学各30题150分 · 共300分 · 作答60分钟</p>
             <div class="blueprint-list">
-              <span>每科3道单选</span><span>3道填空</span
-              ><span>4道名词解释</span><span>3道简答</span><span>1道论述</span>
+              <span>每科10道单选</span><span>14道填空</span><span>4道名词解释</span><span>1道简答</span><span>1道问答</span>
             </div>
-            <p id="intro-state">
-              请先在首页准备试卷。准备与正式开始计时是两个独立步骤。
-            </p>
-            <button id="start" class="primary" hidden>确认开始 · 60分钟</button
-            ><button class="secondary" data-prepare-proxy>准备今日试卷</button>
-            <p class="card-footnote">
-              正式开始后，切换页面或离线均不会暂停计时。
-            </p>
+            <p id="intro-state">请先在首页准备试卷。准备与正式开始计时是两个独立步骤。</p>
+            <button class="primary" id="open-start" type="button" hidden>开始（60 分钟）</button>
+            <button class="secondary" data-prepare-proxy>准备今日试卷</button>
+            <p class="card-footnote">正式开始后，切换页面或离线均不会暂停计时。</p>
           </div>
           <div class="focus-toolbar toolbar" id="focus-toolbar" hidden>
             <div class="focus-topline">
-              <button
-                id="leave-focus"
-                class="icon-button"
-                aria-label="返回学习概览，考试计时继续"
-              >
-                ←
+              <button id="leave-focus" class="icon-button" aria-label="返回学习概览，考试计时继续">
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
               </button>
-              <div class="focus-current">
-                <span id="current-subject">双科正式考试</span
-                ><strong
-                  ><span id="current-number">—</span
-                  ><span class="muted"> / 28</span>
-                  <small id="current-points"></small
-                ></strong>
-              </div>
-              <div class="timer-box">
-                <span>剩余时间</span
-                ><b id="clock" role="timer" aria-label="剩余考试时间"
-                  >尚未开始</b
-                >
-              </div>
+              <div class="timer-box"><b id="clock" role="timer" aria-label="剩余考试时间">尚未开始</b><span>剩余时间</span></div>
+              <button id="question-map" class="map-button" aria-haspopup="dialog">答题卡 <span id="map-progress">0/60</span></button>
+            </div>
+            <progress id="answer-progress" max="60" value="0" aria-label="已作答题目进度"></progress>
+            <div class="focus-progress">
+              <span class="position"><span id="current-number">—</span><span class="muted"> / 60</span></span>
+              <span id="progress">已答 0 / 60</span>
+              <span id="save-state">草稿尚未开始</span>
               <button id="submit" class="submit-button" hidden>交卷</button>
             </div>
-            <div class="focus-progress">
-              <span id="progress">已答 0 / 28</span
-              ><span id="save-state">草稿尚未开始</span>
-            </div>
-            <progress
-              id="answer-progress"
-              max="28"
-              value="0"
-              aria-label="已作答题目进度"
-            ></progress>
+          </div>
+          <div id="question-tags" class="tag-row" hidden>
+            <span id="current-subject" class="tag subject-tag">双科正式考试</span>
+            <span id="current-points" class="tag grey-tag"></span>
           </div>
           <section id="questions" aria-label="试卷题目" hidden inert></section>
+          <div class="focus-secondary" hidden>
+            <button id="toggle-mark" class="mark-button" aria-pressed="false">☆ 标记稍后看</button>
+          </div>
+          <div id="result-bar" class="subbar" hidden>
+            <button id="result-back" class="icon-button" aria-label="返回首页"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <h1 id="result-title">训练卷成绩</h1>
+            <span></span>
+          </div>
           <section id="result" aria-label="考试成绩与解析"></section>
           <div id="focus-actions" class="focus-actions" hidden>
-            <button id="previous-question" class="secondary">← 上一题</button
-            ><button id="toggle-mark" class="mark-button" aria-pressed="false">
-              ☆ 标记</button
-            ><button id="next-question" class="primary">下一题 →</button
-            ><button
-              id="question-map"
-              class="map-button"
-              aria-haspopup="dialog"
-            >
-              答题卡 <span id="map-progress">0/28</span>
-            </button>
+            <button id="previous-question" class="secondary">上一题</button>
+            <button id="next-question" class="primary">下一题</button>
           </div>
         </section>
 
         <section data-page="mistakes" id="mistakes-view" hidden>
-          <div class="page-heading">
-            <div>
-              <p class="eyebrow">REVIEW & REMEMBER</p>
-              <h1>让错题，成为下一次的底气。</h1>
-              <p class="muted">回忆、核对、反馈。用实际FSRS记录安排复习。</p>
+          <header class="page-head"><h1>错题</h1></header>
+          <section class="card key-card due-card" aria-label="今日到期复习">
+            <div class="due-row">
+              <div><span class="stat-label">今日到期复习</span><p><span id="due-number" class="due-number zero">0</span><span class="unit">道</span></p></div>
+              <div class="due-side"><span class="stat-label">未来 7 天</span><div id="due-mini" class="week-bars" role="img" aria-label="未来 7 天每天到期的数量"></div></div>
             </div>
-          </div>
-          <button id="memory" class="primary">读取到期复测</button>
+            <p id="due-note" class="muted small"></p>
+            <button id="memory" class="primary full-width" disabled aria-disabled="true">今日没有到期复习</button>
+          </section>
           <div id="mistakes-content"></div>
-        </section>
-        <section data-page="stats" id="stats-view" hidden>
-          <div class="page-heading">
-            <div>
-              <p class="eyebrow">LEARNING ANALYTICS</p>
-              <h1>用数据，看清下一步。</h1>
-              <p class="muted">
-                已判分与待批改分别统计，不把待批题算成对或错。
-              </p>
+          <section class="card" aria-labelledby="mistake-list-title">
+            <div class="card-heading"><h2 id="mistake-list-title">错题本</h2>
+              <div class="segmented" id="mistake-mode" role="group" aria-label="分组方式"><button type="button" data-mode="due" aria-pressed="true">按到期</button><button type="button" data-mode="chapter" aria-pressed="false">按章节</button></div></div>
+            <div class="filter-line" id="mistake-filter-line">
+              <div class="chips" id="filter-subject" role="group" aria-label="科目"></div>
+              <button id="filter-toggle" class="text-button" type="button" aria-expanded="false" aria-controls="filter-more">筛选 ▾</button>
             </div>
+            <div id="filter-more" class="filter-more" hidden>
+              <div class="chip-scroll"><div class="chips" id="filter-type" role="group" aria-label="题型"></div></div>
+              <label class="filter-row"><span>章节</span><select id="filter-chapter" aria-label="章节"><option value="">全部章节</option></select></label>
+            </div>
+            <div id="mistake-groups" class="mistake-groups"></div>
+            <div id="mistake-empty" class="empty-line" hidden><span>还没有错题，判分后失分的题会出现在这里</span></div>
+          </section>
+        </section>
+        <section data-page="mistake" id="mistake-view" hidden>
+          <div class="subbar"><button class="icon-button" data-back aria-label="返回错题"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>错题详情</h1><span></span></div>
+          <div id="mistake-detail"></div>
+          <div class="sticky-action" id="mistake-action" hidden><button id="mistake-review" class="primary full-width" type="button">复习这道</button></div>
+        </section>
+        <section data-page="review" id="review-view" hidden>
+          <div class="subbar"><button class="icon-button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="review-title">整卷回看</h1><span></span></div>
+          <div id="review-body"></div>
+        </section>
+        <section data-page="drill" id="drill-view" class="drill" hidden aria-label="专项练习答题"></section>
+        <section data-page="stats" id="stats-view" hidden>
+          <div class="subbar">
+            <button id="stats-back" class="icon-button" aria-label="返回我的"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <h1>历史与统计</h1>
+            <span></span>
           </div>
           <div class="button-row">
             <button id="weekly" class="secondary">近7天章节统计</button
             ><button id="insights" class="secondary">学习建议</button
-            ><button id="history" class="secondary">历史只读档案</button>
+            ><button id="history" class="secondary">历史试卷</button>
+            <button id="source-status" class="secondary">教材与题库核验</button>
           </div>
           <div id="stats-content"></div>
         </section>
         <section data-page="profile" id="profile-view" hidden>
-          <div class="page-heading">
-            <div>
-              <p class="eyebrow">YOUR LEARNING SPACE</p>
-              <h1>我的学习空间</h1>
-              <p class="muted">低频设置集中管理，学习时保持专注。</p>
-            </div>
-          </div>
+          <header class="page-head"><h1>我的学习数据</h1></header>
+          <div id="profile-data" class="data-stack" aria-live="polite"><p class="muted">登录后读取你的真实学习记录。</p></div>
+          <h2 class="section-title">设置与档案</h2>
           <section class="card settings-list">
             <button id="profile-history" data-action="history">
               <span
-                >历史只读档案<small>保留原始成绩与题目，不改写历史</small></span
+                >历史试卷<small>每套卷子的成绩、错题和整卷回看</small></span
               ><span aria-hidden="true">→</span></button
             ><button data-action="insights">
               <span>学习建议<small>仅显示已有真实报告</small></span
               ><span aria-hidden="true">→</span></button
-            ><a href="/static/model.html"
+            ><a href="#/progress"
+              ><span>出题进度<small>库存、被挡住的原因、费用、出题程序状态</small></span
+              ><span aria-hidden="true">→</span></a
+            ><a href="#/model"
               ><span
-                >模型与思考设置<small
-                  >查看设置不代表启用自动模型任务</small
+                >模型与费用<small
+                  >模型、费用上限、并发与价格</small
                 ></span
               ><span aria-hidden="true">→</span></a
             ><button id="archive">
@@ -332,17 +274,229 @@
           </section>
           <div id="profile-content"></div>
         </section>
+        <section data-page="progress" id="progress-view" class="view view-progress" hidden>
+          <header class="subbar"><button class="icon-button" type="button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>出题进度</h1><span></span></header>
+          <div id="pv-skeleton" class="skeleton-stack" aria-hidden="true"><div class="skeleton card-sk tall"></div><div class="skeleton card-sk"></div><div class="skeleton card-sk"></div></div>
+          <div id="pv-error" class="error-card" role="alert" hidden><p id="pv-error-text"></p><button id="pv-retry" class="secondary" type="button">重试</button></div>
+          <div id="pv-content" class="stack" hidden>
+        <section class="card key" aria-labelledby="h-batch">
+          <div class="hero">
+            <div id="rate-ring" class="ring" role="img" aria-label="今日审核通过率"><svg viewBox="0 0 80 80" aria-hidden="true"><circle class="ring-track" cx="40" cy="40" r="34"/><circle id="ring-arc" class="ring-arc" cx="40" cy="40" r="34" pathLength="100"/></svg><span class="ring-text"><b id="review-rate"></b><small>今日通过率</small></span></div>
+            <div class="hero-main">
+              <h2 id="h-batch" class="label">首批目标已入库</h2>
+              <p class="big"><b id="batch-number"></b><span id="batch-target" class="unit"></span></p>
+              <div id="batch-progress"></div>
+              <p id="admitted-today" class="note" hidden></p>
+            </div>
+          </div>
+          <div class="tiles">
+            <div class="tile"><span class="label">当前时段</span><b id="period"></b></div>
+            <div class="tile"><span class="label">后台服务</span><b id="worker"></b></div>
+            <div class="tile"><span class="label">凑齐一张卷</span><b id="paper-main"></b></div>
+          </div>
+          <p id="paper-note" class="note"></p>
+          <p id="price-note" class="note warn" role="status" hidden></p>
+          <p id="pace-note" class="note" role="status"></p>
+          <p id="platform-note" class="note warn" role="status" hidden></p>
+          <p id="worker-note" class="note"></p>
+        </section>
+        <section class="card" aria-labelledby="h-bank">
+          <div class="card-head">
+            <h2 id="h-bank">题库库存</h2>
+            <div class="segmented" role="group" aria-label="科目">
+              <button type="button" data-subject="biochemistry" aria-pressed="true">生化</button>
+              <button type="button" data-subject="cell_biology" aria-pressed="false">细胞</button>
+            </div>
+          </div>
+          <p id="bank-label" class="note">已入库 / 目标</p>
+          <div id="bank"></div>
+          <details id="legacy" class="legacy" hidden>
+            <summary id="legacy-summary"></summary>
+            <ul id="legacy-list" class="legacy-list"></ul>
+          </details>
+        </section>
+        <section class="card" aria-labelledby="h-funnel">
+          <div class="card-head"><h2 id="h-funnel">今日出题漏斗</h2></div>
+          <div id="funnel-types" class="segmented wrap" role="group" aria-label="题型"></div>
+          <div id="funnel"></div>
+        </section>
+        <section class="card" aria-labelledby="h-waste">
+          <h2 id="h-waste">近 24 小时被挡原因</h2>
+          <div id="waste"></div>
+        </section>
+        <section class="card" id="grading-card" aria-labelledby="h-grading" hidden>
+          <h2 id="h-grading">待判分的题</h2>
+          <p id="grading-note" class="muted"></p>
+          <ul id="grading-reasons" class="plain-list"></ul>
+          <div id="grading-papers" class="button-row"></div>
+        </section>
+        <section class="card" aria-labelledby="h-jobs">
+          <h2 id="h-jobs">最近任务</h2>
+          <ol id="jobs" class="jobs"></ol>
+        </section>
+        <section class="card" aria-labelledby="h-spend">
+          <div class="card-head">
+            <h2 id="h-spend">费用</h2>
+            <p class="quota"><b id="spend-month"></b></p>
+          </div>
+          <div id="spend-split"></div>
+          <div class="tiles four">
+            <div class="tile"><span class="label">今日</span><b id="spend-today"></b></div>
+            <div class="tile"><span class="label">每入库一题</span><b id="spend-per"></b></div>
+            <div class="tile"><span class="label">今日剩余</span><b id="spend-daily-left"></b></div>
+            <div class="tile"><span class="label">本月出题剩余</span><b id="spend-left"></b></div>
+          </div>
+          <div id="spend-chart"></div>
+          <details id="ledger" class="fold">
+            <summary>对账信息</summary>
+            <div class="tiles">
+              <div class="tile"><span class="label">实际已花</span><b id="ledger-actual"></b></div>
+              <div class="tile"><span class="label">预留中</span><b id="ledger-reserved"></b></div>
+              <div class="tile"><span class="label">上次对账</span><b id="ledger-checked"></b></div>
+            </div>
+            <p id="ledger-note" class="note"></p>
+            <p class="note">判分预留剩余 <span id="spend-grading"></span></p>
+          </details>
+          <p id="spend-note" class="note"></p>
+        </section>
+        <p id="updated" class="note center">正在读取…</p>
+      </div>
+        </section>
+        <section data-page="model" id="model-view" class="view view-model" hidden>
+          <header class="subbar"><button class="icon-button" type="button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>模型与费用</h1><span></span></header>
+          <div id="mv-skeleton" class="skeleton-stack" aria-hidden="true"><div class="skeleton card-sk tall"></div><div class="skeleton card-sk"></div><div class="skeleton card-sk"></div></div>
+          <div id="mv-error" class="error-card" role="alert" hidden><p id="mv-error-text"></p><button id="mv-retry" class="secondary" type="button">重试</button></div>
+          <div id="controls" class="stack" hidden>
+        <section class="card" aria-labelledby="h-model">
+          <h2 id="h-model">当前模型</h2>
+          <label class="field"><span class="label">模型</span><select id="model"></select></label>
+          <label class="field"><span class="label">思考强度</span><select id="effort"></select></label>
+          <label class="row switch"><span><b>自动发现</b><small>定期读取官方模型目录</small></span><input id="discover" type="checkbox" role="switch" /></label>
+          <label class="row switch"><span><b>允许升级</b><small>质量对比通过后才会切换</small></span><input id="upgrade" type="checkbox" role="switch" /></label>
+          <label class="row switch"><span><b>薄弱章节优先出题</b><small>做完至少 2 套卷子后，正确率低于 60% 的章节多出一些题（其余章节仍保留最低出题量）</small></span><input id="weak-focus" type="checkbox" role="switch" /></label>
+          <div class="field lines" id="mistake-lines">
+            <span class="label">主观题错题判定（按得分率）</span>
+            <label class="inline-field"><span>低于此值算错题</span><input id="mistake-below" type="number" inputmode="numeric" min="1" max="100" step="1" /> <em>%</em></label>
+            <label class="inline-field"><span>低于此值算待巩固，达到视为掌握</span><input id="consolidate-below" type="number" inputmode="numeric" min="1" max="100" step="1" /> <em>%</em></label>
+            <small class="note">名词解释、简答、问答用得分率判定；单选、填空仍是对错二分。例如 60% 和 85%：低于 60% 是错题，60%–85% 是待巩固，85% 及以上算掌握、不建复习卡。</small>
+          </div>
+          <p class="note">只影响新任务，已经在运行的任务保持原设置。</p>
+          <details><summary>说明</summary>
+            <p id="capabilities" class="note"></p>
+            <p class="note">AI 自动核验不保证 100% 科学正确。本地费用是估算，不代表官方账单。</p>
+          </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-ledger">
+          <h2 id="h-ledger">费用账本</h2>
+          <div class="usage">
+            <div><div class="limit-head"><span class="label">今日已用</span><span class="used" id="usage-day-text"></span></div><div id="usage-day"></div></div>
+            <div><div class="limit-head"><span class="label">本月已用</span><span class="used" id="usage-month-text"></span></div><div id="usage-month"></div></div>
+          </div>
+          <div class="tiles">
+            <div class="tile"><span class="label">今日剩余</span><b id="bl-day"></b></div>
+            <div class="tile"><span class="label">本月剩余</span><b id="bl-month"></b></div>
+            <div class="tile"><span class="label">累计预留</span><b id="bl-reserved"></b></div>
+            <div class="tile"><span class="label">待对账预留</span><b id="bl-unknown"></b></div>
+            <div class="tile"><span class="label">判分预留剩余</span><b id="bl-grading">—</b></div>
+            <div class="tile"><span class="label">调用次数</span><b id="bl-calls"></b></div>
+            <div class="tile"><span class="label">官方账单</span><b id="bl-invoice"></b></div>
+          </div>
+          <p id="bl-period" class="note"></p>
+          <details class="fold"><summary>说明</summary>
+            <p class="note">这些是应用记录的估算和预留，不是官方账单；官方账单对账后会修正。预留是每次调用前按最坏情况先留出的额度，调用结束后按实际用量结算。</p>
+          </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-limits">
+          <h2 id="h-limits">费用上限</h2>
+          <div class="limit">
+            <div class="limit-head"><span class="label">每日上限</span><span class="used" id="used-day"></span></div>
+            <div class="limit-input"><label class="mini-switch"><input id="daily-limit-enabled" type="checkbox" role="switch" aria-label="启用每日上限" /><span>启用</span></label><span class="yen">¥</span><input id="daily" type="number" inputmode="decimal" min="0" max="1000" step="0.01" aria-label="每日上限（元）" /></div>
+          </div>
+          <div class="limit">
+            <div class="limit-head"><span class="label">每月上限</span><span class="used" id="used-month"></span></div>
+            <div class="limit-input"><label class="mini-switch"><input id="monthly-limit-enabled" type="checkbox" role="switch" aria-label="启用每月上限" /><span>启用</span></label><span class="yen">¥</span><input id="monthly" type="number" inputmode="decimal" min="0" max="10000" step="0.01" aria-label="每月上限（元）" /></div>
+          </div>
+          <div class="limit">
+            <div class="limit-head"><span class="label">单任务上限（含重试）</span><span class="used" id="used-task"></span></div>
+            <div class="limit-input"><label class="mini-switch"><input id="task-limit-enabled" type="checkbox" role="switch" aria-label="启用单任务上限" /><span>启用</span></label><span class="yen">¥</span><input id="task-budget" type="number" inputmode="decimal" min="0" max="1000" step="0.01" aria-label="单任务上限（元）" /></div>
+          </div>
+          <details><summary>说明与累计试验上限</summary>
+            <p class="note">应用侧预算不是平台硬性扣费限额。关闭某项上限后，仍受已授权任务、并发、超时和异常停止保护。</p>
+            <label class="row switch"><span><b>累计试验上限</b><small>关闭不会删除历史预留</small></span><input id="trial-active" type="checkbox" role="switch" /></label>
+            <div class="limit-input"><span class="yen">¥</span><input id="trial-budget" type="number" inputmode="decimal" min="0" max="10000" step="0.01" aria-label="累计试验上限（元）" /></div>
+          </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-run">
+          <h2 id="h-run">运行设置</h2>
+          <label class="field"><span class="label">最大并发（同时进行的请求数）</span>
+            <select id="max-concurrency"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></label>
+          <label class="field"><span class="label">输出长度上限（Token）</span><input id="token-limit" type="number" inputmode="numeric" min="128" max="32768" step="1" /></label>
+          <label class="field"><span class="label">失败重试次数</span><input id="retry-limit" type="number" inputmode="numeric" min="0" max="5" step="1" /></label>
+          <details><summary>说明</summary>
+            <p class="note">并发越高，一次运行完成得越快，但临近额度时更早被挡住。建议 2–3。</p>
+            <p class="note">每次尝试只发一次官方请求；超时或结果不确定时，按预留额度计入并暂停，不会重复扣费。</p>
+          </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-price">
+          <div class="card-head"><h2 id="h-price">价格</h2><button id="price-refresh" class="small-button" type="button">刷新价格</button></div>
+          <div id="price"></div>
+          <p id="price-note" class="note"></p>
+        </section>
+
+        <section class="card" aria-labelledby="h-probe">
+          <h2 id="h-probe">连通测试</h2>
+          <div id="probes"></div>
+          <details><summary>说明</summary>
+            <p class="note">只发送合成算术，不发送教材。需要服务端授权与预算；排队不代表调用成功。</p>
+          </details>
+        </section>
+
+        <details class="card more">
+          <summary>更多</summary>
+          <div class="more-body">
+            <button id="refresh" class="secondary" type="button">刷新官方目录</button>
+            <details><summary>费用与模型历史</summary><pre id="billing-history"></pre></details>
+            <details><summary>私有备份</summary>
+              <p class="note">仅在已授权的非生产环境生成。ZIP 含教材和学习数据，不含登录凭据，请保存到自己的文件位置，不要公开上传。</p>
+              <button id="backup" class="secondary" type="button">生成并准备下载最新备份</button>
+              <p id="backup-info" class="note"></p>
+              <a class="secondary" href="/v2/model/backup/download" download>下载私有 ZIP</a>
+            </details>
+            <form id="command">
+              <label class="field"><span class="label">模型命令</span><input id="text" placeholder="/model help" maxlength="100" /></label>
+              <button class="secondary" type="submit">执行</button>
+            </form>
+            <pre id="help"></pre>
+          </div>
+        </details>
+
+        <section class="card danger" aria-labelledby="h-danger">
+          <h2 id="h-danger">危险操作</h2>
+          <p id="stop-note" class="note"></p>
+          <button id="stop-toggle" class="danger-button" type="button">停止 AI 任务</button>
+          <button id="default" class="danger-button" type="button">恢复默认（并暂停任务）</button>
+        </section>
+      </div>
+          <div id="savebar" class="savebar" hidden>
+      <p id="dirty-note" class="note" role="status">没有未保存的改动</p>
+      <button id="save" class="primary" type="button" disabled>保存</button>
+    </div>
+          <p id="message" class="toast" role="status" aria-live="polite"></p>
+        </section>
         <section id="learning" aria-live="polite"></section>
       </main>
     </div>
     <dialog
       id="question-dialog"
-      class="question-dialog"
+      class="question-dialog sheet"
       aria-labelledby="map-title"
     >
       <div class="dialog-heading">
         <div>
-          <span class="eyebrow">QUESTION MAP</span>
           <h2 id="map-title">答题卡</h2>
         </div>
         <button
@@ -364,23 +518,43 @@
       <p id="map-summary" class="card-footnote"></p>
       <button id="map-submit" class="primary full-width">检查并交卷</button>
     </dialog>
+    <dialog id="start-dialog" class="start-dialog sheet" aria-labelledby="start-title">
+      <h2 id="start-title">开始今日训练卷</h2>
+      <p>开始后计时不会暂停。</p>
+      <div class="button-row"><button id="cancel-start" class="secondary" type="button">再等等</button><button id="start" class="primary" type="button">确认开始 · 60 分钟</button></div>
+    </dialog>
     <dialog
       id="submit-dialog"
-      class="submit-dialog"
+      class="submit-dialog sheet"
       aria-labelledby="submit-title"
     >
-      <span class="eyebrow">FINAL CHECK</span>
+      <span class="eyebrow">交卷前检查</span>
       <h2 id="submit-title">准备交卷了吗？</h2>
       <p id="submit-summary"></p>
+      <p id="submit-warning" class="submit-warning" role="status" hidden></p>
+      <button id="jump-unanswered" class="secondary full-width" type="button" hidden>
+        跳到第一道未答题 <span aria-hidden="true">→</span>
+      </button>
       <p class="muted">
-        交卷后不能修改。未答题按0分，已答主观题保留待批改；系统不会编造完整总成绩。
+        交卷后不能修改。未答题按0分，已答主观题由AI判分，判完前不显示总成绩；系统不会编造成绩。
       </p>
       <div class="button-row">
         <button id="cancel-submit" class="secondary">继续检查</button
         ><button id="confirm-submit" class="primary">确认统一交卷</button>
       </div>
     </dialog>
+    <script src="/static/motion.js" defer></script>
+    <script src="/static/data.js" defer></script>
+    <script src="/static/live.js" defer></script>
+    <script src="/static/charts.js" defer></script>
     <script src="/static/training-ui.js" defer></script>
+    <script src="/static/insights.js" defer></script>
+    <script src="/static/progress.js" defer></script>
+    <script src="/static/model.js" defer></script>
+    <script src="/static/manual.js" defer></script>
+    <script src="/static/drill.js" defer></script>
+    <script src="/static/pages.js" defer></script>
+    <script src="/static/shell.js" defer></script>
     <script src="/static/training.js" defer></script>
   </body>
 </html>

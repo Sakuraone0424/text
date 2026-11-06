@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import Field, StrictInt
 
-from app.auth import require_auth
+from app.auth import require_auth, same_secret
 from app.db import get_db
 from app.question_quality import (
     Audit,
@@ -21,14 +21,23 @@ from app.common import ensure_user
 from app.dynamic_model import Policy
 from app import quiz_v2 as service
 
-router = APIRouter(prefix="/v2", tags=["reviewed-28"])
+router = APIRouter(prefix="/v2", tags=["reviewed-training"])
 
 
 @router.get("/training-specification")
 def training_specification():
-    from app.training_spec import formal_specification
+    # Local isolated regression fixtures explicitly exercise pre-upgrade papers.
+    # Never expose this legacy preview in a deployed production environment.
+    if (
+        os.environ.get("QUIZ_QA_LEGACY_FIXTURE") == "1"
+        and os.environ.get("QUIZ_QA_LEGACY_FIXTURE_SCHEMA", "").startswith("quiz_live_test_")
+    ):
+        from app.training_spec import formal_specification
+    else:
+        from app.training_spec_v4 import formal_specification
+    from app.training_sessions import photo_answers_enabled
 
-    return formal_specification()
+    return {**formal_specification(), "photo_answers_enabled": photo_answers_enabled()}
 
 
 def require_reviewer(request: Request):
@@ -37,7 +46,7 @@ def require_reviewer(request: Request):
         raise HTTPException(
             503, "Review operations are disabled: QUIZ_REVIEW_API_KEY is not configured"
         )
-    if not hmac.compare_digest(request.headers.get("x-review-api-key", ""), configured):
+    if not same_secret(request.headers.get("x-review-api-key", ""), configured):
         raise HTTPException(403, "Reviewer authorization required")
 
 
@@ -114,6 +123,9 @@ def withdraw(question_id: int):
 
 @router.post("/papers")
 def paper(blueprint: Blueprint, username: str = Depends(require_auth)):
+    if (os.environ.get("QUIZ_DEPLOYMENT_PROFILE") == "ustc-exam-ocr-qa"
+            and blueprint.specification != "xiaohan-60q-300pt-v4"):
+        raise HTTPException(409, "QA training requires 60-question specification")
     return operation(lambda c, u: service.create_paper(c, u, blueprint), username)
 
 
@@ -123,23 +135,92 @@ def read_paper(paper_id: int, username: str = Depends(require_auth)):
 
 
 class Submission(StrictModel):
-    answers: dict[int, str | dict] = Field(default_factory=dict, max_length=28)
+    answers: dict[int, str | dict] = Field(default_factory=dict, max_length=60)
     expected_version: StrictInt = Field(default=0, ge=0)
 
 
 @router.post("/papers/{paper_id}/submit")
 def submit(paper_id: int, payload: Submission, username: str = Depends(require_auth)):
-    return operation(
-        lambda c, u: service.submit(
-            c, u, paper_id, payload.answers, payload.expected_version
-        ),
-        username,
-    )
+    def finalize_and_queue(c, u):
+        result = service.submit(c, u, paper_id, payload.answers, payload.expected_version)
+        if result.get("pending"):
+            from app.grading_activity import try_queue
+            result["grading_queue"] = try_queue(c, u, paper_id)
+        return result
+
+    return operation(finalize_and_queue, username)
 
 
 @router.get("/papers/{paper_id}/result")
 def result(paper_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: service.result(c, u, paper_id), username)
+
+
+@router.get("/papers/{paper_id}/verification")
+def question_verification(paper_id: int, username: str = Depends(require_auth)):
+    """Only the owner of a submitted exam may view evidence audit disclosures."""
+    from app.question_verification import report
+
+    return operation(lambda c, u: report(c, u, paper_id), username)
+
+
+@router.get("/quality/six-source-readiness")
+def six_source_readiness(username: str = Depends(require_auth)):
+    """Read-only metadata of the six active sources; not a science attestation."""
+    from app.source_readiness import audit
+
+    return operation(lambda c, u: audit(c), username)
+
+
+@router.get("/quality/genuine-exam-style-readiness")
+def genuine_exam_style_readiness(username: str = Depends(require_auth)):
+    """Original supplied exam content, not model-generated style examples."""
+    from app.exam_style_readiness import report
+
+    return operation(lambda c, u: report(c), username)
+
+
+@router.get("/quality/60q-bank-readiness")
+def sixty_question_bank_readiness(username: str = Depends(require_auth)):
+    """Authenticated learner can inspect exact verified-inventory shortages.
+
+    This is a conservative filter only; cross-answer cue screening is applied
+    again when an actual paper is atomically prepared.
+    """
+    from app.bank_readiness import report
+
+    return operation(lambda c, u: report(c, u), username)
+
+
+@router.get("/papers/{paper_id}/grading-activity")
+def grading_activity(paper_id: int, username: str = Depends(require_auth)):
+    """Read-only progress for the authenticated owner; no AI task is started."""
+    from app.grading_activity import progress
+
+    return operation(lambda c, u: progress(c, u, paper_id), username)
+
+
+@router.post("/papers/{paper_id}/regrade")
+def regrade_paper(paper_id: int, username: str = Depends(require_auth)):
+    """Queue the grading of every unfinished answer of this paper again (including the ones that ended undecided)."""
+    from app import grading_recovery
+
+    def run(c, u):
+        service.owned_paper(c, u, paper_id)
+        return grading_recovery.requeue(c, u, paper_id=paper_id, final_too=True)
+
+    return operation(run, username)
+
+
+@router.post("/papers/{paper_id}/regrade/{question_id}")
+def regrade_question(paper_id: int, question_id: int, username: str = Depends(require_auth)):
+    from app import grading_recovery
+
+    def run(c, u):
+        service.owned_paper(c, u, paper_id)
+        return grading_recovery.requeue(c, u, paper_id=paper_id, question_id=question_id, final_too=True)
+
+    return operation(run, username)
 
 
 ErrorCategory = Literal[
@@ -206,6 +287,16 @@ def quality_report():
     return operation(report)
 
 
+class QuestionReport(StrictModel):
+    note: str = Field(default="", max_length=1000)
+
+
+@router.post("/papers/{paper_id}/questions/{question_id}/report")
+def report_question(paper_id: int, question_id: int, payload: QuestionReport, username: str = Depends(require_auth)):
+    """"这题有问题": never shown again, and not counted in this paper's score."""
+    return operation(lambda c, u: service.report_question(c, u, paper_id, question_id, payload.note), username)
+
+
 @router.post("/papers/{paper_id}/start")
 def start_training(paper_id: int, username: str = Depends(require_auth)):
     from app.training_sessions import start
@@ -248,7 +339,10 @@ async def upload_image(
     username: str = Depends(require_auth),
 ):
     from app.images import verify_image, store_image
+    from app.training_sessions import photo_answers_enabled
 
+    if not photo_answers_enabled():
+        raise HTTPException(410, "Photo answers are turned off; please type your answer")
     raw = bytearray()
     async for part in request.stream():
         raw.extend(part)
@@ -331,6 +425,7 @@ class MemoryRating(StrictModel):
     rating: StrictInt = Field(ge=1, le=4)
     expected_version: StrictInt = Field(ge=0)
     event_key: str = Field(min_length=1, max_length=200)
+    early: bool = Field(default=False, strict=True)          # reviewing a card before it is due, at the learner's own request
 
 
 @router.get("/memory/due")
@@ -338,6 +433,13 @@ def memory_due(username: str = Depends(require_auth)):
     from app.memory import due
 
     return operation(lambda c, u: {"items": due(c, u)}, username)
+
+
+@router.get("/memory/{question_id}/item")
+def memory_item(question_id: int, username: str = Depends(require_auth)):
+    from app.memory import item
+
+    return operation(lambda c, u: item(c, u, question_id), username)
 
 
 @router.post("/memory/{question_id}/review")
@@ -354,6 +456,7 @@ def memory_review(
             payload.rating,
             payload.event_key,
             payload.expected_version,
+            require_due=not payload.early,
         ),
         username,
     )
@@ -365,50 +468,50 @@ class Consent(StrictModel):
 
 @router.put("/archive/consent")
 def archive_consent(payload: Consent, username: str = Depends(require_auth)):
+    from app import notion_sync
+
     def consent(c, u):
         c.execute(
             "INSERT INTO archive_consent VALUES (%s,%s) ON CONFLICT(user_id) DO UPDATE SET enabled=EXCLUDED.enabled",
             (u, payload.enabled),
         )
         if payload.enabled:
-            from app.archiving import enqueue
-
-            for row in c.execute(
-                "SELECT a.paper_id FROM attempts_v2 a JOIN papers_v2 p ON p.id=a.paper_id WHERE p.user_id=%s",
-                (u,),
-            ).fetchall():
-                enqueue(c, u, row["paper_id"])
-        return {
-            "consented": payload.enabled,
-            "configured": __import__("os").environ.get("NOTION_SYNC_ENABLED") == "1",
-        }
+            notion_sync.backfill(c, u)          # papers already graded are queued; nothing is sent until the worker or 立即同步 runs
+        return {"consented": payload.enabled, "configured": notion_sync.configured()}
 
     return operation(consent, username)
 
 
 @router.get("/archive/status")
 def archive_status(username: str = Depends(require_auth)):
-    return operation(
-        lambda c, u: {
-            "configured": os.environ.get("NOTION_SYNC_ENABLED") == "1"
-            and bool(os.environ.get("NOTION_TOKEN"))
-            and bool(os.environ.get("NOTION_DATABASE_ID")),
-            "consented": bool(
-                (
-                    c.execute(
-                        "SELECT enabled FROM archive_consent WHERE user_id=%s", (u,)
-                    ).fetchone()
-                    or {}
-                ).get("enabled")
-            ),
-            "jobs": c.execute(
-                "SELECT j.id,j.state,j.attempts,j.error,j.verified_at FROM archive_jobs j "
-                "JOIN attempts_v2 a ON a.id=j.attempt_id JOIN papers_v2 p ON p.id=a.paper_id WHERE p.user_id=%s ORDER BY j.id",
-                (u,),
-            ).fetchall(),
-        },
-        username,
-    )
+    from app import notion_sync
+
+    return operation(lambda c, u: notion_sync.status(c, u), username)
+
+
+@router.post("/archive/test")
+def archive_test(username: str = Depends(require_auth)):
+    """Read-only check of the secret and the page permission. Writes nothing, anywhere."""
+    from app import notion_sync
+
+    result = notion_sync.test_connection()
+    return {**result, "message": None if result["ok"] else notion_sync.MESSAGES.get(result["code"], notion_sync.MESSAGES["unexpected"])}
+
+
+@router.post("/archive/sync")
+def archive_sync(username: str = Depends(require_auth)):
+    from app import notion_sync
+
+    def run(c, u):
+        try:
+            outcome = notion_sync.sync_now(c, u)
+        except PermissionError:
+            raise HTTPException(409, "sync_switched_off") from None
+        except notion_sync.NotionError as exc:
+            raise HTTPException(409, exc.code) from None
+        return {**outcome, **notion_sync.status(c, u)}
+
+    return operation(run, username)
 
 
 @router.get("/sources/search", dependencies=[Depends(require_reviewer)])
@@ -486,7 +589,8 @@ def weekly_stats(username: str = Depends(require_auth)):
                 "COUNT(*) FILTER(WHERE a.points IS NULL) AS pending,COUNT(*) AS answers "
                 "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
                 "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
-                "WHERE p.user_id=%s AND t.submitted_at>=clock_timestamp()-INTERVAL '7 days' GROUP BY 1,2 ORDER BY 1,2",
+                "WHERE p.user_id=%s AND t.submitted_at>=clock_timestamp()-INTERVAL '7 days' "
+                "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id) GROUP BY 1,2 ORDER BY 1,2",
                 (u,),
             ).fetchall()
         },
@@ -535,10 +639,20 @@ def review_solution(question_id: int, username: str = Depends(require_auth)):
         ).fetchone()
         if not row:
             raise LookupError("Review card not found")
+        question = row["content"]
+        options = question.get("options") or {}
+        answer = question["answer"]
         return {
-            "answer": row["content"]["answer"],
-            "rubric": row["content"]["rubric"],
-            "evidence": row["content"]["evidence"],
+            "answer": answer,
+            "question_type": question["question_type"],
+            "options": options,
+            "answer_display": (
+                f"{answer}. {options[answer]}"
+                if question["question_type"] == "single_choice" and answer in options
+                else answer
+            ),
+            "rubric": question["rubric"],
+            "evidence": question["evidence"],
         }
 
     return operation(read, username)
@@ -583,7 +697,7 @@ def reflect(
                 payload.note,
             ),
         )
-        from app.archiving import enqueue
+        from app.notion_sync import enqueue
 
         enqueue(c, u, paper_id)
         return {"recorded": True, "replayed": False}
@@ -807,7 +921,12 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             ).fetchall()
         ]
         recent = c.execute(
-            "SELECT p.id AS paper_id,p.paper_date,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
+            "SELECT p.id AS paper_id,p.paper_date,p.blueprint->>'specification' AS specification,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending,"
+            "SUM((i.snapshot->>'max_points')::int) AS max_points,(SELECT count(*) FROM question_reports qr WHERE qr.paper_id=p.id) AS excluded "
+            "FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id "
+            "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
+            "WHERE p.user_id=%s AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id) "
+            "GROUP BY p.id,t.id ORDER BY p.paper_date DESC LIMIT 100",
             (u,),
         ).fetchall()
         return {
@@ -815,7 +934,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             "training": [
                 {
                     **r,
-                    "mode": "reviewed_28",
+                    "mode": "reviewed_60" if r["specification"] in ("xiaohan-60q-150pt-v2", "xiaohan-60q-300pt-v4") else "reviewed_28",
                     "score": None if r["pending"] else r["graded_points"],
                 }
                 for r in recent

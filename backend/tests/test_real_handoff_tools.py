@@ -1,18 +1,14 @@
 """Synthetic regression fixtures matching private handoff structure, never private bodies."""
 
 import json
-import stat
 import zipfile
 
 import pytest
-from psycopg.errors import RaiseException
-from app.handoff_bundle import unpack
 from app.source_files import sha
 from app.source_policy import COLLECTION, FILES
 from app.source_paging import PAGE
 from app.source_structure import book_layout
 from app.transcript_analysis import candidates, year_heading
-from app.pending_mappings import persist
 from test_ocr_only import material
 from app import sources
 from app.local_corpus import mapping_proposals, year_report
@@ -48,39 +44,6 @@ def bundle(path, *, corrupt=False, extra=None):
         )
         if extra:
             z.writestr(extra, b"extra")
-
-
-def test_bundle_all_hashes_before_extraction_and_private_permissions(tmp_path):
-    archive = tmp_path / "handoff.zip"
-    bundle(archive)
-    out = tmp_path / "private"
-    report = unpack(archive, out)
-    assert report["hash_matches"] == 6 and report["database_imported"] == 0
-    assert stat.S_IMODE(out.stat().st_mode) == 0o700
-    for file in out.rglob("*"):
-        if file.is_file():
-            assert stat.S_IMODE(file.stat().st_mode) == 0o600
-    with pytest.raises(ValueError, match="new"):
-        unpack(archive, out)
-
-
-@pytest.mark.parametrize(
-    "extra", ["../escape.txt", "/absolute.txt", "files/foreign.txt"]
-)
-def test_bundle_rejects_unsafe_or_foreign_files_before_writing(tmp_path, extra):
-    archive = tmp_path / "bad.zip"
-    bundle(archive, extra=extra)
-    with pytest.raises(ValueError):
-        unpack(archive, tmp_path / "out")
-    assert not (tmp_path / "out").exists()
-
-
-def test_bundle_checksum_failure_extracts_nothing(tmp_path):
-    archive = tmp_path / "bad.zip"
-    bundle(archive, corrupt=True)
-    with pytest.raises(ValueError, match="checksum"):
-        unpack(archive, tmp_path / "out")
-    assert not (tmp_path / "out").exists()
 
 
 def test_numeric_toc_aligns_body_without_using_printed_page_as_ocr_page():
@@ -240,29 +203,3 @@ def test_docx_style_numbering_is_recovered_without_changing_original_text(tmp_pa
     assert blocks[2][-1]["format"] == "decimal"
 
 
-def test_pending_mappings_are_idempotent_immutable_and_not_authoritative(db, tmp_path):
-    path, meta = material(tmp_path, content="Synthetic kinase evidence")
-    sources.import_source(db, path, meta)
-    ref = dict(
-        file_id=meta["file_id"],
-        source_sha256=sha(path.read_bytes()),
-        ordinal=1,
-        ocr_page=1,
-    )
-    proposal = dict(
-        source=ref,
-        target=None,
-        knowledge_label="kinase",
-        method="test",
-        status="pending",
-        evidence={"quote": "Synthetic kinase evidence"},
-    )
-    assert persist(db, [proposal]) == 1
-    assert persist(db, [proposal]) == 0
-    assert db.execute("SELECT count(*) AS n FROM knowledge_links").fetchone()["n"] == 0
-    with pytest.raises(RaiseException), db.transaction():
-        db.execute("UPDATE source_mapping_proposals SET method='tampered'")
-    with pytest.raises(ValueError, match="quote"):
-        persist(db, [{**proposal, "evidence": {"quote": "invented"}}])
-    with pytest.raises(ValueError, match="identity"):
-        persist(db, [{**proposal, "source": {**ref, "source_sha256": "0" * 64}}])

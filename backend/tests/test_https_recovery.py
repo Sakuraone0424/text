@@ -1,5 +1,6 @@
 """Authentic HTTPS+PostgreSQL recovery regressions on synthetic fixtures only."""
 # ruff: noqa: F811
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 import json
 import psycopg
 from psycopg.rows import dict_row
@@ -11,7 +12,7 @@ from https_qa_support import https_app, https_browser  # noqa: F401
 
 def login_start(page, qa):
     page.goto(qa['origin']); page.locator('#password').fill(qa['password']); page.locator('#login button').click(); expect(page.locator('#login')).to_be_hidden()
-    page.locator('#prepare').click(); expect(page.locator('#start')).to_be_visible(); page.locator('#start').click(); expect(page.locator('#questions article:visible')).to_have_count(1)
+    page.locator('#prepare').click();expect(page.locator('#prepare')).to_have_text('开始（60 分钟）');page.locator('#prepare').click();expect(page.locator('#start')).to_be_visible(); page.locator('#start').click(); expect(page.locator('#questions article:visible')).to_have_count(1)
     return page.evaluate('paper')
 
 
@@ -119,7 +120,7 @@ def test_cached_terminal_status_never_unlocks_offline(https_app,firefox_https,te
         page.locator('#submit').click();page.locator('#confirm-submit').click();expect(page.locator('#result > h2')).to_be_visible()
         assert row(qa,'SELECT submitted_at FROM training_sessions WHERE paper_id=%s',(pid,))['submitted_at']
     else:
-        page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.locator('#prepare').click();expect(page.locator('#start')).to_be_visible()
+        page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.locator('#prepare').click();expect(page.locator('#prepare')).to_have_text('开始（60 分钟）');page.locator('#prepare').click();expect(page.locator('#start')).to_be_visible()
         assert page.locator('#questions article').count()==0
     page.route('**/auth/me',lambda route:route.fulfill(json={'username':'test-owner'}));page.route('**/v2/papers/*',lambda route:route.abort('internetdisconnected'))
     page.reload();expect(page.locator('#status')).to_contain_text('尚未开始' if terminal=='not_started' else '已提交')
@@ -222,7 +223,9 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     qa = https_app
     context = https_browser
     page = context.new_page()
-    page.goto(qa['origin'] + '/static/model.html')
+    # The stale v7 cache is planted from a plain static file on the same origin, where no service worker exists yet: the
+    # application's worker then installs and activates over it, exactly like a real upgrade (and in the same order every time).
+    page.goto(qa['origin'] + '/static/tokens.css')
     page.evaluate("""async () => {
       const old = await caches.open('xiaohan-training-shell-v7-offline-recovery');
       await old.put('/static/training.js', new Response(
@@ -239,6 +242,7 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     assert page.evaluate(
         "async () => (await caches.keys()).includes('xiaohan-training-shell-v7-offline-recovery')"
     )
+    page.goto(qa['origin'] + '/training#/model')
     paper = login_start(page, qa)
     q = next(x for x in paper['questions'] if x['question_type'] == 'term')
     open_question(page, q['id'])
@@ -246,17 +250,23 @@ def test_v7_cache_storage_migrates_to_v8_and_offline_refresh(https_app, https_br
     field.fill('v7缓存升级前的合成草稿')
     wait_saved(page)
     page.evaluate('navigator.serviceWorker.ready')
-    page.wait_for_function('navigator.serviceWorker.controller !== null')
+    try:
+        page.wait_for_function('navigator.serviceWorker.controller !== null', timeout=20000)
+    except PlaywrightTimeoutError:
+        # A page opened before its worker became active is controlled from its next load (normal service-worker lifecycle):
+        # reload once, then carry on with the same question and draft.
+        page.reload()
+        page.wait_for_function('navigator.serviceWorker.controller !== null', timeout=40000)
+        open_question(page, q['id'])
+        field = page.locator('#questions textarea:visible')
+    # the new cache is created when the worker starts to install and filled when it finishes: wait for the content itself
     page.wait_for_function("""async () => {
       const keys = await caches.keys();
-      return keys.includes('xiaohan-training-shell-v8-offline-recovery-upgrade') &&
-             !keys.includes('xiaohan-training-shell-v7-offline-recovery');
-    }""")
-    assert page.evaluate("""async () => {
-      const cache = await caches.open('xiaohan-training-shell-v8-offline-recovery-upgrade');
+      if (!keys.includes('xiaohan-training-shell-v19-one-shell') || keys.includes('xiaohan-training-shell-v7-offline-recovery')) return false;
+      const cache = await caches.open('xiaohan-training-shell-v19-one-shell');
       const asset = await cache.match('/static/training.js');
       return !!asset && (await asset.text()).includes('cachedPaper(username, paper.paper_id)');
-    }""")
+    }""", timeout=60000)
     context.set_offline(True)
     field.fill('v8升级后离线刷新保留的草稿')
     page.reload()

@@ -1,5 +1,6 @@
 """Database evidence snapshot plus reproducible weighted sampling within fixed quotas."""
 
+from collections import Counter
 from datetime import datetime
 import json
 import math
@@ -39,7 +40,8 @@ def snapshot(conn, user_id, questions, as_of=None):
         "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
         "LEFT JOIN LATERAL (SELECT graded_at FROM grading_events WHERE attempt_id=a.attempt_id AND question_id=a.question_id ORDER BY id DESC LIMIT 1) g ON true "
-        "WHERE p.user_id=%s AND a.points IS NOT NULL AND COALESCE(g.graded_at,t.submitted_at)<=%s",
+        "WHERE p.user_id=%s AND a.points IS NOT NULL AND COALESCE(g.graded_at,t.submitted_at)<=%s "
+        "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id)",
         (user_id, as_of),
     ).fetchall()
     reflection_rows = conn.execute(
@@ -158,8 +160,9 @@ def snapshot(conn, user_id, questions, as_of=None):
     context["legacy_data_use"] = (
         "read_only_unmapped_history_not_used_as_verified_knowledge_observations"
     )
+    # question id -> when it fell due (a dict: `in` still works, and the paper builder serves the longest-waiting first)
     due = {
-        c["question_id"]
+        c["question_id"]: instant(c["due"])
         for c in cards
         if c.get("last_review") and instant(c["due"]) <= as_of
     }
@@ -220,17 +223,81 @@ def candidate_score(question, context, policy):
     return score * cognitive_factor
 
 
-def pick(pool, count, chapter_counts, context, policy, seed, subject, kind, decisions):
+# Paper rules (hard, relaxed only when the bank cannot satisfy them, and then said so on the paper):
+# - one chapter supplies at most 25% of a subject's questions;
+# - difficulty mix about 3:5:2 for core (基础) : mechanism (核心) : application (拔高).
+CHAPTER_SHARE_CAP = 0.25
+DIFFICULTY_MIX = {"core": 3, "mechanism": 5, "application": 2}
+
+
+def chapter_cap(subject_total):
+    return max(1, int(CHAPTER_SHARE_CAP * subject_total))
+
+
+def difficulty_quotas(subject_total):
+    """Places per difficulty in one subject's part of the paper, from the 3:5:2 mix (largest remainder)."""
+    total = sum(DIFFICULTY_MIX.values())
+    raw = {k: subject_total * v / total for k, v in DIFFICULTY_MIX.items()}
+    quota = {k: int(v) for k, v in raw.items()}
+    for k in sorted(raw, key=lambda k: raw[k] - quota[k], reverse=True)[: subject_total - sum(quota.values())]:
+        quota[k] += 1
+    return quota
+
+
+def pick(pool, count, chapter_counts, context, policy, seed, subject, kind, decisions, due=None,
+         difficulty_counts=None, relaxed=None, subject_total=None):
     rng = random.Random(f"{seed}:{subject}:{kind}")
+    cap = chapter_cap(subject_total) if subject_total else None
+    quotas = difficulty_quotas(subject_total) if subject_total else None
+    if difficulty_counts is None:
+        difficulty_counts = Counter()
+    if relaxed is None:
+        relaxed = set()
     pool = sorted(pool, key=lambda r: r["id"])
     chosen = []
+    # Questions that are DUE come first, the longest-waiting first (ties by id), so a wrong answer is never pushed aside
+    # for long by newer cards; the weighted draw below only fills the places that are left.
+    for row in sorted((r for r in pool if r["id"] in (due or {})), key=lambda r: (due[r["id"]], r["id"]))[:count]:
+        pool.remove(row)
+        chosen.append(row)
+        chapter_counts[(subject, row["content"]["evidence"][0]["chapter"])] += 1
+        difficulty_counts[(subject, row["content"].get("difficulty", "core"))] += 1
+        decisions.append(
+            {
+                "subject": subject,
+                "question_type": kind,
+                "slot": len(chosen),
+                "selected_id": row["id"],
+                "due_since": due[row["id"]].isoformat(),
+                "candidates": [{"question_id": row["id"], "reason": "due_longest_waiting_first"}],
+            }
+        )
     available_chapters = len({r["content"]["evidence"][0]["chapter"] for r in pool})
-    for slot in range(count):
+    def chapter_ok(row):
+        return cap is None or chapter_counts[(subject, row["content"]["evidence"][0]["chapter"])] < cap
+
+    def difficulty_ok(row):
+        return quotas is None or difficulty_counts[(subject, row["content"].get("difficulty", "core"))] < quotas.get(row["content"].get("difficulty", "core"), 0)
+
+    for slot in range(len(chosen), count):
         if not pool:
             break
+        # both rules, else the chapter rule alone, else the difficulty mix alone, else whatever the bank has (said on the paper)
+        usable = [r for r in pool if chapter_ok(r) and difficulty_ok(r)]
+        if not usable:
+            usable = [r for r in pool if chapter_ok(r)]
+            if usable:
+                relaxed.add(f"difficulty_mix:{subject}")
+        if not usable:
+            usable = [r for r in pool if difficulty_ok(r)]
+            if usable:
+                relaxed.add(f"chapter_cap:{subject}")
+        if not usable:
+            usable = list(pool)
+            relaxed.update({f"difficulty_mix:{subject}", f"chapter_cap:{subject}"})
         weights = []
         details = []
-        for row in pool:
+        for row in usable:
             q = row["content"]
             chapter = q["evidence"][0]["chapter"]
             n = chapter_counts[(subject, chapter)]
@@ -254,15 +321,17 @@ def pick(pool, count, chapter_counts, context, policy, seed, subject, kind, deci
             )
         target = rng.random() * sum(weights)
         cumulative = 0.0
-        index = len(pool) - 1
+        index = len(usable) - 1
         for i, weight in enumerate(weights):
             cumulative += weight
             if target < cumulative:
                 index = i
                 break
-        row = pool.pop(index)
+        row = usable[index]
+        pool.remove(row)
         chosen.append(row)
         chapter_counts[(subject, row["content"]["evidence"][0]["chapter"])] += 1
+        difficulty_counts[(subject, row["content"].get("difficulty", "core"))] += 1
         decisions.append(
             {
                 "subject": subject,

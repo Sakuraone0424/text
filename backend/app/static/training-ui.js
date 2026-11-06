@@ -17,6 +17,35 @@
     if (parent) parent.append(node);
     return node;
   };
+  const typeNames = { single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答", essay: "问答" };
+  /* Time spent per question: counted only while that question is on screen, the exam is running and the
+     page is visible. It is saved with the draft (seconds) and copied into answer_timings at submit. */
+  let dwell = { id: null, since: 0 },
+    flushing = false;
+  function flushDwell(restart = false) {
+    if (flushing) return; // saving a draft re-renders the UI, which must not count time again
+    flushing = true;
+    try {
+      if (dwell.id !== null && dwell.since) {
+        const gained = Math.round((Date.now() - dwell.since) / 1000);
+        if (gained > 0 && active()) actions.addSeconds?.(dwell.id, gained);
+      }
+      dwell.since = restart && dwell.id !== null && !document.hidden && active() && view === "exam" ? Date.now() : 0;
+    } finally {
+      flushing = false;
+    }
+  }
+  function startDwell(id) {
+    if (dwell.id === id) {
+      if (!dwell.since && !document.hidden && view === "exam") dwell.since = Date.now();
+      return; // the same question being re-rendered keeps its running timer
+    }
+    flushDwell();
+    dwell = { id, since: !document.hidden && view === "exam" ? Date.now() : 0 };
+  }
+  setInterval(() => flushDwell(true), 20000);
+  document.addEventListener("visibilitychange", () => (document.hidden ? flushDwell() : flushDwell(true)));
+  window.addEventListener("pagehide", () => flushDwell());
   const answered = (draft) =>
     !!(
       draft?.text?.trim() ||
@@ -26,26 +55,123 @@
   const active = () => latest.paper?.timing.status === "in_progress";
   const storageKey = () =>
     `quiz-ui-question:${account}:${latest.paper?.paper_id}`;
-  function showView(next) {
+  // Only the content area scrolls (the document does not): remember where each route was left.
+  const scroller = () => document.querySelector(".workspace");
+  const scrollMemory = {};
+  let currentKey = null;
+  const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", practice: "home", exam: "practice", profile: "home", review: "stats", mistake: "mistakes", drill: "practice" };
+  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile", exam: "practice", review: "profile", mistake: "mistakes", drill: "practice" };
+  // how deep a route is: the four tabs are 0, their sub-pages 1, a sub-page's own sub-page 2
+  const TABS = ["home", "practice", "mistakes", "profile"];
+  const depthOf = (name, sub) => (TABS.includes(name) ? 0 : 1) + (sub ? 1 : 0);
+  const pageOf = (name) => document.querySelector(`[data-page="${name}"]`);
+  const PARAM_VIEWS = ["review", "mistake", "drill"];          // their last part is a parameter (p123 = paper 123, m7 = mistake 7), not a sub-page
+  const hashSub = (key) => {
+    const m = /^#\/([a-z]+)\/([a-z0-9-]+)/.exec(key || "");
+    return m && !PARAM_VIEWS.includes(m[1]) ? m[2] : null;
+  };
+  function renderView(next, key) {
+    if (currentKey && scroller()) scrollMemory[currentKey] = scroller().scrollTop;
+    const before = { view, key: currentKey };
     view = next;
+    currentKey = key || "#/" + next;
+    document.body.dataset.view = next; // the install hint belongs to the home page only
     document.querySelectorAll("[data-page]").forEach((node) => {
       node.hidden = node.dataset.page !== view;
     });
     document.querySelectorAll("[data-view]").forEach((node) => {
-      if (node.dataset.view === view) node.setAttribute("aria-current", "page");
+      if (node.dataset.view === (NAV_FOR[view] || view)) node.setAttribute("aria-current", "page");
       else node.removeAttribute("aria-current");
     });
-    document.body.classList.toggle("focus-mode", view === "exam" && active());
+    document.body.classList.toggle("focus-mode", (view === "exam" && active()) || view === "drill");       // full-screen answering: no bottom navigation
     byId("focus-actions").hidden = view !== "exam" || !active();
+    byId("question-tags").hidden = view !== "exam" || !active();
+    if (view !== "exam") flushDwell();
     const roots = {
       mistakes: "mistakes-content",
       stats: "stats-content",
       profile: "profile-content",
     };
-    if (roots[view]) byId(roots[view]).append(byId("learning"));
-    else byId("learning").hidden = true;
-    if (roots[view]) byId("learning").hidden = false;
+    // `#learning` holds the content of ONE sub-page (weekly, history, insights, archive, source check, due review). It
+    // belongs to the route that opened it: any other route finds it empty, so a sub-page's cards can never show up
+    // at the bottom of a main page.
+    const learning = byId("learning");
+    if (learning.dataset.owner !== currentKey) learning.replaceChildren();
+    if (roots[view]) byId(roots[view]).append(learning);
+    learning.hidden = !roots[view] || !learning.hasChildNodes();
+    window.Insights?.onView(view);
+    if (view === "progress") window.ProgressView?.show();
+    if (view === "model") window.ModelView?.show();
+    if (scroller()) scroller().scrollTop = scrollMemory[currentKey] || 0;
+    // motion: a sub-page slides in from the right, going back fades the page below in (the one above slid out first),
+    // moving between the four tabs cross-fades. Nothing plays when the same route is merely re-applied.
+    if (window.Motion && before.key && before.key !== currentKey && !document.hidden) {
+      const from = depthOf(before.view, hashSub(before.key)), to = depthOf(next, hashSub(currentKey));
+      const kind = TABS.includes(before.view) && TABS.includes(next) ? "tab" : to > from ? "push" : to < from ? "pop" : "tab";
+      window.Motion.enter(pageOf(next), kind);
+    }
+    window.Motion?.cards(pageOf(next));
   }
+
+  /* ---- routes: one shell, hash URLs, the browser's own back stack ---- */
+  const VIEWS = ["home", "practice", "exam", "mistakes", "mistake", "review", "drill", "stats", "profile", "progress", "model"];
+  const SUBS = ["weekly", "history", "insights", "archive", "source-status"];
+  let routeChanges = 0;
+  let suppressRoute = false;
+  let alreadyLoaded = null; // the hash whose page content was just loaded by the click that navigated to it
+  const parseHash = () => {
+    const m = /^#\/([a-z]+)(?:\/([a-z0-9-]+))?/.exec(location.hash);
+    return m ? { view: VIEWS.includes(m[1]) ? m[1] : "home", sub: m[2] || null } : { view: "home", sub: null };
+  };
+  function apply() {
+    const { view: next, sub } = parseHash();
+    const key = location.hash || "#/home";
+    if (view === "model" && next !== "model" && window.ModelView && !window.ModelView.leave()) {
+      history.replaceState(null, "", "#/model"); // unsaved settings: stay
+      return;
+    }
+    routeChanges += 1;
+    window.Data?.setUser(account);
+    renderView(next, key);
+    window.Pages?.show(next, sub);                      // the pages built in pages.js (practice centre, mistake book, review)
+    if (sub && SUBS.includes(sub)) {
+      byId("learning").dataset.owner = key;
+      if (alreadyLoaded === key) alreadyLoaded = null;
+      else {
+        suppressRoute = true;
+        byId(sub).click();
+        suppressRoute = false;
+      }
+    }
+  }
+  function go(next, sub = null, { replace = false } = {}) {
+    const target = "#/" + next + (sub ? "/" + sub : "");
+    if (location.hash === target || (!location.hash && target === "#/home")) return apply();
+    if (replace) {
+      history.replaceState(null, "", target);
+      apply();
+    } else location.hash = target;
+  }
+  function backNow() {
+    // the previous page of this session if there is one (its scroll position and filters are still there), else its parent
+    if (routeChanges > 1 && history.length > 1) history.back();
+    else go(PARENT[view] || "home", null, { replace: true });
+  }
+  // the in-app back button: the navigation is immediate; a picture of the page slides out to the right over the one below
+  function back() {
+    const node = pageOf(view);
+    if (window.Motion && node && !TABS.includes(view)) window.Motion.leave(node, 0);
+    backNow();
+  }
+  window.Motion?.edgeSwipe({
+    canGoBack: () => !TABS.includes(view) || !!hashSub(location.hash),
+    pageNode: () => pageOf(view),
+    back: backNow,
+  });
+  window.addEventListener("hashchange", apply);
+  window.addEventListener("signed-in", apply);
+  window.addEventListener("shell-ready", apply);
+  const showView = (next) => go(next);
   function navigate(index, focus = true) {
     const questions = active() ? latest.paper.questions || [] : [];
     if (!active() || !questions.length) return;
@@ -59,25 +185,44 @@
     }
     const question = questions[position];
     document.querySelectorAll("#questions > article").forEach((article) => {
-      article.hidden = Number(article.dataset.id) !== question.id;
+      const show = Number(article.dataset.id) === question.id;
+      if (show && article.hidden && !window.Motion?.reduced()) {
+        // moving between questions: a 120 ms fade-in only (no sliding, no page turn)
+        article.classList.remove("motion-fade");
+        void article.offsetWidth;
+        article.classList.add("motion-fade");
+      }
+      article.hidden = !show;
     });
     byId("current-number").textContent = String(position + 1);
     byId("current-subject").textContent =
       labels[question.subject] || question.subject;
-    byId("current-points").textContent = `${question.max_points}分`;
+    byId("current-points").textContent = `${typeNames[question.question_type] || ""} · ${question.max_points}分`;
     byId("previous-question").disabled = position === 0;
     byId("next-question").textContent =
-      position === questions.length - 1 ? "检查答题卡" : "下一题 →";
+      position === questions.length - 1 ? "检查答题卡" : "下一题";
     const marked = !!latest.drafts[question.id]?.flagged;
     byId("toggle-mark").setAttribute("aria-pressed", String(marked));
-    byId("toggle-mark").textContent = marked ? "★ 已标记" : "☆ 标记";
+    byId("toggle-mark").textContent = marked ? "★ 已标记稍后看" : "☆ 标记稍后看";
+    // "标记稍后看" and "这题有问题" sit together in one row under the question card
+    const article = document.querySelector(`#questions article[data-id="${question.id}"]`);
+    if (article) {
+      let row = article.querySelector(":scope > .secondary-actions");
+      if (!row) {
+        row = make("div", undefined, article, "secondary-actions");
+        const report = article.querySelector(".question-report");
+        if (report) row.append(report);
+      }
+      row.prepend(byId("toggle-mark"));
+    }
+    startDwell(question.id);
     updateMap();
     if (focus) {
       const stem = document.querySelector(
         `#questions article[data-id="${question.id}"] .question-stem`,
       );
       stem?.focus({ preventScroll: true });
-      window.scrollTo({ top: 0, behavior: "instant" });
+      scroller()?.scrollTo({ top: 0, behavior: "instant" });
     }
   }
   function updateMap() {
@@ -100,62 +245,59 @@
         };
       });
     }
+    const reported = new Set(latest.paper?.reported_question_ids || []);
     let count = 0,
       marked = 0;
     questions.forEach((question, index) => {
       const button = grid.children[index],
         draft = latest.drafts[question.id],
-        done = answered(draft),
+        isReported = reported.has(question.id),
+        done = answered(draft) && !isReported,
         flag = !!draft?.flagged;
       count += Number(done);
       marked += Number(flag);
       button.classList.toggle("answered", done);
       button.classList.toggle("marked", flag);
+      button.classList.toggle("reported", isReported);
       if (position === index) button.setAttribute("aria-current", "step");
       else button.removeAttribute("aria-current");
       button.setAttribute(
         "aria-label",
-        `第${index + 1}题，${done ? "已作答" : "未作答"}${flag ? "，已标记" : ""}${position === index ? "，当前题" : ""}`,
+        `第${index + 1}题，${isReported ? "已反馈不计分" : done ? "已作答" : "未作答"}${flag ? "，已标记" : ""}${position === index ? "，当前题" : ""}`,
       );
     });
+    const counted = (questions.length || latest.paper?.count || 60) - reported.size;
+    byId("answer-progress").max = counted;
     byId("answer-progress").value = count;
-    byId("map-progress").textContent = `${count}/${questions.length || 28}`;
+    byId("map-progress").textContent = `${count}/${counted}`;
     byId("map-summary").textContent =
-      `已答${count}题 · 未答${Math.max(0, questions.length - count)}题 · 已标记${marked}题`;
+      `已答${count}题 · 未答${Math.max(0, counted - count)}题 · 已标记${marked}题` +
+      (reported.size ? ` · 已反馈${reported.size}题（不计分）` : "");
   }
   function state(next) {
     const previousPaper = latest.paper?.paper_id;
     latest = next;
     const timing = latest.paper?.timing;
-    byId("paper-state").textContent = timing
-      ? {
-          not_started: "尚未开始",
-          in_progress: "正在作答",
-          submitted: "已提交",
-        }[timing.status] || "状态待确认"
-      : "状态待载入";
-    byId("paper-state").classList.toggle(
-      "green-pill",
-      timing?.status === "submitted",
-    );
-    byId("prepare").firstChild.textContent = active()
-      ? "继续本次考试 "
-      : timing?.status === "submitted"
-        ? "查看本次结果 "
-        : "开始今日考试 ";
+    const count = latest.paper?.count || 60;
+    const totalIndicator = document.querySelector("#current-number + .muted");
+    if (totalIndicator) totalIndicator.textContent = " / " + count;
+    if (timing) window.Insights?.startReady?.();       // today's paper exists: its own state is known
+    window.Pages?.paintToday();                        // the home card and the practice card show one state, from one place
     byId("prepare-note").textContent = active()
       ? "考试计时继续，已存答案不会丢失"
       : "先准备试卷，确认后才开始60分钟计时";
     byId("exam-intro").hidden = !!timing && timing.status !== "not_started";
     byId("intro-state").textContent =
       timing?.status === "not_started"
-        ? "试卷已准备，尚未开始计时。请确认可以连续作答60分钟。"
-        : "请先准备试卷，再确认开始计时。";
+        ? "试卷已准备好，开始后计时不会暂停。"
+        : "请先准备试卷。";
+    byId("open-start").hidden = timing?.status !== "not_started";
     document.querySelector("[data-prepare-proxy]").hidden = !!latest.paper;
     byId("result").hidden = timing?.status !== "submitted";
+    byId("result-bar").hidden = timing?.status !== "submitted";
     byId("questions").hidden = !active();
-    byId("questions").inert = !active() || !!latest.expired;
-    byId("submit").disabled = !!latest.expired || !!latest.serverPending;
+    byId("questions").inert = !active() || !!latest.expired || document.body.classList.contains("is-submitting");
+    byId("submit").disabled = !!latest.expired || !!latest.serverPending || document.body.classList.contains("is-submitting");
     byId("toggle-mark").disabled = !!latest.expired;
     byId("focus-toolbar").hidden = !active();
     if (!active()) {
@@ -179,7 +321,7 @@
         : latest.pendingCount
           ? `本机暂存 · ${latest.pendingCount}题待同步`
           : timing?.status === "in_progress"
-            ? "已与服务端同步"
+            ? "已保存"
             : "尚未开始";
     const photoPending = active() && next.message?.includes("照片原件仍保留");
     if (active() && next.message?.includes("上传中"))
@@ -196,7 +338,9 @@
       ),
     );
     if (view === "exam") showView("exam");
+    window.Insights?.applyLock?.(); // a short bank keeps the start button grey until a paper exists
   }
+  window.__hasPaper = () => !!latest.paper;
   function rendered(next) {
     state(next);
   }
@@ -207,127 +351,6 @@
     );
     byId("focus-toolbar").classList.toggle("time-critical", remaining <= 120);
   }
-  function subjectBars(root, subjects) {
-    root.replaceChildren();
-    Object.entries(labels).forEach(([subject, label]) => {
-      const data = subjects[subject] || { points: 0, max: 0, pending: 0 };
-      const row = make("div", undefined, root, "subject-row"),
-        heading = make("div", undefined, row, "subject-label");
-      make("span", label, heading);
-      make(
-        "span",
-        data.max > 0
-          ? `${data.points} / ${data.max}分 · ${Math.round((data.points / data.max) * 100)}%`
-          : "暂无已判分记录",
-        heading,
-      );
-      const track = make("div", undefined, row, "data-track");
-      track.setAttribute("role", "img");
-      track.setAttribute(
-        "aria-label",
-        `${label}：${data.max > 0 ? `已判分${data.points}/${data.max}分` : "暂无已判分数据"}；待批${data.pending}题`,
-      );
-      const fill = make(
-        "div",
-        undefined,
-        track,
-        `data-fill ${subject === "cell_biology" ? "cell" : ""}`,
-      );
-      fill.style.width = `${data.max > 0 ? Math.min(100, Math.max(0, (data.points / data.max) * 100)) : 0}%`;
-      if (data.pending)
-        make(
-          "small",
-          `${data.pending}题待批，未计入得分率`,
-          row,
-          "card-footnote",
-        );
-    });
-  }
-  function trend(root, history) {
-    const rows = history
-      .filter((row) => Number.isFinite(row.score))
-      .slice(0, 10)
-      .reverse();
-    root.replaceChildren();
-    if (rows.length < 2) {
-      root.className = "empty-state";
-      make("span", "↗", root, "empty-icon").setAttribute(
-        "aria-hidden",
-        "true",
-      );
-      make("strong", "让进步留下轨迹", root);
-      make(
-        "p",
-        rows.length
-          ? "已有1份完整判分记录，再完成一份即可查看真实趋势。"
-          : "完成考试后查看成绩趋势。待批改成绩不绘入曲线。",
-        root,
-      );
-      return;
-    }
-    root.className = "";
-    const ns = "http://www.w3.org/2000/svg",
-      svg = document.createElementNS(ns, "svg");
-    svg.setAttribute("viewBox", "0 0 360 180");
-    svg.setAttribute("role", "img");
-    svg.classList.add("chart");
-    const description = rows
-      .map((r) => `${r.paper_date}：${r.score}/150分`)
-      .join("；");
-    const title = document.createElementNS(ns, "title");
-    title.textContent = `真实完整判分成绩：${description}`;
-    svg.append(title);
-    const points = rows.map((r, i) => [
-      32 + (i * 304) / (rows.length - 1),
-      148 - (r.score / 150) * 116,
-    ]);
-    [0, 75, 150].forEach((value) => {
-      const y = 148 - (value / 150) * 116,
-        line = document.createElementNS(ns, "line");
-      Object.entries({
-        x1: 32,
-        x2: 344,
-        y1: y,
-        y2: y,
-        stroke: "#e7ebf0",
-      }).forEach(([k, v]) => line.setAttribute(k, v));
-      svg.append(line);
-      const text = document.createElementNS(ns, "text");
-      text.setAttribute("x", "0");
-      text.setAttribute("y", String(y + 4));
-      text.textContent = String(value);
-      svg.append(text);
-    });
-    const polyline = document.createElementNS(ns, "polyline");
-    Object.entries({
-      points: points.map((p) => p.join(",")).join(" "),
-      fill: "none",
-      stroke: "#2563eb",
-      "stroke-width": 2.5,
-      "stroke-linejoin": "round",
-    }).forEach(([k, v]) => polyline.setAttribute(k, v));
-    svg.append(polyline);
-    points.forEach(([x, y]) => {
-      const circle = document.createElementNS(ns, "circle");
-      Object.entries({
-        cx: x,
-        cy: y,
-        r: 4,
-        fill: "#fff",
-        stroke: "#2563eb",
-        "stroke-width": 2,
-      }).forEach(([k, v]) => circle.setAttribute(k, v));
-      svg.append(circle);
-    });
-    root.append(svg);
-    make("p", description, root, "chart-description");
-    make(
-      "p",
-      "仅含正式28题、150分试卷的完整判分成绩；待批与旧制60分记录不混算。",
-      root,
-      "card-footnote",
-    );
-  }
   async function read(path) {
     const response = await fetch(path, {
       credentials: "same-origin",
@@ -337,77 +360,7 @@
     return response.json();
   }
   async function loadOverview() {
-    const results = await Promise.allSettled([
-      read("/v2/history"),
-      read("/v2/stats/weekly"),
-      read("/v2/memory/due"),
-    ]);
-    if (results[0].status === "fulfilled") {
-      const records = results[0].value.training;
-      byId("metric-submitted").textContent = String(records.length);
-      byId("metric-graded").textContent = String(
-        records.filter((r) => Number.isFinite(r.score)).length,
-      );
-      const pending = records.filter((r) => r.score === null).length;
-      byId("overview-note").textContent = records.length
-        ? `${pending}份试卷待完成批改；提交不等于完整判分。统计范围为最近100份正式档案。`
-        : "尚无提交记录。完成第一份考试，开始积累你的学习轨迹。";
-      trend(byId("score-trend"), records);
-    } else
-      byId("overview-note").textContent =
-        "历史记录暂时读取失败，未将未知数据当作0。";
-    if (results[1].status === "fulfilled") {
-      const subjects = {},
-        chapters = results[1].value.chapters;
-      chapters.forEach((row) => {
-        const total = (subjects[row.subject] ||= {
-          points: 0,
-          max: 0,
-          pending: 0,
-        });
-        total.points += Number(row.graded_points || 0);
-        total.max += Number(row.graded_max_points || 0);
-        total.pending += Number(row.pending || 0);
-      });
-      subjectBars(byId("subject-performance"), subjects);
-      const weak = chapters
-        .filter(
-          (r) => Number(r.graded_max_points) > Number(r.graded_points || 0),
-        )
-        .sort(
-          (a, b) =>
-            b.graded_max_points -
-            b.graded_points -
-            (a.graded_max_points - a.graded_points),
-        )
-        .slice(0, 4);
-      if (weak.length) {
-        const root = byId("weak-chapters");
-        root.replaceChildren();
-        root.className = "weak-list";
-        weak.forEach((row) => {
-          const button = make("button", undefined, root, "weak-chip"),
-            label = make("span", row.chapter || "未标注章节", button);
-          make("small", `${labels[row.subject]} · 近7天已判分失分`, label);
-          make(
-            "b",
-            `${row.graded_max_points - (row.graded_points || 0)}分待巩固 →`,
-            button,
-          );
-          button.onclick = () => byId("weekly").click();
-        });
-      }
-    } else
-      byId("subject-performance").textContent =
-        "科目统计暂时不可用，请稍后重试。";
-    if (results[2].status === "fulfilled") {
-      const count = results[2].value.items.length;
-      byId("metric-due").textContent = String(count);
-      byId("review-summary").textContent = count
-        ? `当前有${count}道错题到期，复习后更新实际FSRS安排。`
-        : "当前没有到期复习，完成练习后会根据真实错题建立卡片。";
-    } else
-      byId("review-summary").textContent = "到期卡片读取失败，暂不显示数量。";
+    await window.Insights?.loadHome();
   }
   function signedIn(user) {
     const changed = account !== user;
@@ -423,177 +376,70 @@
     document.body.classList.remove("focus-mode");
     byId("focus-actions").hidden = true;
     byId("exam-intro").hidden = true;
-    const summary = make("div", undefined, undefined, "result-analytics"),
-      grade = make("section", undefined, summary, "card grade-card");
-    const graded = data.answers.filter((a) => a.points !== null).length;
-    const ns = "http://www.w3.org/2000/svg",
-      ring = document.createElementNS(ns, "svg");
-    ring.setAttribute("viewBox", "0 0 100 100");
-    ring.classList.add("grade-ring");
-    ring.setAttribute("role", "img");
-    ring.setAttribute(
-      "aria-label",
-      `已判分${graded}/28题，待批${data.pending}题`,
-    );
-    const total = document.createElementNS(ns, "circle"),
-      done = document.createElementNS(ns, "circle");
-    [total, done].forEach((circle) => {
-      Object.entries({
-        cx: 50,
-        cy: 50,
-        r: 40,
-        fill: "none",
-        "stroke-width": 6,
-      }).forEach(([k, v]) => circle.setAttribute(k, v));
-      ring.append(circle);
-    });
-    total.setAttribute("stroke", "#edf1f5");
-    done.setAttribute("stroke", "#2563eb");
-    done.setAttribute("stroke-dasharray", `${(graded / 28) * 251.3} 251.3`);
-    done.setAttribute("transform", "rotate(-90 50 50)");
-    const text = document.createElementNS(ns, "text");
-    text.setAttribute("x", "50");
-    text.setAttribute("y", "49");
-    text.setAttribute("text-anchor", "middle");
-    text.textContent = `${graded}/28`;
-    ring.append(text);
-    const caption = document.createElementNS(ns, "text");
-    caption.setAttribute("x", "50");
-    caption.setAttribute("y", "64");
-    caption.setAttribute("text-anchor", "middle");
-    caption.classList.add("small-text");
-    caption.textContent = "已判分题目";
-    ring.append(caption);
-    grade.append(ring);
-    const info = make("div", undefined, grade);
-    make("span", data.pending ? "待批改" : "批改完成", info, "pill blue-pill");
-    make(
-      "div",
-      data.score === null
-        ? `${data.pending}题待批改`
-        : `${data.score} / ${data.max_points}分`,
-      info,
-      "grade-title",
-    );
-    make(
-      "p",
-      data.score === null
-        ? `已评分得分 ${data.graded_points}；完整总分尚未确定。`
-        : "本卷所有题目均已判分。",
-      info,
-      "grade-caption",
-    );
-    const subject = make("section", undefined, summary, "card");
-    make("h2", "学科表现", subject);
-    const bars = make("div", undefined, subject);
-    const scores = {};
-    data.answers.forEach((answer) => {
-      const score = (scores[answer.subject] ||= {
-        points: 0,
-        max: 0,
-        pending: 0,
+    byId("result-bar").hidden = false;
+    const day = latest.paper?.date ? new Date(latest.paper.date + "T00:00:00") : null;
+    byId("result-title").textContent = day ? `${day.getMonth() + 1} 月 ${day.getDate()} 日训练卷` : "训练卷成绩";
+    const summary = make("div", undefined, undefined, "result-analytics");
+    const key = make("section", undefined, summary, "card key-card result-key");
+    const types = make("section", undefined, summary, "card data-card");
+    const pending = data.pending;
+    if (pending) {
+      // Grading is still running: say how far it is (never a made-up total).
+      const graded = data.answers.filter((a) => a.points !== null || a.excluded).length;
+      const progress = make("section", undefined, summary, "card grade-card");
+      progress.setAttribute("role", "group");
+      progress.setAttribute("aria-label", `已判分${graded}/${data.answers.length}题，待判分${pending}题`);
+      const info = make("div", undefined, progress);
+      make("span", "判分中", info, "pill blue-pill");
+      make("div", `${pending}题待判分`, info, "grade-title");
+      make("p", `已判分 ${graded}/${data.answers.length} 题，已得 ${data.graded_points} 分；完整总分尚未确定。`, info, "grade-caption");
+    }
+    void window.Insights?.resultExtras(data, { key, types });
+    // the per-question details, in one card with an "only the lost ones" switch
+    const detail = make("section", undefined, undefined, "card detail-card");
+    const head = make("div", undefined, detail, "card-heading");
+    make("h2", "逐题详情", head);
+    const toggle = make("div", undefined, head, "detail-toggle");
+    toggle.setAttribute("role", "group");
+    toggle.setAttribute("aria-label", "逐题详情筛选");
+    const holder = make("div", undefined, detail, "detail-list");
+    const modes = [["all", "全部"], ["lost", "只看失分题"]];
+    const apply = (mode) => {
+      toggle.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === mode)));
+      holder.querySelectorAll(":scope > article").forEach((article) => {
+        const answer = data.answers[Number(article.dataset.index)];
+        article.hidden = mode === "lost" && !(answer && !answer.excluded && (answer.points === null || answer.points < answer.max_points));
       });
-      if (answer.points === null) score.pending++;
-      else {
-        score.points += answer.points;
-        score.max += answer.max_points;
-      }
-    });
-    subjectBars(bars, scores);
-    make(
-      "p",
-      "得分率仅含已判分题目，未答0分计入，待批题目排除。",
-      subject,
-      "card-footnote",
-    );
-    const coverage = make("section", undefined, summary, "card");
-    make("h2", "知识章节分布", coverage);
-    const chapters = new Map();
-    data.answers.forEach((answer) => {
-      new Set(answer.evidence.map((e) => e.chapter).filter(Boolean)).forEach(
-        (chapter) => chapters.set(chapter, (chapters.get(chapter) || 0) + 1),
-      );
-    });
-    Array.from(chapters)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .forEach(([chapter, count]) => {
-        const row = make("div", undefined, coverage, "subject-row"),
-          heading = make("div", undefined, row, "subject-label");
-        make("span", chapter, heading);
-        make("span", `${count}题涉及`, heading);
-        const track = make("div", undefined, row, "data-track"),
-          fill = make("div", undefined, track, "data-fill");
-        fill.style.width = `${(count / data.answers.length) * 100}%`;
-      });
-    make(
-      "p",
-      "按每题引用的章节去重计数；一题可覆盖多个章节。这是本卷覆盖分布，不是掌握率。",
-      coverage,
-      "card-footnote",
-    );
-    const reflection = make("section", undefined, summary, "card");
-    make("h2", "错题与复盘", reflection);
-    const isAnswered = (answer) => {
-      try {
-        return answered(JSON.parse(answer.answer));
-      } catch {
-        return !!answer.answer?.trim();
-      }
     };
-    const wrong = data.answers.filter(
-      (a) => a.points !== null && a.points < a.max_points && isAnswered(a),
-    );
-    const blank = data.answers.filter((a) => !isAnswered(a)).length;
-    make("div", `${wrong.length}道已作答失分题`, reflection, "grade-title");
-    make(
-      "p",
-      `另有${blank}道未答题、${data.pending}道待批题，未混入已作答错题。`,
-      reflection,
-      "grade-caption",
-    );
-    make(
-      "p",
-      "暂无可汇总的错因分类；请在具体题目中记录真实复盘原因，不从分数推测错因。",
-      reflection,
-      "card-footnote",
-    );
-    const review = make(
-      "button",
-      "查看实际FSRS复习安排 →",
-      reflection,
-      "text-button",
-    );
-    review.onclick = () => byId("memory").click();
+    modes.forEach(([mode, label]) => {
+      const button = make("button", label, toggle);
+      button.type = "button";
+      button.dataset.mode = mode;
+      button.onclick = () => apply(mode);
+    });
     byId("result").prepend(summary);
     byId("result")
       .querySelectorAll(":scope > article")
       .forEach((article, index) => {
         const answer = data.answers[index];
-        if (!answer) return;
-        const details = make("details"),
-          title = make(
-            "summary",
-            undefined,
-            details,
-            "result-question-summary",
+        article.dataset.index = String(index);
+        if (answer) {
+          const details = make("details"),
+            title = make("summary", undefined, details, "result-question-summary");
+          make("span", `第${index + 1}题 · ${labels[answer.subject]} · ${typeNames[answer.question_type] || ""}`, title);
+          make(
+            "span",
+            answer.excluded ? "已反馈 · 不计分" : answer.points === null ? "待判分" : `${answer.points}/${answer.max_points}分`,
+            title,
           );
-        make(
-          "span",
-          `第${index + 1}题 · ${labels[answer.subject]} · 查看作答与解析`,
-          title,
-        );
-        make(
-          "span",
-          answer.points === null
-            ? "待批改"
-            : `${answer.points}/${answer.max_points}分`,
-          title,
-        );
-        const body = make("div", undefined, details);
-        while (article.firstChild) body.append(article.firstChild);
-        article.append(details);
+          const body = make("div", undefined, details);
+          while (article.firstChild) body.append(article.firstChild);
+          article.append(details);
+        }
+        holder.append(article);
       });
+    summary.after(detail);
+    apply("all");
     lastLoad = 0;
     if (account) signedIn(account);
   }
@@ -618,7 +464,7 @@
       make("h3", row.chapter || "未标注章节", card);
       make(
         "p",
-        `${labels[row.subject]} · ${row.answers}条作答记录 · ${row.pending}题待批`,
+        `${labels[row.subject]} · ${row.answers}条作答记录 · ${row.pending}题待判分`,
         card,
         "analysis-note",
       );
@@ -641,8 +487,36 @@
       fill.style.width = `${data.max ? Math.min(100, (data.points / data.max) * 100) : 0}%`;
     });
   }
+  // Unanswered (not reported) questions and those marked "look again", in paper order.
+  function submitCheck() {
+    const questions = latest.paper?.questions || [];
+    const reported = new Set(latest.paper?.reported_question_ids || []);
+    const open = [],
+      marked = [];
+    questions.forEach((question, index) => {
+      if (reported.has(question.id)) return;
+      const draft = latest.drafts[question.id];
+      if (!answered(draft)) open.push(index);
+      if (draft?.flagged) marked.push(index);
+    });
+    return { open, marked };
+  }
   function confirmSubmit() {
     const dialog = byId("submit-dialog");
+    const check = submitCheck();
+    const warning = byId("submit-warning"),
+      jump = byId("jump-unanswered");
+    const parts = [];
+    if (check.open.length) parts.push(`还有 ${check.open.length} 题未答`);
+    if (check.marked.length) parts.push(`${check.marked.length} 题标记稍后看`);
+    warning.hidden = !parts.length;
+    warning.textContent = parts.join("、");
+    jump.hidden = !check.open.length;
+    jump.onclick = () => {
+      dialog.close();
+      showView("exam");
+      navigate(check.open[0]);
+    };
     byId("submit-summary").textContent =
       byId("map-summary").textContent +
       (latest.pendingCount
@@ -659,21 +533,49 @@
       dialog.addEventListener("close", () => resolve(accepted), { once: true });
     });
   }
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.onclick = () => showView(button.dataset.view);
+  // a sub-page that finishes loading after the user already left its route must not draw itself on the new page
+  new MutationObserver(() => {
+    const learning = byId("learning");
+    if (learning.hasChildNodes() && learning.dataset.owner !== currentKey) learning.replaceChildren();
+    learning.hidden = !learning.hasChildNodes();
+  }).observe(byId("learning"), { childList: true });
+  document.querySelectorAll("button[data-view]").forEach((button) => {
+    button.onclick = () => go(button.dataset.view);
+  });
+  document.querySelectorAll("[data-back]").forEach((button) => {
+    button.onclick = back;
   });
   document.querySelectorAll("[data-action]").forEach((button) => {
     button.onclick = () => byId(button.dataset.action).click();
   });
   document.querySelector("[data-prepare-proxy]").onclick = () =>
     byId("prepare").click();
-  ["memory", "weekly", "history", "insights", "archive"].forEach((id) =>
-    byId(id).addEventListener("click", () =>
-      showView(
-        id === "memory" ? "mistakes" : id === "archive" ? "profile" : "stats",
-      ),
-    ),
+  byId("open-start").onclick = () => byId("start-dialog").showModal();
+  byId("cancel-start").onclick = () => byId("start-dialog").close();
+  ["memory", "weekly", "history", "insights", "archive", "source-status"].forEach((id) =>
+    byId(id).addEventListener("click", () => {
+      if (suppressRoute) return; // a back/forward navigation re-opening this page: the URL is already right
+      if (id === "memory") {
+        byId("learning").dataset.owner = "#/mistakes";
+        return go("mistakes");
+      }
+      alreadyLoaded = id === "archive" ? "#/profile/archive" : "#/stats/" + id;
+      byId("learning").dataset.owner = alreadyLoaded;
+      if (id === "archive") go("profile", "archive");
+      else go("stats", id);
+    }),
   );
+  // Messages appear as a short toast at the top, not as a permanent status line on the page.
+  const statusEl = byId("status");
+  let statusTimer = 0;
+  new MutationObserver(() => {
+    if (!statusEl.textContent.trim()) return statusEl.classList.remove("show");
+    statusEl.classList.add("show");
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => statusEl.classList.remove("show"), statusEl.textContent.trim() === "已登录" ? 2000 : 5000);
+  }).observe(statusEl, { childList: true, characterData: true, subtree: true });
+  byId("result-back").onclick = () => go("home");
+  byId("stats-back").onclick = back;
   byId("leave-focus").onclick = () => {
     showView("home");
     byId("status").textContent = "已返回概览，考试计时仍在继续。";
@@ -726,14 +628,7 @@
   window.addEventListener("online", connection);
   window.addEventListener("offline", connection);
   connection();
-  if (window.visualViewport) {
-    const viewport = () =>
-      document.body.classList.toggle(
-        "keyboard-open",
-        window.innerHeight - window.visualViewport.height > 150,
-      );
-    window.visualViewport.addEventListener("resize", viewport);
-  }
+  // (the keyboard-open class is kept by shell.js)
   byId("logout").onclick = async () => {
     if (
       active() &&
@@ -757,13 +652,6 @@
     sessionStorage.removeItem("quiz-v2-paper-key");
     location.reload();
   };
-  byId("today-label").textContent =
-    new Intl.DateTimeFormat("zh-CN", {
-      timeZone: "Asia/Shanghai",
-      month: "long",
-      day: "numeric",
-      weekday: "long",
-    }).format(new Date()) + " · 学习工作台";
   window.TrainingUI = {
     state,
     rendered,
@@ -774,11 +662,21 @@
     },
     result,
     weekly,
+    // the mark button lives inside the shown question; park it before the questions are rebuilt
+    parkMarkButton: () => document.querySelector(".focus-secondary")?.append(byId("toggle-mark")),
     confirmSubmit,
     actions: (value) => {
       actions = value;
     },
     showView,
+    go,
+    back,
+    today: () => ({
+      status: latest.paper?.timing?.status || null,
+      hasPaper: !!latest.paper,
+      clock: byId("clock")?.textContent || "",
+      paperId: latest.paper?.paper_id || null,
+    }),
   };
-  showView("home");
+  apply();
 })();

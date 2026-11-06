@@ -7,6 +7,58 @@ COLLECTION = json.loads(Path(__file__).with_name("ocr_collection.json").read_tex
 FILES = {f["file_id"]: f for f in COLLECTION["files"]}
 
 
+def pinned_source_bytes(file_id, source_sha256):
+    """True only for this collection's exact six-owner-source byte revisions.
+
+    A valid Drive file ID, current source_documents row or self-consistent
+    database checksum is not sufficient. Fail closed on a missing/mismatched
+    lock file. This gate is intended for NEW automatic generation; historical
+    snapshots must remain readable even after a source revision changes.
+    """
+    try:
+        lock = json.loads(
+            Path(__file__).with_name("ocr_source_sha256_lock.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError, TypeError):
+        return False
+    item = FILES.get(file_id)
+    if not item or lock.get("collection_version") != COLLECTION["version"]:
+        return False
+    expected = lock.get("files", {}).get(item["key"], {})
+    return (
+        type(source_sha256) is str
+        and len(source_sha256) == 64
+        and expected.get("sha256") == source_sha256
+    )
+
+
+
+def pinned_science_evidence(question):
+    """New 60q paper admission: every answer source is a pinned OCR textbook.
+
+    Style text, non-current Drive IDs, empty evidence and same-ID changed bytes
+    never count as scientific support. This applies only when preparing a NEW
+    paper; frozen old attempts and scores are not altered.
+    """
+    if not isinstance(question, dict):
+        return False
+    evidences = question.get("evidence")
+    if not isinstance(evidences, list) or not evidences:
+        return False
+    textbooks = {
+        item["file_id"] for item in COLLECTION["files"]
+        if item["kind"] == "textbook"
+    }
+    return all(
+        isinstance(e, dict)
+        and e.get("file_id") in textbooks
+        and pinned_source_bytes(e.get("file_id"), e.get("source_sha256"))
+        for e in evidences
+    )
+
+
 def current_source_sql(alias="d", *, kind=None, at_sql=None):
     ids = [f["file_id"] for f in FILES.values() if kind is None or f["kind"] == kind]
     literals = ",".join(

@@ -1,0 +1,123 @@
+/* One set of colour variables for every page; light by default, dark when the system is dark
+   (prefers-color-scheme). Nothing else in the styles or scripts may hard-code a colour.
+   Light: page #F4F6FA, card #FFFFFF, border #E5E9F0, divider #EEF1F5, text #111827, secondary #556070,
+   primary #2563EB, key card #F0F5FF / #DBE6FB, orange #EA580C (text #C2410C), green #15803D.
+   Dark:  page #0E1014, card #171A21, border #262B35, divider #222731, text #E8EAED, secondary #A3A9B5,
+   primary #60A5FA (pressed #93C5FD), key card #111B2E / #1E3A5F, orange #FB923C (text #FDBA74), green #4ADE80.
+   Cards are told apart by their border, not by shadows (no shadow in dark). */
+:root {
+  color-scheme: light dark;
+  --bg: #f4f6fa;
+  --card: #ffffff;
+  --line: #e5e9f0;
+  --divider: #eef1f5;
+  --ink: #111827;
+  --text: var(--ink);
+  --muted: #556070;
+  --primary: #2563eb;
+  --primary-press: #1d4ed8;
+  --on-primary: #ffffff;
+  --primary-soft: #dbeafe;
+  --primary-soft-ink: #1e40af;
+  --primary-soft-line: #bfdbfe;
+  --primary-bar: #93c5fd;
+  --key: #f0f5ff;
+  --key-line: #dbe6fb;
+  --accent: #ea580c;
+  --accent-ink: #c2410c;
+  --accent-soft: #ffedd5;
+  --accent-faint: #fff7ed;
+  --accent-line: #fdba74;
+  --up: #15803d;
+  --up-soft: #dcfce7;
+  --up-line: #86efac;
+  --danger: #b91c1c;
+  --danger-line: #fecaca;
+  --tag: #e5e9f0;
+  --tag-ink: #374151;
+  --disabled: #e5e9f0;
+  --disabled-ink: #5f6773; /* 4.5:1 on the disabled fill */
+  --placeholder: #6b7280;
+  --input: #f8faff;
+  --input-focus: #93c5fd;
+  --focus-ring: rgba(147, 197, 253, 0.4);
+  --shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
+  --dialog-shadow: 0 8px 24px rgba(17, 24, 39, 0.18);
+  --scrim: rgba(17, 24, 39, 0.4);
+  --toast-bg: #111827;
+  --toast-ink: #ffffff;
+  /* charts */
+  --chart-bio: #2563eb;
+  --chart-cell: #ea580c;
+  --chart-total: #111827;
+  --chart-grid: #eef1f5;
+  --chart-axis: #556070;
+  --chart-track: #e5e9f0;
+  --heat-0: #e5e9f0;
+  --heat-0: color-mix(in srgb, var(--ink) 10%, var(--card));
+  --heat-1: #dbeafe;
+  --heat-2: #93c5fd;
+  --heat-3: #3b82f6;
+  --heat-4: #1d4ed8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1014;
+    --card: #171a21;
+    --line: #262b35;
+    --divider: #222731;
+    --ink: #e8eaed;
+    --muted: #a3a9b5;
+    --primary: #60a5fa;
+    --primary-press: #93c5fd;
+    --on-primary: #0b1220;
+    --primary-soft: #172554;
+    --primary-soft-ink: #bfdbfe;
+    --primary-soft-line: #1e3a8a;
+    --primary-bar: #2f5f9e;
+    --key: #111b2e;
+    --key-line: #1e3a5f;
+    --accent: #fb923c;
+    --accent-ink: #fdba74;
+    --accent-soft: #3a2310;
+    --accent-faint: #241a10;
+    --accent-line: #7c4a1f;
+    --up: #4ade80;
+    --up-soft: #12301d;
+    --up-line: #1f6b3a;
+    --danger: #f87171;
+    --danger-line: #6b2424;
+    --tag: #262b35;
+    --tag-ink: #cbd5e1;
+    --disabled: #262b35;
+    --disabled-ink: #8b93a1;
+    --placeholder: #8b93a1;
+    --input: #12151b;
+    --input-focus: #3b82f6;
+    --focus-ring: rgba(59, 130, 246, 0.35);
+    --shadow: none;
+    --dialog-shadow: none;
+    --scrim: rgba(0, 0, 0, 0.6);
+    --toast-bg: #e8eaed;
+    --toast-ink: #0e1014;
+    --chart-bio: #60a5fa;
+    --chart-cell: #fb923c;
+    --chart-total: #e8eaed;
+    --chart-grid: #222731;
+    --chart-axis: #a3a9b5;
+    --chart-track: #262b35;
+    --heat-0: #262b35;
+    --heat-0: color-mix(in srgb, var(--ink) 14%, var(--card));
+    --heat-1: #1e3a8a;
+    --heat-2: #1d4ed8;
+    --heat-3: #3b82f6;
+    --heat-4: #93c5fd;
+  }
+}
+
+/* Page shell on every page: the document itself never scrolls. Top gap (16px, so the title sits clear of the
+   system's blurred status-bar zone) -> scrolling content area -> bottom bar. Without viewport-fit=cover the
+   system keeps the page inside the status bar and the Home indicator, so nothing needs a safe-area inset. */
+html, body { margin: 0; height: var(--app-h, 100dvh); overflow: hidden; overscroll-behavior: none; }
+body { display: grid; grid-template-rows: 16px minmax(0, 1fr) auto; background: var(--bg); }
+body::before { content: ""; grid-row: 1; grid-column: 1 / -1; }

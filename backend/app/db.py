@@ -10,14 +10,12 @@ from psycopg.rows import dict_row
 from psycopg.conninfo import conninfo_to_dict
 
 
-@contextmanager
-def get_db():
-    """Yield a transaction-scoped connection; commit on success, roll back on error."""
+def _verified_database_url():
+    """The database URL, after the same identity checks every connection goes through."""
     from app.deployment_target import (
         verify_isolated_target,
         on_railway,
         verify_database_url,
-        verify_database_connection,
     )
 
     verify_isolated_target()
@@ -40,20 +38,50 @@ def get_db():
             raise PermissionError(
                 "Remote database requires pinned Railway identity or approved recovery tool"
             )
+    return database_url
+
+
+def _isolated_schema(conn):
+    """The explicitly configured isolated schema (None when the connection's own search_path is used)."""
+    from app.deployment_target import on_railway, verify_database_connection
+
+    if on_railway():
+        verify_database_connection(conn)
+    schema = os.environ.get("QUIZ_DB_SCHEMA")
+    if schema:
+        if not re.fullmatch(r"source_staging_[a-zA-Z0-9_]+", schema):
+            raise ValueError("Explicit isolated schema required")
+        if not conn.execute(
+            "SELECT 1 FROM pg_namespace WHERE nspname=%s", (schema,)
+        ).fetchone():
+            raise ValueError(
+                "Isolated schema missing; restore explicitly, never create a parallel bank"
+            )
+    return schema
+
+
+@contextmanager
+def get_db():
+    """Yield a transaction-scoped connection; commit on success, roll back on error."""
+    database_url = _verified_database_url()
     with psycopg.connect(database_url, row_factory=dict_row) as conn:
-        if on_railway():
-            verify_database_connection(conn)
-        schema = os.environ.get("QUIZ_DB_SCHEMA")
+        schema = _isolated_schema(conn)
         if schema:
-            if not re.fullmatch(r"source_staging_[a-zA-Z0-9_]+", schema):
-                raise ValueError("Explicit isolated schema required")
-            if not conn.execute(
-                "SELECT 1 FROM pg_namespace WHERE nspname=%s", (schema,)
-            ).fetchone():
-                raise ValueError(
-                    "Isolated schema missing; restore explicitly, never create a parallel bank"
-                )
             conn.execute(
                 sql.SQL("SET LOCAL search_path TO {}").format(sql.Identifier(schema))
             )
         yield conn
+
+
+def listen_connection():
+    """A long-lived autocommit connection for LISTEN (the caller closes it). Same checks as get_db; returns (conn, schema)
+    where schema is the schema this deployment's rows live in."""
+    conn = psycopg.connect(_verified_database_url(), row_factory=dict_row, autocommit=True)
+    try:
+        schema = _isolated_schema(conn)
+        if schema:
+            conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
+        return conn, conn.execute("SELECT current_schema() AS s").fetchone()["s"]
+    except Exception:
+        conn.close()
+        raise

@@ -5,7 +5,7 @@ const labels = {
   fill_blank: "填空",
   term: "名词解释",
   short_answer: "简答",
-  essay: "论述",
+  essay: "问答",
   biochemistry: "生化",
   cell_biology: "细胞",
   approve_candidate: "候选审核通过（未发布）",
