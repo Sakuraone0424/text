@@ -12,7 +12,7 @@ from datetime import timedelta
 from app import chapters, memory
 from app.learning_stats import SHANGHAI, TYPES, today_cn
 
-GROUPS = (("today", "今天及之前到期"), ("tomorrow", "明天到期"), ("later", "以后"), ("consolidate", "待巩固"), ("mastered", "已掌握"))
+GROUPS = (("today", "已到期"), ("tomorrow", "今天稍后及明天"), ("later", "以后"), ("consolidate", "待巩固"), ("mastered", "已掌握"))
 MASTERED_AFTER = 3          # successful reviews (Good or Easy) after which a question counts as mastered: the three dots
 
 
@@ -76,6 +76,7 @@ def history_of(conn, uid, question_id):
 def book(conn, uid, today=None):
     today = today or today_cn(conn)
     tomorrow = today + timedelta(days=1)
+    now = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
     mapper = chapters.ChapterMap(conn)
     cards = conn.execute(
         "SELECT c.question_id,c.status,c.due,c.version,q.content FROM fsrs_cards c JOIN reviewed_questions q ON q.id=c.question_id "
@@ -99,10 +100,11 @@ def book(conn, uid, today=None):
         due_day = c["due"].astimezone(SHANGHAI).date()
         if c["status"] == "mastered" or dots >= MASTERED_AFTER:
             group = "mastered"
-        elif c["status"] == "consolidate" and due_day > today:
-            group = "consolidate"             # not due yet; one that is due is in the due groups (the count on top and the group agree)
+        elif c["status"] == "consolidate" and c["due"] > now:
+            group = "consolidate"             # not due yet; one that is due is in the due group (the count on top and the group agree)
         else:
-            group = "today" if due_day <= today else "tomorrow" if due_day == tomorrow else "later"
+            # the same test as the count on top and the review queue: due by now
+            group = "today" if c["due"] <= now else "tomorrow" if due_day <= tomorrow else "later"
         subjective = content["question_type"] in memory.SUBJECTIVE
         items.append(dict(
             question_id=c["question_id"], subject=content["subject"], question_type=content["question_type"],

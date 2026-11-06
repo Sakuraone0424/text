@@ -173,7 +173,6 @@
     if (!lock || window.__hasPaper?.()) startReady();
     else window.Pages?.todayLoaded();
     window.Pages?.paintToday();
-    $("prepare-note").hidden = !(lock && lock.complete) && !!lock;
   }
   async function loadHomeNow() {
     a2hsHint();

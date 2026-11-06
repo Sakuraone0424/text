@@ -41,7 +41,7 @@ def item(qid, subject, qtype, chapter, group, **over):
 
 BOOK = {
     "today": "2026-11-05", "total": 6, "open": 5, "unmapped": {},
-    "groups": [{"key": "today", "label": "今天及之前到期", "count": 2}, {"key": "tomorrow", "label": "明天到期", "count": 1}, {"key": "later", "label": "以后", "count": 1},
+    "groups": [{"key": "today", "label": "已到期", "count": 2}, {"key": "tomorrow", "label": "今天稍后及明天", "count": 1}, {"key": "later", "label": "以后", "count": 1},
                {"key": "consolidate", "label": "待巩固", "count": 1}, {"key": "mastered", "label": "已掌握", "count": 1}],
     "items": [
         item(1, "biochemistry", "single_choice", "第二章 蛋白质的结构与功能", "today", stem="下列关于蛋白质二级结构的叙述，哪一项是正确的", wrong_times=3, dots=1),
@@ -122,8 +122,8 @@ def test_the_practice_page_has_the_papers_card_six_kinds_and_the_recent_list(eng
 def test_one_state_on_the_home_card_and_the_practice_card(engine, live_app):
     page, _ = start(engine, live_app, ROUTES)
     page.wait_for_function("document.getElementById('prepare').dataset.kind && document.getElementById('prepare').dataset.kind !== 'loading'")
-    home = page.evaluate("[document.getElementById('prepare').textContent, document.getElementById('paper-state').textContent, document.getElementById('prepare').disabled]")
-    practice = page.evaluate("[document.getElementById('practice-today-btn').textContent, document.getElementById('practice-paper-state').textContent, document.getElementById('practice-today-btn').disabled]")
+    home, practice = page.evaluate("""() => { const v = (b, p) => [document.getElementById(b).textContent, document.getElementById(p).textContent, document.getElementById(b).disabled];
+        return [v('prepare', 'paper-state'), v('practice-today-btn', 'practice-paper-state')]; }""")        # read together: the state may change between two calls
     assert home == practice                                                    # the same label, pill and state, always
     page.close()
 
@@ -142,7 +142,7 @@ def test_the_mistake_book_is_cards_grouped_by_due_date_with_a_one_line_filter(en
     page, errors = start(engine, live_app, ROUTES, path="/training#/mistakes")
     page.wait_for_selector("#mistake-groups .mistake-card")
     groups = page.locator("#mistake-groups .mg-head")
-    assert [t.split("\n")[0] for t in groups.all_inner_texts()] == ["今天及之前到期", "明天到期", "以后", "待巩固", "已掌握"]
+    assert [t.split("\n")[0] for t in groups.all_inner_texts()] == ["已到期", "今天稍后及明天", "以后", "待巩固", "已掌握"]
     first = page.locator("#mistake-groups .mistake-card").first
     assert first.get_attribute("href") == "#/mistake/m1"
     text = first.inner_text()
@@ -251,7 +251,7 @@ def test_the_number_on_top_and_the_first_group_are_the_same_count(engine, live_a
     page.wait_for_selector("#mistake-groups .mistake-card")
     page.wait_for_function("document.getElementById('due-number').textContent !== '0'")
     first = page.locator("#mistake-groups .mg-head").first
-    assert "今天及之前到期" in first.inner_text()
+    assert "已到期" in first.inner_text()
     assert page.locator("#due-number").inner_text() == first.locator(".mg-count").inner_text() == "2"
     # the seven bars use the width to the right of the count
     box = page.evaluate("""() => { const b = document.getElementById('due-mini').getBoundingClientRect(), c = document.querySelector('.due-card').getBoundingClientRect(),
@@ -294,7 +294,7 @@ def test_a_review_with_waiting_answers_shows_the_objective_part_the_reasons_and_
     head = page.locator("#review-body .review-head").inner_text()
     assert "38" in head and "/ 60 分" in head and "客观题" in head and "主观题判分中" in head
     assert "有 5 题交卷后超过 30 分钟仍未判完" in head
-    assert "排队等待 AI 判分" in page.locator("#review-body .review-q.pending").first.inner_text()
+    assert "排队等待 AI 判分" in page.locator("#review-body .review-q.pending").first.text_content()
     page.locator("#review-body .review-head button", has_text="整卷重新判分").click()
     page.wait_for_function("window.__calls && window.__calls['/v2/papers/9/regrade'] === 1")
     expect(page.locator("#review-body .review-head button", has_text="已重新排队")).to_have_count(1)

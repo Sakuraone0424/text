@@ -48,6 +48,7 @@ def start(engine, live_app, scheme="light", reduced=False, routes=None, path="/t
         page.context.add_init_script(init)
     page.goto(base + path)
     page.wait_for_selector('nav.primary-nav [data-view="home"]')
+    errors.clear()          # requests of the document this one replaced are cancelled (WebKit reports them as page errors): not this page's
     return page, errors
 
 

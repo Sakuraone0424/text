@@ -98,7 +98,8 @@
       if (note) {
         if (!note.dataset.plain) note.dataset.plain = note.textContent;      // the home card's usual line (shown when nothing needs saying)
         note.textContent = s.reason || (note.id === "prepare-note" ? note.dataset.plain : "");
-        if (s.reason) note.hidden = false;
+        if (note.id === "prepare-note") note.hidden = !(s.reason || s.kind === "prepare");        // the home card's line: the usual hint, or why it cannot start
+        else if (s.reason) note.hidden = false;
       }
     }
   }
