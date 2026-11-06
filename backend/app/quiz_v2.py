@@ -41,7 +41,9 @@ def exclusive_topic_collision(question, other):
     return bool(ids(question) & ids(other))
 
 
-REUSE_AFTER_DAYS = 14  # a question last seen this long ago may fill a gap in a paper
+# A question that has been on one of this learner's papers (or practice sets) is used for good: it never goes on a daily paper
+# again, and neither does a question with (nearly) the same stem. The old rule that let a question come back after 14 days
+# is gone. Mistakes are reviewed on the mistakes page, never mixed into a daily paper.
 
 
 class BankShortage(ValueError):
@@ -153,6 +155,26 @@ def publish_question(conn, question_id: int):
     return {"id": question_id, "status": "published"}
 
 
+def used_questions(conn, user_id):
+    """(ids of every question this learner has had on a paper, old 28-question paper or practice set, their stems)."""
+    ids, stems = set(), []
+    for r in conn.execute(
+        "SELECT i.question_id AS id,i.snapshot->>'stem' AS stem FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id WHERE p.user_id=%s "
+        "UNION ALL SELECT i.question_id,q.stem FROM paper_questions i JOIN papers p ON p.id=i.paper_id "
+        "JOIN questions q ON q.id=i.question_id WHERE p.user_id=%s",
+        (user_id, user_id),
+    ).fetchall():
+        ids.add(r["id"])
+        stems.append(r["stem"])
+    for r in conn.execute(
+        "SELECT q.id,q.content->>'stem' AS stem FROM practice_sets s JOIN reviewed_questions q ON q.id=ANY(s.question_ids) WHERE s.user_id=%s",
+        (user_id,),
+    ).fetchall():
+        ids.add(r["id"])
+        stems.append(r["stem"])
+    return ids, stems
+
+
 def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     resume_unfinished = day is None
     day = day or today_cn()
@@ -205,22 +227,8 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     relaxed_rules = set()      # paper rules the bank could not keep (chapter cap, difficulty mix): said on the paper
     decisions = []
     audit = []
-    # Also reject semantically close stems already seen by this user; no revision recycling.
-    seen_rows = [
-        (r["stem"], r["day"])
-        for r in conn.execute(
-            "SELECT i.snapshot->>'stem' AS stem,p.paper_date AS day FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id WHERE p.user_id=%s "
-            "UNION ALL SELECT q.stem,p.paper_date FROM paper_questions i JOIN papers p ON p.id=i.paper_id "
-            "JOIN questions q ON q.id=i.question_id WHERE p.user_id=%s",
-            (user_id, user_id),
-        ).fetchall()
-    ]
-    seen = [stem for stem, _ in seen_rows]
-    # Not enough new questions? Questions last seen REUSE_AFTER_DAYS or more ago may fill the gap.
-    import datetime as _dt
-
-    reuse_cutoff = day - _dt.timedelta(days=REUSE_AFTER_DAYS)
-    reusable = defaultdict(list)
+    # Never a question this learner has had (paper or practice set), and never one with a (nearly) identical stem.
+    used_ids, seen = used_questions(conn, user_id)
     selected, shortages = [], []
     from app.sources import evidence_issues
     from app.exams import style_issues
@@ -285,9 +293,10 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
         )
         if not reasons:
             quality.append(row)
-    context, policy, due = snapshot(
+    context, policy, _ = snapshot(
         conn, user_id, [r["content"] for r in quality], as_of
     )
+    due = {}          # no FSRS mistakes on a daily paper: all 60 are new questions
     eligible = []
     for row in quality:
         content = row["content"]
@@ -302,24 +311,15 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                 )
             ]
 
-        if row["id"] not in due and any(
-            duplicate(content["stem"], stem) for stem in seen
-        ):
-            item["excluded_reasons"].append("previously_seen_stem_without_due_review")
-            last_seen = max(d for stem, d in seen_rows if duplicate(content["stem"], stem))
-            if last_seen <= reuse_cutoff:
-                item["is_retest"] = False
-                item["review_knowledge_tags"] = review_tags()
-                reusable[(content["subject"], content["question_type"])].append((last_seen, row["id"], row, item))
+        if row["id"] in used_ids or any(duplicate(content["stem"], stem) for stem in seen):
+            item["excluded_reasons"].append("already_used_or_same_stem_as_a_used_question")
             continue
-        item["is_retest"] = row["id"] in due
-        item["review_knowledge_tags"] = review_tags()
+        item["is_retest"] = False
+        item["review_knowledge_tags"] = []
         eligible.append(row)
     from app.past_exam_import import concept_keys, concepts_collide
 
-    concepts = concept_keys(
-        conn, [r["id"] for r in eligible] + [x[2]["id"] for group in reusable.values() for x in group]
-    )
+    concepts = concept_keys(conn, [r["id"] for r in eligible])
     reused_ids = set()
     for subject in SUBJECTS:
         for kind, count in spec_counts.items():
@@ -353,27 +353,6 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                     ].append("duplicate_candidate_stem")
                     continue
                 pool.append(row)
-            if len(pool) < count:
-                # New questions are not enough: fill with the ones seen longest ago.
-                for _, _, cand, cand_item in sorted(reusable.get((subject, kind), []), key=lambda x: (x[0], x[1])):
-                    if len(pool) >= count:
-                        break
-                    cand_content = cand["content"]
-                    from app.answer_cues import conflict as cue_conflict
-
-                    if (
-                        cue_conflict(cand_content, [r["content"] for r in selected + pool])
-                        or any(
-                            exclusive_topic_collision(cand_content, r["content"]) or concepts_collide(concepts, cand["id"], r["id"])
-                            for r in selected + pool
-                        )
-                        or any(duplicate(cand_content["stem"], r["content"]["stem"]) for r in selected + pool)
-                    ):
-                        continue
-                    cand_item["excluded_reasons"] = []
-                    cand_item["reused"] = True
-                    reused_ids.add(cand["id"])
-                    pool.append(cand)
             if len(pool) < count:
                 shortages.append(
                     {

@@ -153,6 +153,11 @@ def plan(conn, uid, target=None, report=None):
     auto_quality.retire_stale(conn)
     auto_quality.retire_old_scoring(conn)
     auto_quality.retire_unusable_sources(conn)   # literature-list sources, missing figures, answers written in the stem
+    from app import memory
+
+    done = memory.reclassify_existing(conn)        # once: review cards sorted by the new mistake rule (nothing deleted)
+    if done and report is not None:
+        report["reclassified"] = ";".join(f"{k}:{'/'.join(f'{s}{n}' for s, n in sorted(v.items())) or '-'}" for k, v in done.items())
     auto_quality.discard_unfixable(conn)
     mark("retire")
     for row in conn.execute(

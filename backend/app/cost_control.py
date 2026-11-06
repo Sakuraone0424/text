@@ -291,15 +291,13 @@ def reserve_target(required, days):
 
 def bucket_supply(conn, subject, kind):
     """Questions of a bucket that exist or are already on their way (any pipeline stage)."""
-    # A ready question that has already been on a paper is not stock any more (the paper builder does not use it again until
-    # it is due for review): counting it kept the temporary first-batch limit "full" after the first paper and nothing new
-    # was written.
+    # A ready question that has already been on a paper or practice set is not stock any more, for good (it never returns).
     made = conn.execute(
         "SELECT count(*) AS n FROM auto_question_states st JOIN reviewed_questions q ON q.id=st.question_id "
         "WHERE st.status IN ('ready','candidate','checking','repairing') "
         "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
-        "AND NOT (st.status='ready' AND EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
-        "WHERE i.question_id=q.id AND p.paper_date > (clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date - 14))",
+        "AND NOT (st.status='ready' AND (EXISTS(SELECT 1 FROM paper_items_v2 i WHERE i.question_id=q.id) "
+        "OR EXISTS(SELECT 1 FROM practice_sets ps WHERE q.id=ANY(ps.question_ids))))",
         (subject, kind),
     ).fetchone()["n"]
     queued = conn.execute(

@@ -31,6 +31,8 @@ function form() {
     auto_discover: $("discover").checked,
     auto_upgrade: $("upgrade").checked,
     weak_focus: $("weak-focus").checked,
+    mistake_below: Number($("mistake-below").value) / 100,
+    consolidate_below: Number($("consolidate-below").value) / 100,
     task_cny: money($("task-budget").value),
     trial_cny: money($("trial-budget").value),
     trial_active: $("trial-active").checked,
@@ -57,6 +59,8 @@ function fill(s) {
   $("discover").checked = !!s.auto_discover;
   $("upgrade").checked = !!s.auto_upgrade;
   $("weak-focus").checked = s.weak_focus !== false;
+  $("mistake-below").value = String(Math.round((s.mistake_below ?? 0.6) * 100));
+  $("consolidate-below").value = String(Math.round((s.consolidate_below ?? 0.85) * 100));
 }
 const dirty = () => !!saved && JSON.stringify(form()) !== JSON.stringify(saved);
 function refreshDirty() {

@@ -120,7 +120,7 @@ def test_empty_state_pages(engine, live_app, mode, scheme):
     # home with a short bank: grey button that says why, no made-up numbers
     expect(page.locator("#days-left")).not_to_have_text("—")
     expect(page.locator("#prepare")).to_be_disabled()
-    expect(page.locator("#prepare")).to_have_text("题库还差 56 道，暂不能开始")
+    expect(page.locator("#prepare")).to_have_text(re.compile(r"^题库还差 56 道，预计 .*\d\d:\d\d 可开始$"))      # no old question fills a paper: it says when
     expect(page.locator("#paper-state")).to_have_text("题库准备中")
     expect(page.locator("#bank-eta")).to_contain_text("预计")
     expect(page.locator("#streak-days")).to_have_class(re.compile("zero"))

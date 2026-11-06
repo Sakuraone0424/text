@@ -191,6 +191,8 @@ class SaveAll(StrictModel):
     daily_limit_enabled: StrictBool
     monthly_limit_enabled: StrictBool
     weak_focus: StrictBool | None = None      # 薄弱章节优先出题 (None: leave as it is)
+    mistake_below: float | None = Field(default=None, gt=0, le=1, allow_inf_nan=False)       # 主观题得分率低于它算错题
+    consolidate_below: float | None = Field(default=None, gt=0, le=1, allow_inf_nan=False)  # 低于它（且不低于上一条）算待巩固
 
 
 @router.post("/save")
@@ -203,7 +205,7 @@ def save_all(data: SaveAll, request: Request, name=Depends(require_auth)):
         same = (data.model_id, data.effort) == (current["model_id"], current["effort"])
         models.configure(
             c, u, data.model_id, data.effort, verify=not same,
-            **{k: v for k, v in data.model_dump(exclude={"model_id", "effort"}).items() if not (k == "weak_focus" and v is None)},
+            **{k: v for k, v in data.model_dump(exclude={"model_id", "effort"}).items() if not (k in ("weak_focus", "mistake_below", "consolidate_below") and v is None)},
         )
         return status(c, u)
 

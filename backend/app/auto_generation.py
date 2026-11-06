@@ -298,13 +298,12 @@ def generation_attempts(conn, uid):
     }
 
 
-REUSE_AFTER_DAYS = 14   # = quiz_v2.REUSE_AFTER_DAYS: a question last on a paper this long ago may be used again
-# "Stock" is a question that can go on the NEXT paper as a fresh one: it has never been on this learner's paper, or its last
-# paper is old enough to reuse it. A question that was on a paper a few days ago is used up: it does not hold back the writing
-# of new ones (and it does not matter that its review is due: a review retest is not a fresh question).
+# "Stock" is a question that can go on the NEXT paper as a new one: it has never been on this learner's paper or practice set,
+# and no question with the very same stem has. A used question never comes back (no 14-day return), so it is not stock for good.
 UNUSED_SQL = (
     "NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id "
-    "WHERE i.question_id=q.id AND p.user_id=%s AND p.paper_date > (clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date - %s::int)"
+    "WHERE p.user_id=%s AND (i.question_id=q.id OR i.snapshot->>'stem'=q.content->>'stem')) "
+    "AND NOT EXISTS(SELECT 1 FROM practice_sets ps WHERE ps.user_id=%s AND q.id=ANY(ps.question_ids))"
 )
 
 
@@ -317,7 +316,7 @@ def eligible_reserve_count(conn, uid, subject, kind, cached=False):
         "WHERE s.status='ready' AND q.status='published' "
         "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
         "AND q.content->>'max_points'=%s AND " + UNUSED_SQL,
-        (subject, kind, str(POINTS[kind]), uid, REUSE_AFTER_DAYS),
+        (subject, kind, str(POINTS[kind]), uid, uid),
     ).fetchall()
     return eligible_verified_reserve(conn, eligible, cached=cached)
 
