@@ -12,7 +12,7 @@ from https_qa_support import https_app, https_browser  # noqa: F401
 
 def login_start(page, qa):
     page.goto(qa['origin']); page.locator('#password').fill(qa['password']); page.locator('#login button').click(); expect(page.locator('#login')).to_be_hidden()
-    page.locator('#prepare').click(); expect(page.locator('#start')).to_be_visible(); page.locator('#start').click(); expect(page.locator('#questions article:visible')).to_have_count(1)
+    page.locator('#prepare').click();expect(page.locator('#prepare')).to_have_text('开始（60 分钟）');page.locator('#prepare').click();expect(page.locator('#start')).to_be_visible(); page.locator('#start').click(); expect(page.locator('#questions article:visible')).to_have_count(1)
     return page.evaluate('paper')
 
 
@@ -120,7 +120,7 @@ def test_cached_terminal_status_never_unlocks_offline(https_app,firefox_https,te
         page.locator('#submit').click();page.locator('#confirm-submit').click();expect(page.locator('#result > h2')).to_be_visible()
         assert row(qa,'SELECT submitted_at FROM training_sessions WHERE paper_id=%s',(pid,))['submitted_at']
     else:
-        page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.locator('#prepare').click();expect(page.locator('#start')).to_be_visible()
+        page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.locator('#prepare').click();expect(page.locator('#prepare')).to_have_text('开始（60 分钟）');page.locator('#prepare').click();expect(page.locator('#start')).to_be_visible()
         assert page.locator('#questions article').count()==0
     page.route('**/auth/me',lambda route:route.fulfill(json={'username':'test-owner'}));page.route('**/v2/papers/*',lambda route:route.abort('internetdisconnected'))
     page.reload();expect(page.locator('#status')).to_contain_text('尚未开始' if terminal=='not_started' else '已提交')
