@@ -180,7 +180,9 @@
     button.dataset.locked = "1";
     button.disabled = !lock.complete;
     button.setAttribute("aria-disabled", String(!lock.complete));
-    button.firstChild.textContent = lock.complete ? "开始" : `题库还差 ${lock.missing} 道，暂不能开始`;
+    // short bank: how many are missing and, when it can be estimated, when the paper can start (no old question fills a paper)
+    const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clock(lock.eta_at)} 可开始` : "，暂不能开始";
+    button.firstChild.textContent = lock.complete ? "开始" : `题库还差 ${lock.missing} 道${when}`;
     $("paper-state").textContent = lock.complete ? "已就绪" : "题库准备中";
     $("paper-state").classList.toggle("green-pill", lock.complete);
     $("prepare-note").hidden = !lock.complete;

@@ -277,3 +277,8 @@ body:not([data-view="home"]) #a2hs-hint { display: none; }
 /* 今日出题漏斗的题型切换：六个按钮一行排下，不换行 */
 .training-app #funnel-types { display: flex; flex-wrap: nowrap; width: 100%; justify-content: space-between; border-radius: 999px; }
 .training-app #funnel-types button { padding: 4px 8px; white-space: nowrap; flex: 0 1 auto; }
+
+.training-app .field.lines { display: flex; flex-direction: column; gap: 8px; }
+.training-app .inline-field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
+.training-app .inline-field input { width: 72px; min-height: 40px; text-align: right; }
+.training-app .inline-field em { font-style: normal; color: var(--muted); }

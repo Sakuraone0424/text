@@ -288,18 +288,6 @@ def items(db, paper_id):
     return {r["question_id"]: r["is_reused"] for r in db.execute("SELECT question_id,is_reused FROM paper_items_v2 WHERE paper_id=%s", (paper_id,)).fetchall()}
 
 
-def test_when_new_questions_run_out_questions_seen_14_or_more_days_ago_fill_the_paper(db, old_paper, blueprint):
-    from app import training_sessions
-
-    uid, first, first_day = old_paper
-    paper = quiz_v2.create_paper(db, uid, blueprint, day=date.today())
-    assert paper["count"] == 28 and paper["includes_reused"] is True
-    assert set(items(db, paper["paper_id"])) == set(items(db, first["paper_id"])) and all(items(db, paper["paper_id"]).values())
-    assert not any(items(db, first["paper_id"]).values()) and not quiz_v2.load_paper(db, uid, first["paper_id"])["includes_reused"]
-    training_sessions.start(db, uid, paper["paper_id"])
-    assert all(q["reused"] for q in quiz_v2.load_paper(db, uid, paper["paper_id"])["questions"])  # every card says so
-
-
 def test_questions_seen_recently_are_never_reused(db, bank, blueprint):
     from app.common import ensure_user
 
@@ -307,38 +295,6 @@ def test_questions_seen_recently_are_never_reused(db, bank, blueprint):
     quiz_v2.create_paper(db, uid, blueprint, day=date.today() - timedelta(days=13))
     with pytest.raises(quiz_v2.BankShortage):
         quiz_v2.create_paper(db, uid, blueprint, day=date.today())
-
-
-def test_fresh_questions_come_first_and_only_the_gap_is_reused(db, old_paper, blueprint, question_factory, passing_audit):
-    from app.quiz_v2 import create_question, publish_question, review_question
-
-    uid, first, _ = old_paper
-    fresh = []
-    for subject in ("biochemistry", "cell_biology"):
-        for _ in range(3):  # a whole new single_choice quota for each subject
-            qid = create_question(db, question_factory(subject, "single_choice"))["id"]
-            assert review_question(db, qid, passing_audit)["passed"]
-            publish_question(db, qid)
-            fresh.append(qid)
-    paper = quiz_v2.create_paper(db, uid, blueprint, day=date.today())
-    flags = items(db, paper["paper_id"])
-    reused = {qid for qid, flag in flags.items() if flag}
-    chosen = set(flags)
-    assert set(fresh) <= chosen  # every new single-choice question is used
-    assert len(reused) == 28 - 6 and not reused & set(fresh)
-
-
-def test_a_reported_question_is_not_reused(db, old_paper, blueprint):
-    uid, first, first_day = old_paper
-    quiz_v2.load_paper(db, uid, first["paper_id"])
-    from app import training_sessions
-
-    training_sessions.start(db, uid, first["paper_id"])
-    victim = quiz_v2.load_paper(db, uid, first["paper_id"])["questions"][0]
-    quiz_v2.report_question(db, uid, first["paper_id"], victim["id"])
-    with pytest.raises(quiz_v2.BankShortage) as short:
-        quiz_v2.create_paper(db, uid, blueprint, day=date.today())
-    assert [(s["subject"], s["question_type"], s["missing"]) for s in short.value.shortages if s["missing"]] == [(victim["subject"], victim["question_type"], 1)]
 
 
 # ---- dates up to the project end (2026-12-19) --------------------------------------------

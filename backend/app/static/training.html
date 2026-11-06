@@ -333,6 +333,12 @@
           <label class="row switch"><span><b>自动发现</b><small>定期读取官方模型目录</small></span><input id="discover" type="checkbox" role="switch" /></label>
           <label class="row switch"><span><b>允许升级</b><small>质量对比通过后才会切换</small></span><input id="upgrade" type="checkbox" role="switch" /></label>
           <label class="row switch"><span><b>薄弱章节优先出题</b><small>做完至少 2 套卷子后，正确率低于 60% 的章节多出一些题（其余章节仍保留最低出题量）</small></span><input id="weak-focus" type="checkbox" role="switch" /></label>
+          <div class="field lines" id="mistake-lines">
+            <span class="label">主观题错题判定（按得分率）</span>
+            <label class="inline-field"><span>低于此值算错题</span><input id="mistake-below" type="number" inputmode="numeric" min="1" max="100" step="1" /> <em>%</em></label>
+            <label class="inline-field"><span>低于此值算待巩固，达到视为掌握</span><input id="consolidate-below" type="number" inputmode="numeric" min="1" max="100" step="1" /> <em>%</em></label>
+            <small class="note">名词解释、简答、问答用得分率判定；单选、填空仍是对错二分。例如 60% 和 85%：低于 60% 是错题，60%–85% 是待巩固，85% 及以上算掌握、不建复习卡。</small>
+          </div>
           <p class="note">只影响新任务，已经在运行的任务保持原设置。</p>
           <details><summary>说明</summary>
             <p id="capabilities" class="note"></p>

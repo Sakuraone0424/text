@@ -1,3 +1,4 @@
+from decimal import Decimal
 """Official-only discovery, immutable task settings, fail-closed capability admission."""
 
 from datetime import datetime, timezone
@@ -175,12 +176,22 @@ def configure(conn, user_id, model, effort, verify=True, **options):
         "daily_limit_enabled",
         "monthly_limit_enabled",
         "weak_focus",
+        "mistake_below",
+        "consolidate_below",
     }
     if set(options) - allowed:
         raise ValueError("unknown_setting")
     from psycopg import sql
 
     from app.cny_billing import money
+
+    # the two score-rate lines that sort subjective answers into mistake / to consolidate / mastered
+    if "mistake_below" in options or "consolidate_below" in options:
+        low = float(options.get("mistake_below", current["mistake_below"]))
+        high = float(options.get("consolidate_below", current["consolidate_below"]))
+        if not (0 < low <= high <= 1):
+            raise ValueError("invalid_mistake_lines")
+        options["mistake_below"], options["consolidate_below"] = low, high
 
     for key in ("daily_cny", "monthly_cny", "task_cny", "trial_cny"):
         if key in options:

@@ -114,11 +114,11 @@ def chapter_table(rows, practice):
 
 
 def due_reviews(conn, uid, today):
-    due_now = conn.execute("SELECT count(*) AS n FROM fsrs_cards WHERE user_id=%s AND due<=clock_timestamp()", (uid,)).fetchone()["n"]
+    due_now = conn.execute("SELECT count(*) AS n FROM fsrs_cards WHERE user_id=%s AND status<>'mastered' AND due<=clock_timestamp()", (uid,)).fetchone()["n"]
     days = {
         r["d"]: r["n"]
         for r in conn.execute(
-            "SELECT (due AT TIME ZONE 'Asia/Shanghai')::date AS d,count(*) AS n FROM fsrs_cards WHERE user_id=%s GROUP BY 1",
+            "SELECT (due AT TIME ZONE 'Asia/Shanghai')::date AS d,count(*) AS n FROM fsrs_cards WHERE user_id=%s AND status<>'mastered' GROUP BY 1",
             (uid,),
         ).fetchall()
     }
