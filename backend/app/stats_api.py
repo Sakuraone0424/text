@@ -38,15 +38,74 @@ def mistakes(
 
 
 class PracticeStart(StrictModel):
-    mode: str = Field(pattern="^(chapter|weak)$")
+    mode: str = Field(pattern="^(chapter|weak|type|retry|quick|year)$")
     subject: str | None = Field(default=None, pattern="^(biochemistry|cell_biology)$")
     chapter: str | None = Field(default=None, max_length=300)
+    question_type: str | None = Field(default=None, pattern="^(single_choice|fill_blank|term|short_answer|essay)$")
+    year: StrictInt | None = Field(default=None, ge=1990, le=2100)
+    seconds: StrictInt | None = Field(default=None, ge=60, le=7200)           # optional time limit (quick practice)
     size: StrictInt = Field(default=10, ge=1, le=practice.MAX_SET)
 
 
 @router.post("/practice")
 def practice_start(data: PracticeStart, username: str = Depends(require_auth)):
-    return operation(lambda c, u: practice.start(c, u, data.mode, data.subject, data.chapter, data.size), username)
+    return operation(lambda c, u: practice.start(c, u, data.mode, data.subject, data.chapter, data.size, data.question_type, data.year, data.seconds), username)
+
+
+@router.get("/practice/overview")
+def practice_overview(username: str = Depends(require_auth)):
+    from app import practice_center
+
+    return operation(practice_center.overview, username)
+
+
+@router.get("/training/recent")
+def recent_training(limit: int = Query(default=5, ge=1, le=30), username: str = Depends(require_auth)):
+    from app import paper_review
+
+    return operation(lambda c, u: {"items": paper_review.recent(c, u, limit)}, username)
+
+
+@router.get("/mistakes/book")
+def mistake_book(username: str = Depends(require_auth)):
+    from app import mistake_book as book
+
+    return operation(book.book, username)
+
+
+@router.get("/mistakes/{question_id}")
+def mistake_detail(question_id: int, username: str = Depends(require_auth)):
+    from app import mistake_book as book
+
+    return operation(lambda c, u: book.detail(c, u, question_id), username)
+
+
+@router.get("/papers/{paper_id}/review")
+def paper_review_summary(paper_id: int, username: str = Depends(require_auth)):
+    from app import paper_review
+
+    return operation(lambda c, u: paper_review.summary(c, u, paper_id), username)
+
+
+@router.get("/papers/{paper_id}/review/{question_id}")
+def paper_review_detail(paper_id: int, question_id: int, username: str = Depends(require_auth)):
+    from app import paper_review
+
+    return operation(lambda c, u: paper_review.detail(c, u, paper_id, question_id), username)
+
+
+@router.get("/practice/{set_id}/review")
+def practice_review_summary(set_id: int, username: str = Depends(require_auth)):
+    from app import paper_review
+
+    return operation(lambda c, u: paper_review.practice_summary(c, u, set_id), username)
+
+
+@router.get("/practice/{set_id}/review/{question_id}")
+def practice_review_detail(set_id: int, question_id: int, username: str = Depends(require_auth)):
+    from app import paper_review
+
+    return operation(lambda c, u: paper_review.practice_detail(c, u, set_id, question_id), username)
 
 
 class PracticeAnswer(StrictModel):

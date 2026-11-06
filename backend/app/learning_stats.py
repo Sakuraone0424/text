@@ -20,9 +20,20 @@ def today_cn(conn):
     return conn.execute("SELECT (clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date AS d").fetchone()["d"]
 
 
+def named(conn, rows):
+    """The same rows with their chapter label turned into the textbook's chapter name (「6 核酸」 -> 「第六章 核酸」), so every page shows one name."""
+    from app import chapters
+
+    mapper = chapters.ChapterMap(conn)
+    for r in rows:
+        if r.get("chapter"):
+            r["chapter"] = mapper.name(r["subject"], r["chapter"])
+    return rows
+
+
 def graded_rows(conn, uid):
     """Every answer of a submitted paper, minus reported questions, oldest first."""
-    return conn.execute(
+    return named(conn, conn.execute(
         "SELECT p.id AS paper_id,p.paper_date,t.id AS attempt_id,t.submitted_at,"
         "p.blueprint->>'specification' AS spec,"
         "i.snapshot->>'subject' AS subject,i.snapshot->>'question_type' AS qtype,"
@@ -34,17 +45,17 @@ def graded_rows(conn, uid):
         "WHERE p.user_id=%s AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id) "
         "ORDER BY t.submitted_at,p.id,i.position",
         (uid,),
-    ).fetchall()
+    ).fetchall())
 
 
 def practice_rows(conn, uid):
-    return conn.execute(
+    return named(conn, conn.execute(
         "SELECT pa.question_id,pa.points,pa.max_points,pa.seconds,pa.answered_at,"
         "q.content->>'subject' AS subject,q.content->>'question_type' AS qtype,q.content->'evidence'->0->>'chapter' AS chapter "
         "FROM practice_answers pa JOIN practice_sets ps ON ps.id=pa.set_id JOIN reviewed_questions q ON q.id=pa.question_id "
         "WHERE ps.user_id=%s ORDER BY pa.answered_at",
         (uid,),
-    ).fetchall()
+    ).fetchall())
 
 
 def papers(rows):

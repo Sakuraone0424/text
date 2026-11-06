@@ -1,0 +1,142 @@
+/* Practice centre, mistake book, a mistake in full, whole-paper review. Colours come from tokens only; the subject colours are the
+   chart colours (生化 blue, 细胞 orange) everywhere. */
+
+/* ---- shared small pieces ---- */
+.training-app .chev { color: var(--muted); font-size: 20px; line-height: 1; flex: none; }
+.training-app .text-button { background: none; border: 0; color: var(--primary); font-weight: 500; padding: 4px 0; min-height: 32px; }
+.training-app .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.training-app .chips button { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; min-height: 32px; padding: 4px 12px; font-size: 13px; white-space: nowrap; }
+.training-app .chips button[aria-pressed="true"] { background: var(--primary-soft); border-color: var(--primary); color: var(--primary-soft-ink); font-weight: 700; }
+.training-app .sticky-action { position: sticky; bottom: calc(var(--nav, 64px) + 8px); padding: 8px 0; z-index: 5; }
+
+/* ---- today's paper card (practice page) ---- */
+.training-app .today-card .today-block { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.training-app .today-card .hero-action { margin-top: 12px; width: 100%; }
+.training-app .paper-info { margin-top: 8px; }
+.training-app .paper-info summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+
+/* ---- practice grid ---- */
+.training-app .practice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 8px 0 16px; }
+.training-app .practice-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 14px; min-height: 132px; }
+.training-app .practice-card b { font-size: 15px; }
+.training-app .practice-card small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.training-app .practice-card .practice-count { margin-top: auto; font-size: 12px; color: var(--primary); font-weight: 700; }
+.training-app .practice-card .practice-count.off { color: var(--muted); font-weight: 500; }
+.training-app .practice-card:disabled { opacity: 0.6; }
+.training-app .practice-icon { width: 36px; height: 36px; border-radius: 12px; background: var(--primary-soft); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; }
+.training-app .practice-icon .ico { width: 20px; height: 20px; }
+
+/* ---- recent trainings ---- */
+.training-app .recent-list { list-style: none; margin: 0; padding: 0; }
+.training-app .recent-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--divider); color: var(--ink); text-decoration: none; }
+.training-app .recent-list li:first-child .recent-row { border-top: 0; }
+.training-app .recent-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.training-app .recent-main small { color: var(--muted); }
+.training-app .recent-score { font-variant-numeric: tabular-nums; font-weight: 700; }
+.training-app .recent-score.pending { color: var(--muted); font-weight: 500; }
+
+/* ---- the due card: seven labelled bars ---- */
+.training-app .week-bars { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; height: 74px; border-bottom: 1px solid var(--line); padding-bottom: 0; min-width: 190px; }
+.training-app .week-bars .wk-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; flex: 1; min-width: 0; gap: 2px; position: relative; height: 100%; }
+.training-app .week-bars .wk-n { font-size: 11px; color: var(--muted); line-height: 1; min-height: 11px; font-variant-numeric: tabular-nums; }
+.training-app .week-bars i { display: block; width: 100%; max-width: 14px; border-radius: 3px 3px 0 0; background: var(--primary-soft-line); }
+.training-app .week-bars .today i { background: var(--primary); }
+.training-app .week-bars .today .wk-n { color: var(--primary); font-weight: 700; }
+.training-app .week-bars .wk-d { position: absolute; top: 100%; margin-top: 3px; font-size: 10px; color: var(--muted); white-space: nowrap; }
+.training-app .due-card .due-row { margin-bottom: 20px; }
+.training-app .due-card #memory { margin-top: 12px; }
+
+/* ---- mistake book ---- */
+.training-app .filter-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; }
+.training-app .filter-line .chips { flex-wrap: nowrap; overflow-x: auto; }
+.training-app .filter-more { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.training-app .chip-scroll { position: relative; overflow: hidden; }
+.training-app .chip-scroll .chips { flex-wrap: nowrap; overflow-x: auto; padding-right: 28px; scrollbar-width: none; }
+.training-app .chip-scroll .chips::-webkit-scrollbar { display: none; }
+/* a soft edge says "more to the right" without cutting a label in half (a shadow of the card colour: no gradient needed) */
+.training-app .chip-scroll::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 18px; background: var(--card); box-shadow: -10px 0 12px 4px var(--card); pointer-events: none; }
+.training-app .mistake-groups { display: flex; flex-direction: column; gap: 16px; }
+.training-app .mistake-group { display: flex; flex-direction: column; gap: 8px; }
+.training-app .mg-head { display: flex; align-items: center; justify-content: space-between; margin: 0; font-size: 14px; color: var(--ink); cursor: default; list-style: none; }
+.training-app .mg-count { font-size: 12px; color: var(--muted); background: var(--tag); border-radius: 999px; padding: 1px 8px; }
+.training-app details.mistake-group > summary { cursor: pointer; }
+.training-app .mistake-card { position: relative; display: block; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--bar, var(--chart-bio)); border-radius: 14px; padding: 12px 36px 12px 12px; color: var(--ink); text-decoration: none; box-shadow: var(--shadow); }
+.training-app .mistake-card .chev { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); }
+.training-app .mc-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.training-app .mc-type { font-size: 11px; background: var(--primary-soft); color: var(--primary-soft-ink); border-radius: 999px; padding: 1px 8px; font-weight: 700; }
+.training-app .mc-chapter { font-size: 12px; color: var(--muted); }
+.training-app .mc-times { font-size: 11px; color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; margin-left: auto; }
+.training-app .mc-stem { margin: 6px 0 4px; font-size: 14px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.training-app .mc-cmp { margin: 0; display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.training-app .mc-wrong { color: var(--danger); }
+.training-app .mc-right { color: var(--up); }
+.training-app .mc-foot { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.training-app .mc-dots { display: inline-flex; gap: 4px; }
+.training-app .mc-dots i { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); }
+.training-app .mc-dots i.on { background: var(--up); border-color: var(--up); }
+
+/* ---- a mistake / a question in full ---- */
+.training-app .question-detail, .training-app .rq-body { display: flex; flex-direction: column; gap: 10px; }
+.training-app .qd-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.training-app .qd-score { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+.training-app .qd-stem { margin: 0; line-height: 1.6; white-space: pre-wrap; }
+.training-app .qd-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.training-app .qd-options li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.training-app .qd-options li.is-right { border-color: var(--up); background: var(--up-soft); }
+.training-app .qd-options li.is-wrong { border-color: var(--danger); background: var(--accent-faint); }
+.training-app .qd-options em { margin-left: auto; font-style: normal; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.training-app .opt-letter { width: 22px; flex: none; }
+.training-app .answer-line { display: flex; gap: 10px; padding: 8px 12px; border-radius: 12px; background: var(--tag); }
+.training-app .answer-line.ok { background: var(--up-soft); }
+.training-app .answer-line.bad { background: var(--accent-faint); }
+.training-app .al-label { color: var(--muted); font-size: 12px; flex: none; padding-top: 2px; }
+.training-app .al-text { white-space: pre-wrap; flex: 1; }
+.training-app .criteria { display: flex; flex-direction: column; gap: 6px; }
+.training-app .criteria h4, .training-app .history h4 { margin: 4px 0; font-size: 13px; color: var(--muted); }
+.training-app .criterion-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.training-app .criterion-row.lost { color: var(--danger); }
+.training-app .reason { color: var(--muted); font-size: 12px; margin: -2px 0 4px; }
+.training-app .qd-note { margin: 0; font-size: 13px; color: var(--muted); }
+.training-app .evidence summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+.training-app .evidence blockquote { margin: 8px 0 0; padding: 8px 12px; border-left: 3px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.55; }
+.training-app .history p { margin: 2px 0; font-size: 13px; }
+
+/* ---- whole-paper review ---- */
+.training-app .review-head .rh-total { display: flex; align-items: baseline; gap: 4px; }
+.training-app .review-head .rh-total strong { font-size: 36px; font-variant-numeric: tabular-nums; }
+.training-app .rh-subjects { display: flex; gap: 20px; margin-top: 8px; flex-wrap: wrap; }
+.training-app .rh-subjects > div { display: flex; flex-direction: column; gap: 2px; }
+.training-app .rh-subj { font-size: 12px; color: var(--muted); }
+.training-app .rh-rates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.training-app .rate-chip { font-size: 12px; background: var(--tag); border-radius: 999px; padding: 2px 10px; }
+.training-app .rate-chip::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--dot); margin-right: 5px; }
+.training-app .review-filters { display: flex; flex-direction: column; gap: 8px; }
+.training-app .nav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px; margin: 8px 0; }
+.training-app .nav-cell { min-height: 36px; padding: 0; border-radius: 10px; border: 1px solid var(--line); background: var(--card); font-variant-numeric: tabular-nums; font-size: 13px; }
+.training-app .nav-cell.right { background: var(--up-soft); border-color: var(--up); color: var(--up); }
+.training-app .nav-cell.wrong { background: var(--accent-faint); border-color: var(--danger); color: var(--danger); }
+.training-app .nav-cell.partial { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
+.training-app .nav-cell.blank, .training-app .nav-cell.reported, .training-app .nav-cell.pending { background: var(--tag); color: var(--muted); }
+.training-app .nav-cell.dim { opacity: 0.35; }
+.training-app .nav-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 0; }
+.training-app .nav-legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; border: 1px solid var(--line); }
+.training-app .swatch.right { background: var(--up); } .training-app .swatch.wrong { background: var(--danger); }
+.training-app .swatch.partial { background: var(--accent); } .training-app .swatch.blank { background: var(--tag); }
+.training-app .review-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.training-app .review-q { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 14px; padding: 12px; content-visibility: auto; contain-intrinsic-size: auto 96px; }
+.training-app .review-q.right { border-left-color: var(--up); }
+.training-app .review-q.wrong { border-left-color: var(--danger); }
+.training-app .review-q.partial { border-left-color: var(--accent); }
+.training-app .rq-head { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: 0; padding: 0; min-height: 32px; text-align: left; }
+.training-app .rq-type { color: var(--muted); font-size: 12px; }
+.training-app .rq-score { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; }
+.training-app .rq-stem { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); }
+.training-app .rq-body { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--divider); }
+
+/* ---- bottom sheet with choices ---- */
+.training-app .pick-dialog h2 { margin: 4px 0 8px; font-size: 16px; }
+.training-app .pick-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; max-height: 52vh; overflow: auto; }
+.training-app .pick-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); min-height: 48px; }
+.training-app .pick-option small { color: var(--muted); }
+.training-app .start-dialog .button-row { display: flex; gap: 8px; margin-top: 12px; }
+.training-app .start-dialog .button-row button { flex: 1; }

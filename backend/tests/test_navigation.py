@@ -2,7 +2,7 @@
 back works and the page left comes back as it was. Chromium locally, WebKit iPhone 15 in CI.
 
 Inventory (from -> via -> to), each one exercised below:
-  bottom bar:  home/exam/mistakes/profile  <->  each other                  (#/home #/exam #/mistakes #/profile)
+  bottom bar:  home/practice/mistakes/profile  <->  each other                  (#/home #/practice #/mistakes #/profile)
   home         quick card "出题进度"            -> #/progress
   profile      links "出题进度", "模型与费用"     -> #/progress, #/model        (back -> #/profile)
   stats        buttons 近7天 / 学习建议 / 历史只读档案 / 教材与题库核验 / 归档状态 -> #/stats/<sub>
@@ -42,7 +42,7 @@ def test_every_navigation_stays_in_the_one_document_and_lands_on_the_right_page(
         assert same_document(page), f"{view}: the document was reloaded"
 
     # bottom bar, every ordered pair
-    bar = {"home": "#/home", "exam": "#/exam", "mistakes": "#/mistakes", "profile": "#/profile"}
+    bar = {"home": "#/home", "practice": "#/practice", "mistakes": "#/mistakes", "profile": "#/profile"}
     for a in bar:
         for b in bar:
             if a == b:

@@ -237,7 +237,9 @@ def login(page, base):
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
     page.locator("#login").wait_for(state="hidden")
-    page.locator("#prepare").click()
+    page.locator("#prepare").click()                                    # prepares today's paper (and stays on the page) ...
+    page.wait_for_function("document.getElementById('prepare').textContent.includes('开始（60')")
+    page.locator("#prepare").click()                                    # ... then the same button asks to confirm the start
     page.locator("#start").wait_for(state="visible")
 
 

@@ -60,7 +60,7 @@ def test_practice_over_http_end_to_end(api, monkeypatch):
     client, db, uid, stats = api
     monkeypatch.setattr(auto_quality, "ready", lambda conn, qid: True)
     ids = []
-    for n in range(3):
+    for n in range(6):
         qid = question(db, "biochemistry", "single_choice", 4, "糖代谢", options={"A": "a", "B": "b", "C": "c", "D": "d"}, answer="A", stem=f"练习题{n}")
         db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
         ids.append(qid)
