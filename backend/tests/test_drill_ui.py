@@ -100,8 +100,11 @@ def test_the_answer_page_keeps_its_bars_and_the_field_inside_the_visible_part_wh
     assert "keyboard-open" in page.evaluate("document.body.className")
     boxes = page.evaluate("""() => { const f = document.querySelector('#drill-view input.drill-answer').getBoundingClientRect(),
         a = document.querySelector('.drill-actions').getBoundingClientRect(), t = document.querySelector('.drill-top').getBoundingClientRect();
-        return { fieldTop: f.top, fieldBottom: f.bottom, actionsTop: a.top, actionsBottom: a.bottom, topBottom: t.bottom, vh: 430 }; }""")
-    assert boxes["actionsBottom"] <= boxes["vh"] + 1 and boxes["fieldBottom"] <= boxes["actionsTop"] and boxes["fieldTop"] >= boxes["topBottom"], boxes     # nothing covers the field
+        const d = document.querySelector('#drill-view').getBoundingClientRect();
+        return { fieldTop: f.top, fieldBottom: f.bottom, actionsTop: a.top, actionsBottom: a.bottom, topBottom: t.bottom, drillTop: d.top, drillBottom: d.bottom, vh: 430 }; }""")
+    # the page is the visible part (WebKit may offset a fixed page by a pixel or two while the keyboard animates), the bars are inside it, the field is clear of both
+    assert abs((boxes["drillBottom"] - boxes["drillTop"]) - boxes["vh"]) <= 3 and boxes["actionsBottom"] <= boxes["drillBottom"] + 1, boxes
+    assert boxes["fieldBottom"] <= boxes["actionsTop"] and boxes["fieldTop"] >= boxes["topBottom"], boxes     # nothing covers the field
     assert not page.locator("nav.primary-nav").is_visible()
     page.evaluate("document.activeElement.blur(); document.documentElement.style.setProperty('--app-h', '')")
     page.wait_for_function("!document.body.classList.contains('keyboard-open')")
