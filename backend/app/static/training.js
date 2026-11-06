@@ -66,11 +66,12 @@ async function api(path, options = {}) {
     }
     if (reason && reason.code === "insufficient_reviewed_bank") {
       const missing = (reason.shortages || []).filter(x => x.missing > 0);
-      reason = "自动核验合格题库不足，尚不能安全生成60题：" +
+      const total = missing.reduce((n, x) => n + x.missing, 0);
+      reason = `题库还差 ${total} 道，暂时凑不齐一张卷子：` +
         missing.map(x => (x.subject === "biochemistry" ? "生化" : "细胞") +
-          " " + (names[x.question_type] || x.question_type) +
-          "缺" + x.missing + "题").join("；") +
-        "。系统不会使用未经核验的题目凑数。";
+          (names[x.question_type] || x.question_type) +
+          "缺 " + x.missing + " 道").join("；") +
+        "。不会用旧题或未核验的题凑数，也不会出半套卷；新题补够后可以再准备。";
     }
     const e = new Error(typeof reason === "string" ? reason : JSON.stringify(reason));
     e.status = r.status;

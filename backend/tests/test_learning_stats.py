@@ -12,6 +12,14 @@ from stats_helpers import SPEC, item, paper, publish, question
 SECRET = "不得出现在统计里的题干"
 
 
+def open_stock(monkeypatch):
+    """Synthetic questions have no pinned textbook evidence and there is no daily-paper reserve to protect in these tests."""
+    from app import auto_generation, practice_center
+
+    monkeypatch.setattr(auto_generation, "pinned_science_evidence", lambda content: True)
+    monkeypatch.setattr(practice_center, "reserve_of", lambda subject, kind: 0)
+
+
 @pytest.fixture
 def uid(db):
     return ensure_user(db, "stats-student")
@@ -184,6 +192,7 @@ def bank(db, monkeypatch):
     from app import auto_quality
 
     monkeypatch.setattr(auto_quality, "ready", lambda conn, qid: True)
+    open_stock(monkeypatch)
     ids = {}
     for n in range(6):
         kind = "single_choice" if n % 2 == 0 else "fill_blank"
@@ -229,9 +238,9 @@ def test_a_practice_question_is_used_for_good_and_other_users_cannot_touch_a_set
     s1 = practice.start(db, uid, "chapter", "biochemistry", "第三章 糖代谢", 6)
     missed = s1["questions"][-1]
     practice.answer(db, uid, s1["set_id"], missed["id"], {"text": "错误答案"})
-    # the questions of a set are used: no new set of that chapter can be drawn from the same questions (and none ever goes on a paper)
-    with pytest.raises(ValueError, match="no_practice_questions"):
-        practice.start(db, uid, "chapter", "biochemistry", "第三章 糖代谢", 3)
+    # the questions of a set are used (none ever goes on a paper); they are the first source of the next set of that chapter
+    again = practice.start(db, uid, "chapter", "biochemistry", "第三章 糖代谢", 6)
+    assert {q["id"] for q in s1["questions"]} <= {q["id"] for q in again["questions"]} or len(again["questions"]) == 6
     # a missed practice question joins the mistake book (a review card), and "retry" draws from the book
     assert db.execute("SELECT status FROM fsrs_cards WHERE user_id=%s AND question_id=%s", (uid, missed["id"])).fetchone()["status"] == "mistake"
     redo = practice.start(db, uid, "retry")
@@ -252,9 +261,9 @@ def test_practice_feeds_chapter_accuracy_but_never_the_papers_or_trends(db, uid,
     assert p["chapters"][0]["chapter"] == "第三章 糖代谢" and p["chapters"][0]["rate"] == 0.0 and p["chapters"][0]["answers"] == 3
     assert stats.overview(db, uid)["streak"]["current"] == 1  # practising counts as studying today
     assert stats.overview(db, uid)["last7"]["papers"] == 0
-    # three of the six are used now: fewer than five new ones are left, so the weak-chapter set is "being prepared"
-    with pytest.raises(ValueError, match="no_practice_questions"):
-        practice.start(db, uid, "weak", size=5)
+    # the three used ones come first in the next weak-chapter set, then the new ones
+    weak = practice.start(db, uid, "weak", size=5)
+    assert {q["id"] for q in s["questions"]} <= {q["id"] for q in weak["questions"]}
     redo = practice.start(db, uid, "retry")                      # but the three missed ones can be redone
     assert redo["mode"] == "retry" and len(redo["questions"]) == 3
 

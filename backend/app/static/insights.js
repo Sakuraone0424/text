@@ -82,7 +82,8 @@
   };
   const PRACTICE_REASON = {
     no_weak_chapters_yet: "还没有足够的已判分记录来找出薄弱章节（每章至少 3 题）。",
-    no_practice_questions_in_these_chapters: "这些章节暂时没有可练的已入库客观题；题库补充后再试。",
+    no_practice_questions_in_these_chapters: "这一类暂时没有可练的题（每日试卷的储备不会被占用）。新题补充后再试。",
+    answer_required: "请先写下作答。",
     subject_and_chapter_required: "请选择科目和章节。",
   };
 
@@ -565,12 +566,12 @@
   }
   const chapterPractice = (subject, chapter) => startPractice({ mode: "chapter", subject, chapter, size: 10 });
   function runPractice(panel, set) {
-    let index = 0, correct = 0;
+    let index = 0, correct = 0, waiting = 0;
     const questions = set.questions;
     const finish = () => {
       panel.replaceChildren();
       el("h2", "练习完成", panel);
-      el("p", `${questions.length} 道里答对 ${correct} 道。`, panel, "grade-title");
+      el("p", waiting ? `${questions.length} 道：答对 ${correct} 道，${waiting} 道写作题等 AI 判分。` : `${questions.length} 道里答对 ${correct} 道。`, panel, "grade-title");
       el("p", "练习成绩不计入每日成绩，但会更新章节正确率。", panel, "muted");
       const again = el("button", "再练一套薄弱题", panel, "primary");
       again.onclick = () => startPractice({ mode: "weak", size: 10 });
@@ -606,6 +607,13 @@
             box.querySelectorAll(".option").forEach((x) => x.classList.toggle("chosen", x === option));
           };
         });
+      } else if (["term", "short_answer", "essay"].includes(q.question_type)) {
+        // written answers: the AI grades them after they are handed in (the score shows in the practice review)
+        const area = el("textarea", undefined, panel);
+        area.rows = q.question_type === "essay" ? 9 : 5;
+        area.setAttribute("aria-label", "作答");
+        area.placeholder = "写下你的作答，交卷后由 AI 判分";
+        fields.push(area);
       } else {
         for (let i = 0; i < q.blank_count; i++) {
           const input = el("input", undefined, panel);
@@ -619,14 +627,23 @@
       submit.onclick = async () => {
         submit.disabled = true;
         const seconds = Math.min(7200, Math.round((Date.now() - started) / 1000));
-        const body = q.question_type === "single_choice" ? { question_id: q.id, text: chosen, seconds } : q.blank_count > 1 ? { question_id: q.id, blanks: fields.map((f) => f.value), seconds } : { question_id: q.id, text: fields[0].value, seconds };
+        const body = ["term", "short_answer", "essay"].includes(q.question_type) ? { question_id: q.id, text: fields[0].value, seconds } : q.question_type === "single_choice" ? { question_id: q.id, text: chosen, seconds } : q.blank_count > 1 ? { question_id: q.id, blanks: fields.map((f) => f.value), seconds } : { question_id: q.id, text: fields[0].value, seconds };
         try {
           const r = await send(`/v2/practice/${set.set_id}/answer`, body);
+          if (r.pending) {
+            waiting++;
+            feedback.className = "practice-feedback";
+            el("strong", "已交，AI 判分中", feedback);
+            el("p", r.queued ? "分数出来后会显示在这套的练习回看里；低于合格线的会进入错题本。" : "暂时无法发送给 AI 判分，分数会在可判时补上（不会记 0 分）。", feedback, "muted small");
+            if (r.answer) el("p", "参考答案：" + r.answer, feedback);
+            r.why.forEach((w) => el("p", "得分点：" + w, feedback, "muted small"));
+          } else {
           if (r.correct) correct++;
           feedback.className = "practice-feedback " + (r.correct ? "ok" : "bad");
           el("strong", r.correct ? "回答正确" : `未答对（${r.points}/${r.max_points} 分）`, feedback);
           el("p", "参考答案：" + [r.answer, ...r.accepted_answers.filter((x) => x !== r.answer)].join(" / "), feedback);
           r.why.forEach((w) => el("p", "得分点：" + w, feedback, "muted small"));
+          }
           const next = el("button", index + 1 >= questions.length ? "查看结果" : "下一题", panel, "primary");
           next.onclick = () => {
             index++;

@@ -13,15 +13,20 @@
 .training-app .today-card .today-block { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .training-app .today-card .hero-action { margin-top: 12px; width: 100%; }
 .training-app .paper-info { margin-top: 8px; }
-.training-app .paper-info summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+.training-app .paper-info summary { color: var(--muted); font-size: 13px; cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 4px; border-radius: 8px; transition: background-color var(--t-fast) var(--ease-out); }
+.training-app .paper-info summary::-webkit-details-marker { display: none; }
+.training-app .paper-info summary::after { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--t-base) var(--ease-out); margin-right: 4px; }
+.training-app .paper-info[open] summary::after { transform: rotate(45deg); }
+.training-app .paper-info summary:active { background: var(--tag); }
 
 /* ---- practice grid ---- */
 .training-app .practice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 8px 0 16px; }
 .training-app .practice-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 14px; min-height: 132px; }
 .training-app .practice-card b { font-size: 15px; }
-.training-app .practice-card small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.training-app .practice-card small { color: var(--muted); font-size: 12px; line-height: 1.4; text-wrap: balance; line-break: strict; word-break: keep-all; overflow-wrap: anywhere; }
 .training-app .practice-card .practice-count { margin-top: auto; font-size: 12px; color: var(--primary); font-weight: 700; }
-.training-app .practice-card .practice-count.off { color: var(--muted); font-weight: 500; }
+.training-app .practice-card .practice-count.off { color: var(--muted); font-weight: 500; text-wrap: balance; }
+.training-app .practice-card .practice-count.few { color: var(--accent-ink); }
 .training-app .practice-card:disabled { opacity: 0.6; }
 .training-app .practice-icon { width: 36px; height: 36px; border-radius: 12px; background: var(--primary-soft); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; }
 .training-app .practice-icon .ico { width: 20px; height: 20px; }

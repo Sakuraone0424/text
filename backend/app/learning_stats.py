@@ -53,7 +53,7 @@ def practice_rows(conn, uid):
         "SELECT pa.question_id,pa.points,pa.max_points,pa.seconds,pa.answered_at,"
         "q.content->>'subject' AS subject,q.content->>'question_type' AS qtype,q.content->'evidence'->0->>'chapter' AS chapter "
         "FROM practice_answers pa JOIN practice_sets ps ON ps.id=pa.set_id JOIN reviewed_questions q ON q.id=pa.question_id "
-        "WHERE ps.user_id=%s ORDER BY pa.answered_at",
+        "WHERE ps.user_id=%s AND pa.points IS NOT NULL ORDER BY pa.answered_at",
         (uid,),
     ).fetchall())
 
@@ -169,7 +169,10 @@ def tomorrow_ready(conn, uid):
     ready = sum(min(b["stocked"], b["required"]) for b in buckets)
     needed = sum(b["required"] for b in buckets)
     paper = progress.next_paper(conn, buckets, conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"])
-    return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed,
+    # every subject x type cell must hold one paper's worth of NEW verified questions by itself: a surplus in one cell never covers another
+    short = [dict(subject=b["subject"], question_type=b["question_type"], have=b["stocked"], need=b["required"], missing=b["required"] - b["stocked"])
+             for b in buckets if b["stocked"] < b["required"]]
+    return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed and not short, short_cells=short,
                 platform_busy=progress.platform_status(conn)["busy"],
                 eta_at=paper["eta_at"], eta_hours=paper["eta_hours"], eta_state=paper["eta_state"], per_hour=paper["per_hour"], budget=paper["budget"])
 

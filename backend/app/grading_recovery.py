@@ -160,6 +160,13 @@ def recover(conn, user_id, report_to=None):
     from app import legacy_reuse
 
     counts = requeue(conn, user_id)
+    # subjective practice answers wait for the same grading: a blocked task goes back like a paper's
+    practice = conn.execute(
+        "UPDATE ai_jobs SET state='retrying',next_retry=clock_timestamp(),transient_attempts=attempts,platform_streak=0,error_code=NULL,dispatched_at=NULL "
+        "WHERE user_id=%s AND kind='grading' AND state='blocked' AND payload ? 'practice_set_id' AND COALESCE(error_code,'')<>ALL(%s) "
+        "AND COALESCE(error_code,'')<>'invalid_or_uncertain_result' AND lease_token IS NULL", (user_id, list(FINAL_CODES))).rowcount
+    if practice:
+        counts["practice_requeued"] = practice
     if not legacy_reuse._state(conn, STATE_KEY):
         once = requeue(conn, user_id, final_too=True)
         legacy_reuse._set_state(conn, STATE_KEY, once)

@@ -9,6 +9,14 @@ from stats_helpers import item, paper, question
 from test_api_v2 import LEARNER
 
 
+def open_stock(monkeypatch):
+    """Synthetic questions have no pinned textbook evidence and there is no daily-paper reserve to protect in these tests."""
+    from app import auto_generation, practice_center
+
+    monkeypatch.setattr(auto_generation, "pinned_science_evidence", lambda content: True)
+    monkeypatch.setattr(practice_center, "reserve_of", lambda subject, kind: 0)
+
+
 @pytest.fixture
 def api(client, db, monkeypatch):
     from app import learning_stats
@@ -59,6 +67,7 @@ def test_timing_of_a_paper_is_owner_only_numbers(api):
 def test_practice_over_http_end_to_end(api, monkeypatch):
     client, db, uid, stats = api
     monkeypatch.setattr(auto_quality, "ready", lambda conn, qid: True)
+    open_stock(monkeypatch)
     ids = []
     for n in range(6):
         qid = question(db, "biochemistry", "single_choice", 4, "糖代谢", options={"A": "a", "B": "b", "C": "c", "D": "d"}, answer="A", stem=f"练习题{n}")

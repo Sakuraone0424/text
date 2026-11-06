@@ -140,16 +140,16 @@ def practice_summary(conn, uid, set_id):
         if not content:
             continue
         raw = (content.get("evidence") or [{}])[0].get("chapter")
-        state = "blank" if not a else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong"
+        state = "blank" if not a else "pending" if a["points"] is None else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong"
         items.append(dict(position=position, question_id=qid, subject=content["subject"], question_type=content["question_type"],
                           chapter=mapper.name(content["subject"], raw) if raw else chapters.OTHER, points=a["points"] if a else None,
-                          max_points=content["max_points"], status=state, flag="mistake" if a and a["points"] < a["max_points"] else None,
+                          max_points=content["max_points"], status=state, flag="mistake" if a and a["points"] is not None and a["points"] < a["max_points"] else None,
                           stem=" ".join((content.get("stem") or "").split())[:60]))
     got = [i for i in items if i["points"] is not None]
     seconds = sum(r["seconds"] or 0 for r in answered.values()) or None
     day = s["created_at"].astimezone(SHANGHAI).date().isoformat() if s.get("created_at") else None
     return dict(
-        paper_id=set_id, kind="practice", date=day, specification=s["mode"], specification_name="专项练习", read_only=True, pending=0,
+        paper_id=set_id, kind="practice", date=day, specification=s["mode"], specification_name="专项练习", read_only=True, pending=sum(1 for i in items if i["status"] == "pending"),
         score=sum(i["points"] for i in got), graded_points=sum(i["points"] for i in got), max_points=sum(i["max_points"] for i in items),
         subject_scores={}, seconds=seconds, type_rates=[], items=items,
         counts={k: sum(1 for i in items if i["status"] == k) for k in ("right", "partial", "wrong", "blank", "pending", "reported")},
@@ -174,9 +174,9 @@ def practice_detail(conn, uid, set_id, question_id):
         correct_choice=reference if content["question_type"] == "single_choice" else None, your_answer=mine,
         reference=(f"{reference}. {options.get(reference, '')}" if content["question_type"] == "single_choice" and reference in options else reference),
         accepted_answers=content.get("accepted_answers") or [], points=a["points"] if a else None, max_points=content["max_points"],
-        status="blank" if not a else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong", reported=False,
-        criteria=[], criterion_reasons=[], rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
-        blank_points=a["answer"].get("blank_points") if a and isinstance(a["answer"], dict) else None, comment=None, concept_errors=[], imprecisions=[], suggestions=[],
+        status="blank" if not a else "pending" if a["points"] is None else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong", reported=False,
+        criteria=((a["feedback"] or {}).get("criteria") or []) if a else [], criterion_reasons=((a["feedback"] or {}).get("criterion_reasons") or []) if a else [], rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
+        blank_points=a["answer"].get("blank_points") if a and isinstance(a["answer"], dict) else None, comment=((a["feedback"] or {}).get("comment") if a else None), concept_errors=[], imprecisions=[], suggestions=[],
         evidence=sources_of(content),
     )
 
@@ -202,13 +202,13 @@ def recent(conn, uid, limit=5):
             seconds=int((r["submitted_at"] - r["started_at"]).total_seconds()) if r["started_at"] else None, at=r["submitted_at"].isoformat(),
         ))
     for r in conn.execute(
-        "SELECT s.id,s.mode,s.created_at,count(a.*) AS n,sum(a.points) AS points,sum(a.max_points) AS max_points,sum(a.seconds) AS seconds,max(a.answered_at) AS last "
+        "SELECT s.id,s.mode,s.created_at,count(a.*) AS n,count(*) FILTER (WHERE a.points IS NULL) AS pending,sum(a.points) AS points,sum(a.max_points) AS max_points,sum(a.seconds) AS seconds,max(a.answered_at) AS last "
         "FROM practice_sets s JOIN practice_answers a ON a.set_id=s.id WHERE s.user_id=%s GROUP BY s.id ORDER BY max(a.answered_at) DESC LIMIT %s",
         (uid, limit),
     ).fetchall():
         out.append(dict(
             kind="practice", id=r["id"], date=r["last"].astimezone(SHANGHAI).date().isoformat(), label=PRACTICE_NAMES.get(r["mode"], "专项练习"),
-            points=int(r["points"] or 0), max_points=int(r["max_points"] or 0), pending=0, seconds=int(r["seconds"]) if r["seconds"] else None, at=r["last"].isoformat(),
+            points=None if r["pending"] else int(r["points"] or 0), max_points=int(r["max_points"] or 0), pending=int(r["pending"]), seconds=int(r["seconds"]) if r["seconds"] else None, at=r["last"].isoformat(),
         ))
     out.sort(key=lambda x: x["at"], reverse=True)
     return out[:limit]

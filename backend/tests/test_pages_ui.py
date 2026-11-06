@@ -14,14 +14,15 @@ from test_ui_screens import engine, open_page  # noqa: F401
 SHOTS = Path(os.environ.get("SHOT_DIR", "/tmp/claude-0/shots"))
 
 OVERVIEW = {
-    "weak": {"mode": "weak", "available": 14, "ready": True, "size": 10, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "rate": 0.3}]},
-    "chapter": {"mode": "chapter", "available": 40, "ready": True, "size": 10, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "available": 14}, {"subject": "cell_biology", "chapter": "第二章 细胞膜", "available": 8}]},
-    "type": {"mode": "type", "available": 40, "ready": True, "size": 10, "types": [
-        {"value": "single_choice", "name": "单选", "available": 22, "supported": True}, {"value": "fill_blank", "name": "填空", "available": 18, "supported": True},
-        {"value": "term", "name": "名词解释", "available": 0, "supported": False}, {"value": "short_answer", "name": "简答", "available": 0, "supported": False}, {"value": "essay", "name": "问答", "available": 0, "supported": False}]},
-    "retry": {"mode": "retry", "available": 0, "ready": False, "size": 0},
-    "quick": {"mode": "quick", "available": 40, "ready": True, "size": 10},
-    "year": {"mode": "year", "available": 3, "ready": False, "size": 3, "years": [{"year": 2022, "available": 3}]},
+    "weak": {"mode": "weak", "available": 6, "ready": True, "size": 6, "short_by": 4, "reason": None, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "rate": 0.3}]},
+    "chapter": {"mode": "chapter", "available": 40, "ready": True, "size": 10, "short_by": 0, "reason": None, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "available": 14}, {"subject": "cell_biology", "chapter": "第二章 细胞膜", "available": 26}]},
+    "type": {"mode": "type", "available": 43, "ready": True, "size": 10, "short_by": 0, "reason": None, "types": [
+        {"value": "single_choice", "name": "单选", "available": 22, "used": 22, "new": 0, "supported": True, "graded_by_ai": False}, {"value": "fill_blank", "name": "填空", "available": 18, "used": 18, "new": 0, "supported": True, "graded_by_ai": False},
+        {"value": "term", "name": "名词解释", "available": 3, "used": 0, "new": 3, "supported": True, "graded_by_ai": True}, {"value": "short_answer", "name": "简答", "available": 0, "used": 0, "new": 0, "supported": True, "graded_by_ai": True},
+        {"value": "essay", "name": "问答", "available": 0, "used": 0, "new": 0, "supported": True, "graded_by_ai": True}]},
+    "retry": {"mode": "retry", "available": 0, "ready": False, "size": 0, "short_by": 0, "reason": "还没有可重做的错题"},
+    "quick": {"mode": "quick", "available": 40, "ready": True, "size": 10, "short_by": 0, "reason": None},
+    "year": {"mode": "year", "available": 0, "ready": False, "size": 0, "short_by": 0, "reason": "这一年的真题暂时没有可练的题，还差 10 道", "years": []},
     "set_size": 10,
 }
 RECENT = {"items": [
@@ -104,8 +105,9 @@ def test_the_practice_page_has_the_papers_card_six_kinds_and_the_recent_list(eng
     expect(cards).to_have_count(6)
     expect(cards.nth(0)).to_contain_text("薄弱章节练习")
     assert cards.nth(3).is_disabled() and "还没有可重做的错题" in cards.nth(3).inner_text()        # retry: nothing to redo yet
-    assert cards.nth(5).is_disabled() and "题库准备中" in cards.nth(5).inner_text()               # year: fewer than five new questions
+    assert cards.nth(5).is_disabled() and "还差 10 道" in cards.nth(5).inner_text() and "题库准备中" not in cards.nth(5).inner_text()      # year: its own reason, not a general one
     assert not cards.nth(4).is_disabled() and "可练 40 题" in cards.nth(4).inner_text()
+    assert not cards.nth(0).is_disabled() and "可练 6 题（不足 10 道，还差 4 道）" in cards.nth(0).inner_text()          # fewer than ten: it may start with what there is
     rows = page.locator("#recent-list .recent-row")
     expect(rows).to_have_count(3)
     expect(rows.nth(0)).to_contain_text("212 / 300")
@@ -296,4 +298,55 @@ def test_a_review_with_waiting_answers_shows_the_objective_part_the_reasons_and_
     page.locator("#review-body .review-head button", has_text="整卷重新判分").click()
     page.wait_for_function("window.__calls && window.__calls['/v2/papers/9/regrade'] === 1")
     expect(page.locator("#review-body .review-head button", has_text="已重新排队")).to_have_count(1)
+    page.close()
+
+
+def test_the_type_picker_offers_all_five_types_and_says_which_are_graded_by_the_ai(engine, live_app):
+    page, _ = start(engine, live_app, ROUTES, path="/training#/practice")
+    page.wait_for_selector("#practice-grid .practice-card")
+    page.locator("#practice-grid .practice-card").nth(2).click()
+    options = page.locator(".pick-dialog .pick-option")
+    expect(options).to_have_count(5)
+    texts = options.all_inner_texts()
+    assert [t.split("\n")[0] for t in texts] == ["单选", "填空", "名词解释", "简答", "问答"]
+    assert "AI 判分" in texts[2] and "可练 3 题" in texts[2] and not options.nth(2).is_disabled()          # a spare 名词解释 can be practised although 单选 is short
+    assert options.nth(3).is_disabled() and "暂时没有可练的题" in texts[3]
+    page.close()
+
+
+SHORT_CELLS = {**SHORT_BANK, "tomorrow": {**SHORT_BANK["tomorrow"], "ready": 53, "needed": 60, "missing": 7, "short_cells": [
+    {"subject": "cell_biology", "question_type": "single_choice", "have": 3, "need": 10, "missing": 7}]}}
+
+
+def test_a_cell_that_is_short_makes_the_paper_not_ready_and_says_which(engine, live_app):
+    page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": SHORT_CELLS, "/v2/model/progress/bank": SHORT_CELLS["tomorrow"], "/v2/papers": [None, 0]}, path="/training#/practice")
+    page.wait_for_function("document.getElementById('prepare').dataset.kind === 'short'")
+    for button, pill, note in (("#prepare", "#paper-state", "#prepare-note"), ("#practice-today-btn", "#practice-paper-state", "#practice-today-note")):
+        assert page.locator(button).is_disabled() and page.locator(button).inner_text().startswith("题库还差 7 道")
+        assert page.locator(pill).inner_text() == "题库准备中"
+        assert "细胞单选缺 7" in page.locator(note).inner_text()
+    page.close()
+
+
+def test_the_paper_is_never_ready_before_the_bank_is_known(engine, live_app):
+    page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": [FULL, 6000], "/v2/model/progress/bank": [FULL["tomorrow"], 6000], "/v2/papers": [None, 0]}, path="/training#/practice")
+    page.wait_for_timeout(800)
+    assert page.locator("#practice-paper-state").inner_text() != "已就绪" and page.locator("#practice-today-btn").is_disabled()
+    page.close()
+
+
+def test_the_paper_description_has_an_arrow_and_the_card_texts_do_not_wrap_a_lone_character(engine, live_app):
+    page, _ = start(engine, live_app, ROUTES, path="/training#/practice")
+    page.wait_for_selector("#practice-grid .practice-card")
+    summary = page.locator(".paper-info summary")
+    assert summary.evaluate("n => getComputedStyle(n, '::after').content") not in ("none", "normal")           # the arrow
+    assert summary.bounding_box()["height"] >= 40                                                              # a finger-sized target
+    page.locator(".paper-info summary").click()
+    assert page.locator(".paper-info").evaluate("n => n.open") and "60 题" in page.locator(".paper-info").inner_text()
+    lines = page.evaluate("""() => [...document.querySelectorAll('.practice-card small, .practice-card .practice-count')].map((n) => {
+        const r = document.createRange(); r.selectNodeContents(n); const rects = [...r.getClientRects()].filter((x) => x.width > 0);
+        const tops = [...new Set(rects.map((x) => Math.round(x.top)))]; const last = rects.filter((x) => Math.round(x.top) === tops[tops.length - 1]);
+        return { text: n.textContent, lines: tops.length, lastWidth: last.reduce((a, x) => a + x.width, 0), font: parseFloat(getComputedStyle(n).fontSize) }; })""")
+    for line in lines:
+        assert line["lines"] == 1 or line["lastWidth"] >= line["font"] * 2.5, line          # never one character alone on the last line
     page.close()

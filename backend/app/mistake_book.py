@@ -64,7 +64,7 @@ def history_of(conn, uid, question_id):
     out = [dict(paper_id=r["paper_id"], date=r["day"].isoformat(), points=r["points"], max_points=r["max_points"], answer=r["answer"], kind="paper") for r in rows]
     for r in conn.execute(
         "SELECT pa.set_id,pa.points,pa.max_points,pa.answer,pa.answered_at FROM practice_answers pa JOIN practice_sets ps ON ps.id=pa.set_id "
-        "WHERE ps.user_id=%s AND pa.question_id=%s ORDER BY pa.answered_at DESC",
+        "WHERE ps.user_id=%s AND pa.question_id=%s AND pa.points IS NOT NULL ORDER BY pa.answered_at DESC",
         (uid, question_id),
     ).fetchall():
         out.append(dict(paper_id=None, set_id=r["set_id"], date=r["answered_at"].astimezone(SHANGHAI).date().isoformat(),

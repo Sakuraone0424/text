@@ -103,9 +103,71 @@ def schedule(conn, uid, paper_id):
     return jobs
 
 
+def schedule_practice(conn, uid, set_id, question_id, content, answer):
+    """A subjective practice answer is graded by the AI like a paper answer; the result is written to the practice answer.
+    Returns the job, or None (no scoring points / too long / not allowed to queue): the answer then stays without a score."""
+    from app import grading_activity, grading_recovery
+
+    if not grading_recovery.has_rubric(content) or _length(answer) > MAX_ANSWER_CHARS:
+        return None
+    try:
+        with conn.transaction():
+            if not grading_activity.auto_queue_allowed(conn, uid)[0]:
+                return None
+            payload = grading_payload(None, dict(question_id=question_id, attempt_id=None), content, answer)
+            payload["practice_set_id"] = set_id
+            return enqueue(conn, uid, f"pgrade:{set_id}:{question_id}:{content_sha(answer)}", "grading", payload)
+    except Exception:  # noqa: BLE001  (grading must never stop an answer from being saved)
+        return None
+
+
+def _checked(job):
+    g = Grade.model_validate(job["result"]["response"])
+    q = job["payload"]["question"]
+    if set(g.knowledge_tags) - set(q["knowledge_tags"]):
+        raise ValueError("unfounded_grading_knowledge_mapping")
+    if g.uncertain:
+        raise ValueError("uncertain_score_requires_independent_reassessment")
+    if (
+        len(g.criterion_points) != len(q["rubric"])
+        or len(g.reasons) != len(q["rubric"])
+        or any(len(x.strip()) < 10 for x in g.reasons)
+        or any(x < 0 or x > r["points"] for x, r in zip(g.criterion_points, q["rubric"]))
+        or sum(g.criterion_points) != g.total
+    ):
+        raise ValueError("invalid_rubric_scores")
+    return g, q
+
+
+def apply_practice(conn, job):
+    p = job["payload"]
+    g, q = _checked(job)
+    row = conn.execute("SELECT * FROM practice_answers WHERE set_id=%s AND question_id=%s FOR UPDATE", (p["practice_set_id"], p["question_id"])).fetchone()
+    if not row or content_sha(row["answer"]) != p["answer_sha256"]:
+        raise ValueError("answer_changed")
+    if row["points"] is not None:
+        return "already_applied"
+    feedback = dict(
+        ai_job_id=job["id"], model_id=job["settings_snapshot"]["model_id"], effort=job["settings_snapshot"]["effort"], grading_version="auto-grading/1",
+        criteria=[dict(description=r["description"], points=pts, max_points=r["points"]) for r, pts in zip(q["rubric"], g.criterion_points)],
+        criterion_reasons=g.reasons, comment=g.explanation, knowledge_tags=g.knowledge_tags,
+    )
+    conn.execute("UPDATE practice_answers SET points=%s,feedback=%s,graded_by='AI自动核验' WHERE set_id=%s AND question_id=%s",
+                 (g.total, Jsonb(feedback), p["practice_set_id"], p["question_id"]))
+    from app import memory
+
+    uid = conn.execute("SELECT user_id FROM practice_sets WHERE id=%s", (p["practice_set_id"],)).fetchone()["user_id"]
+    kind = memory.classify(q["question_type"], g.total, q["max_points"], *memory.lines(conn, uid))
+    if kind in ("mistake", "consolidate"):
+        memory.record_practice_failure(conn, uid, p["question_id"], p["practice_set_id"], kind)
+    return "applied"
+
+
 def apply(conn, job):
     if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
         raise ValueError("actual_grading_call_required")
+    if job["payload"].get("practice_set_id"):
+        return apply_practice(conn, job)
     p = job["payload"]
     g = Grade.model_validate(job["result"]["response"])
     q = p["question"]
