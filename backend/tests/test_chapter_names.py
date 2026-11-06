@@ -45,3 +45,39 @@ def test_what_cannot_be_mapped_is_counted_not_guessed(mapper):
     for raw in ("9 氨基酸", "9 氨基酸", "30 其它"):
         mapper.name("biochemistry", raw)
     assert mapper.unmapped == {"9 氨基酸": 2, "30 其它": 1}
+
+
+@pytest.fixture
+def lipid_book(db, monkeypatch):
+    # a textbook numbered differently from the exam's labels, plus one chapter that is only a number and words
+    book = [("第二十三章 光合作用", 23, "光合作用"), ("第二十章 脂质代谢", 20, "脂质代谢"), ("第十九章 糖类的合成代谢", 19, "糖类的合成代谢"), ("24 氨基酸代谢", 24, "氨基酸代谢")]
+    monkeypatch.setattr(chapters, "textbook_chapters", lambda conn, subject: book)
+    return ChapterMap(db)
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("23 脂质合成", "第二十章 脂质代谢"),             # the number belongs to another book: the words decide, never chapter 23 (光合作用)
+    ("21 糖类合成代谢", "第十九章 糖类的合成代谢"),
+    ("24 氨基酸代谢", "第二十四章 氨基酸代谢"),        # the textbook's own entry is only "24 …": written the textbook's way
+    ("23 光合作用", "第二十三章 光合作用"),
+    ("21 完全无关的内容", "其他"),
+])
+def test_a_label_numbered_by_another_book_is_matched_by_its_words(lipid_book, raw, expected):
+    assert lipid_book.name("biochemistry", raw) == expected
+
+
+def test_the_unmapped_ones_are_counted_and_listed(lipid_book):
+    for raw in ("21 完全无关的内容", "21 完全无关的内容", "30 另一个"):
+        lipid_book.name("biochemistry", raw)
+    assert dict(lipid_book.unmapped) == {"21 完全无关的内容": 2, "30 另一个": 1}
+
+
+def test_the_mapping_report_says_how_many_number_style_labels_there_are_and_how_many_still_do_not_map(db, lipid_book):
+    from stats_helpers import question
+
+    question(db, "biochemistry", "single_choice", 4, "23 脂质合成")
+    question(db, "biochemistry", "single_choice", 4, "23 脂质合成")
+    question(db, "biochemistry", "single_choice", 4, "99 没有这一章")
+    report = chapters.mapping_report(db)
+    assert report["number_style_labels"] == 2 and report["number_style_questions"] == 3
+    assert report["unmapped_labels"] == 1 and report["unmapped_questions"] == 1 and report["left"] == ["biochemistry:99 没有这一章(1)"]

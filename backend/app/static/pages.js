@@ -57,7 +57,7 @@
     if (t.status === "in_progress") return { kind: "continue", label: `继续作答（剩余 ${t.clock && /\d/.test(t.clock) ? t.clock : "--:--"}）`, pill: "正在作答" };
     if (t.status === "submitted") {
       const done = mine && mine.points !== undefined && mine.points !== null;
-      return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : "查看成绩（判分中）", pill: "已提交", green: true };
+      return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : mine && mine.objective_max ? `查看成绩（客观题 ${mine.objective_points} / ${mine.objective_max}）` : "查看成绩（判分中）", pill: "已提交", green: true };
     }
     if (t.status === "not_started") return { kind: "start", label: "开始（60 分钟）", pill: "尚未开始", green: true };
     if (!loaded) return { kind: "loading", label: "开始", pill: "状态待载入" };
@@ -256,6 +256,9 @@
     const data = book;
     const open = data.items.filter((i) => i.group !== "mastered");
     const count = (subject) => open.filter((i) => i.subject === subject).length;
+    // the numbers on the type chips and in the chapter list follow the subject (and each other): what you would get if you tapped it
+    const inScope = (i, skip) => (skip === "subject" || !view.subject || i.subject === view.subject) && (skip === "type" || !view.type || i.question_type === view.type)
+      && (skip === "chapter" || !view.chapter || i.chapter === view.chapter);
     // the one-line filter: 全部 · 生化 N · 细胞 N   筛选 ▾
     const subjects = $("filter-subject");
     subjects.replaceChildren();
@@ -271,7 +274,7 @@
     $("filter-toggle").setAttribute("aria-expanded", String(view.open));
     const types = $("filter-type");
     types.replaceChildren();
-    [["", "全部题型"], ...TYPES.map((t) => [t, `${TYPE[t]} ${(data.types.find((x) => x.value === t) || { count: 0 }).count}`])].forEach(([value, label]) => {
+    [["", "全部题型"], ...TYPES.map((t) => [t, `${TYPE[t]} ${open.filter((i) => i.question_type === t && inScope(i, "type")).length}`])].forEach(([value, label]) => {
       const chip = el("button", label, types);
       chip.type = "button";
       chip.setAttribute("aria-pressed", String(view.type === value));
@@ -281,7 +284,8 @@
     select.replaceChildren();
     el("option", "全部章节", select).value = "";
     data.chapters.filter((c) => !view.subject || c.subject === view.subject).forEach((c) => {
-      const option = el("option", `${SHORT[c.subject]} · ${c.value}（${c.count}）`, select);
+      const n = open.filter((i) => i.subject === c.subject && i.chapter === c.value && inScope(i, "chapter")).length;
+      const option = el("option", `${SHORT[c.subject]} · ${c.value}（${n}）`, select);
       option.value = c.value;
     });
     select.value = view.chapter;
@@ -407,6 +411,11 @@
   /* ------------------------------------------------------------------------------------------------------------------
      Whole-paper review: light summary first, one question in full when it is opened
      ------------------------------------------------------------------------------------------------------------------ */
+  async function postJSON(path) {
+    const response = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" });
+    if (!response.ok) throw new Error(`操作失败（${response.status}）`);
+    return response.json();
+  }
   const STATUS = { right: "对", wrong: "错", partial: "部分", blank: "未答", pending: "判分中", reported: "已反馈 · 不计分" };
   const rv = { filter: "all", subject: "", type: "" };
   let review = null;
@@ -416,8 +425,15 @@
     const card = el("section", undefined, root, "card key-card review-head");
     el("p", `${md(s.date)} · ${s.specification_name}`, card, "date-line");
     const total = el("div", undefined, card, "rh-total");
-    el("strong", s.pending ? "判分中" : String(s.score ?? s.graded_points), total);
-    el("span", ` / ${s.max_points} 分`, total);
+    if (s.pending && s.kind === "paper") {
+      // the subjective answers are still being graded: the objective part, never a total (and never 0)
+      el("strong", String(s.objective_points), total);
+      el("span", ` / ${s.objective_max} 分 · 客观题`, total);
+      el("span", "主观题判分中", total, "pill");
+    } else {
+      el("strong", s.pending ? "判分中" : String(s.score ?? s.graded_points), total);
+      el("span", ` / ${s.max_points} 分`, total);
+    }
     if (s.read_only && s.kind === "paper") el("span", "旧卷 · 只读", total, "pill");
     const subjects = el("div", undefined, card, "rh-subjects");
     Object.entries(s.subject_scores || {}).forEach(([subject, v]) => {
@@ -429,6 +445,21 @@
       const box = el("div", undefined, subjects);
       el("span", "用时", box, "rh-subj");
       el("b", mmss(s.seconds), box);
+    }
+    if (s.pending && s.kind === "paper") {
+      if (s.grading_late && s.grading_late.count) el("p", `有 ${s.grading_late.count} 题交卷后超过 ${s.grading_late.minutes} 分钟仍未判完。`, card, "notice late-grading");
+      const again = el("button", "整卷重新判分", card, "secondary");
+      again.type = "button";
+      again.onclick = async () => {
+        again.disabled = true;
+        try {
+          await postJSON("/v2/papers/" + s.paper_id + "/regrade");
+          again.textContent = "已重新排队";
+        } catch (error) {
+          again.disabled = false;
+          again.textContent = error.message;
+        }
+      };
     }
     if (s.type_rates && s.type_rates.length) {
       const rates = el("div", undefined, card, "rh-rates");
@@ -493,6 +524,7 @@
       el("span", `${SHORT[item.subject]} · ${TYPE[item.question_type]}`, head, "rq-type");
       el("span", item.status === "reported" ? STATUS.reported : item.points === null ? "判分中" : `${item.points} / ${item.max_points}`, head, "rq-score");
       el("span", item.stem, box, "rq-stem");
+      if (item.status === "pending" && item.pending_text) el("span", item.pending_text, box, "rq-pending");
       head.onclick = () => openQuestion(box, item);
     });
   }
@@ -512,6 +544,21 @@
       target.className = "rq-body";
       if (d.reported) el("p", "已反馈 · 不计分", target, "notice");
       drawQuestion(target, d);
+      if (d.points === null && !d.reported) {
+        el("p", d.pending_text || "待判分", target, "notice");
+        const again = el("button", "重新判分", target, "secondary");
+        again.type = "button";
+        again.onclick = async () => {
+          again.disabled = true;
+          try {
+            await postJSON(reviewPath(reviewKey).replace("/review", "/regrade") + "/" + item.question_id);
+            again.textContent = "已重新排队";
+          } catch (error) {
+            again.disabled = false;
+            again.textContent = error.message;
+          }
+        };
+      }
     } catch (error) {
       target.textContent = error.message;
     }

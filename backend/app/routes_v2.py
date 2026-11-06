@@ -200,6 +200,29 @@ def grading_activity(paper_id: int, username: str = Depends(require_auth)):
     return operation(lambda c, u: progress(c, u, paper_id), username)
 
 
+@router.post("/papers/{paper_id}/regrade")
+def regrade_paper(paper_id: int, username: str = Depends(require_auth)):
+    """Queue the grading of every unfinished answer of this paper again (including the ones that ended undecided)."""
+    from app import grading_recovery
+
+    def run(c, u):
+        service.owned_paper(c, u, paper_id)
+        return grading_recovery.requeue(c, u, paper_id=paper_id, final_too=True)
+
+    return operation(run, username)
+
+
+@router.post("/papers/{paper_id}/regrade/{question_id}")
+def regrade_question(paper_id: int, question_id: int, username: str = Depends(require_auth)):
+    from app import grading_recovery
+
+    def run(c, u):
+        service.owned_paper(c, u, paper_id)
+        return grading_recovery.requeue(c, u, paper_id=paper_id, question_id=question_id, final_too=True)
+
+    return operation(run, username)
+
+
 ErrorCategory = Literal[
     "concept_unclear",
     "memory_omission",

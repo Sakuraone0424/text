@@ -1,6 +1,7 @@
 """FSRS-6 scheduling; existing fixed-interval history is never fabricated."""
 
 import json
+from zoneinfo import ZoneInfo
 from datetime import timezone
 from fsrs import Card, Rating, Scheduler
 from psycopg.types.json import Jsonb
@@ -96,8 +97,8 @@ def review(
     if type(rating) is not int or rating not in (1, 2, 3, 4):
         raise ValueError("FSRS rating must be Again=1, Hard=2, Good=3 or Easy=4")
     now = server_now(conn).astimezone(timezone.utc)
-    if require_due and row["due"] > now:
-        raise ValueError("Review is not yet due")
+    if require_due and row["due"].astimezone(SHANGHAI).date() > now.astimezone(SHANGHAI).date():
+        raise ValueError("Review is not yet due")             # due TODAY (Beijing) is due: the count on the page is by day
     if expected_version is not None and row["version"] != expected_version:
         raise ValueError("version_conflict")
     card, _ = SCHEDULER.review_card(Card.from_dict(row["card"]), Rating(rating), now)
@@ -125,13 +126,14 @@ def due(conn, user_id):
         "SELECT c.question_id,c.card,c.version,c.due,q.content->>'stem' AS stem, "
         "q.content->>'question_type' AS question_type,q.content->'options' AS options "
         "FROM fsrs_cards c JOIN reviewed_questions q ON q.id=c.question_id "
-        "WHERE c.user_id=%s AND c.due<=clock_timestamp() AND c.status<>'mastered' "
+        "WHERE c.user_id=%s AND (c.due AT TIME ZONE 'Asia/Shanghai')::date<=(clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date AND c.status<>'mastered' "
         "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.user_id=c.user_id AND qr.question_id=c.question_id) "
         "ORDER BY c.due,c.question_id",
         (user_id,),
     ).fetchall()
 
 
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 STATE_KEY = "mistake_reclassify_v1"
 
 

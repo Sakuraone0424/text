@@ -120,7 +120,7 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     page.locator('nav.primary-nav [data-view="profile"]').click()
     page.locator("#profile-history").click()
     expect(page.locator("#learning .chart-svg")).not_to_have_count(0)
-    expect(page.locator("#learning article").first).to_contain_text("用时")
+    expect(page.locator("#learning .history-card").first).to_contain_text("用时")
     no_overflow(page)
     shot(page, "part4-history.png")
     assert not errors, errors

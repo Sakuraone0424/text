@@ -12,7 +12,7 @@ from datetime import timedelta
 from app import chapters, memory
 from app.learning_stats import SHANGHAI, TYPES, today_cn
 
-GROUPS = (("today", "今天到期"), ("tomorrow", "明天到期"), ("later", "以后"), ("consolidate", "待巩固"), ("mastered", "已掌握"))
+GROUPS = (("today", "今天及之前到期"), ("tomorrow", "明天到期"), ("later", "以后"), ("consolidate", "待巩固"), ("mastered", "已掌握"))
 MASTERED_AFTER = 3          # successful reviews (Good or Easy) after which a question counts as mastered: the three dots
 
 
@@ -99,8 +99,8 @@ def book(conn, uid, today=None):
         due_day = c["due"].astimezone(SHANGHAI).date()
         if c["status"] == "mastered" or dots >= MASTERED_AFTER:
             group = "mastered"
-        elif c["status"] == "consolidate":
-            group = "consolidate"
+        elif c["status"] == "consolidate" and due_day > today:
+            group = "consolidate"             # not due yet; one that is due is in the due groups (the count on top and the group agree)
         else:
             group = "today" if due_day <= today else "tomorrow" if due_day == tomorrow else "later"
         subjective = content["question_type"] in memory.SUBJECTIVE

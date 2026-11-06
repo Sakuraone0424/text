@@ -7,7 +7,7 @@ read the same way and stay read-only (nothing here writes).
 import json
 from collections import defaultdict
 
-from app import chapters, memory
+from app import chapters, grading_activity, grading_recovery, memory, quiz_v2
 from app.learning_stats import SHANGHAI, TYPES
 from app.mistake_book import plain_answer, sources_of
 
@@ -74,13 +74,22 @@ def summary(conn, uid, paper_id):
             by_subject[snap["subject"]][2] += 1 if r["points"] is None else 0
     total_points = sum(v[0] for v in by_subject.values())
     total_max = sum(v[1] for v in by_subject.values())
+    obj_points = sum(i["points"] for i in items if i["status"] != "reported" and i["points"] is not None and i["question_type"] in quiz_v2.OBJECTIVE_TYPES)
+    obj_max = sum(i["max_points"] for i in items if i["status"] != "reported" and i["points"] is not None and i["question_type"] in quiz_v2.OBJECTIVE_TYPES)
+    texts = {}
+    if pending:
+        texts = {q["question_id"]: q.get("pending_text") for q in grading_activity.progress(conn, uid, paper_id)["questions"] if q["points"] is None and not q["excluded"]}
+        for i in items:
+            if i["status"] == "pending":
+                i["pending_text"] = texts.get(i["question_id"]) or "待判分"
     spec = (paper["blueprint"] or {}).get("specification")
     seconds = int((session["submitted_at"] - session["started_at"]).total_seconds()) if session and session["submitted_at"] and session["started_at"] else None
     return dict(
         paper_id=paper_id, kind="paper", date=paper["paper_date"].isoformat(), specification=spec, specification_name=SPEC_NAMES.get(spec, spec),
         read_only=spec == "xiaohan-150-60-v1", pending=pending, score=None if pending else total_points, graded_points=total_points, max_points=total_max,
         subject_scores={s: dict(points=v[0], max_points=v[1], pending=v[2]) for s, v in sorted(by_subject.items())},
-        seconds=seconds,
+        seconds=seconds, objective_points=obj_points, objective_max=obj_max,
+        grading_late=grading_recovery.late(conn, uid, paper_id) if pending else dict(count=0, minutes=grading_recovery.LATE_AFTER_MINUTES),
         type_rates=[dict(subject=s, question_type=t, points=v[0], max_points=v[1], rate=round(v[0] / v[1], 4) if v[1] else None)
                     for (s, t), v in sorted(by_type.items(), key=lambda kv: (kv[0][0], TYPES.index(kv[0][1]) if kv[0][1] in TYPES else 9))],
         items=items,
@@ -113,6 +122,7 @@ def detail(conn, uid, paper_id, question_id):
         blank_points=feedback.get("blank_points"), comment=feedback.get("comment"),
         concept_errors=feedback.get("concept_errors") or [], imprecisions=feedback.get("imprecisions") or [], suggestions=feedback.get("suggestions") or [],
         evidence=sources_of(snap),
+        pending_text=next((q.get("pending_text") for q in grading_activity.progress(conn, uid, paper_id)["questions"] if q["question_id"] == question_id), None) if row["points"] is None and not reported else None,
     )
 
 

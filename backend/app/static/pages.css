@@ -140,3 +140,20 @@
 .training-app .pick-option small { color: var(--muted); }
 .training-app .start-dialog .button-row { display: flex; gap: 8px; margin-top: 12px; }
 .training-app .start-dialog .button-row button { flex: 1; }
+
+/* history: one card per paper */
+.training-app .history-list { display: grid; gap: 12px; margin-top: 12px; }
+.training-app .history-card { position: relative; display: block; text-decoration: none; color: inherit; padding: 16px 40px 16px 16px; }
+.training-app .hc-top { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.training-app .hc-score { margin: 6px 0 4px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.training-app .hc-score strong { font-size: 28px; font-variant-numeric: tabular-nums; }
+.training-app .hc-score span { color: var(--muted); font-size: 14px; }
+.training-app .hc-pending { margin-left: 4px; }
+.training-app .hc-meta { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 13px; }
+.training-app .history-card .chev { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 20px; }
+.training-app .rq-pending { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.training-app .late-grading { margin: 8px 0; }
+/* the seven bars take all the width to the right of the count (no blank block on their left) */
+.training-app .due-card .due-side { flex: 1 1 auto; min-width: 0; align-items: stretch; }
+.training-app .due-card .due-side .stat-label { text-align: right; }
+.training-app .due-card .week-bars { width: 100%; min-width: 0; }

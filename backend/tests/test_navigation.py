@@ -5,7 +5,7 @@ Inventory (from -> via -> to), each one exercised below:
   bottom bar:  home/practice/mistakes/profile  <->  each other                  (#/home #/practice #/mistakes #/profile)
   home         quick card "出题进度"            -> #/progress
   profile      links "出题进度", "模型与费用"     -> #/progress, #/model        (back -> #/profile)
-  stats        buttons 近7天 / 学习建议 / 历史只读档案 / 教材与题库核验 / 归档状态 -> #/stats/<sub>
+  stats        buttons 近7天 / 学习建议 / 历史试卷 / 教材与题库核验 / 归档状态 -> #/stats/<sub>
   progress, model, stats: the subbar's back button -> the page they were opened from (or their parent)
   old addresses /progress and /static/model.html -> #/progress, #/model     (server redirects, then one load)
 """

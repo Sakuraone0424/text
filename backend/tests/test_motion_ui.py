@@ -311,6 +311,11 @@ def test_pull_to_refresh_feels_like_ios_and_keeps_the_data(engine, live_app, chr
     touch(page, "touchEnd", 400)
     page.wait_for_timeout(300)
     assert page.locator(".ptr.spin").count() == 1                                  # the indicator turns while it refreshes
+    # the words sit BELOW the round indicator (never over it), centred; and no top line runs while the pull indicator is showing
+    boxes = page.evaluate("""() => { const d = document.querySelector('.ptr-dot').getBoundingClientRect(), l = document.querySelector('.ptr-label').getBoundingClientRect();
+        return { dotBottom: d.bottom, labelTop: l.top, dotCentre: d.left + d.width / 2, screen: innerWidth / 2 }; }""")
+    assert boxes["labelTop"] >= boxes["dotBottom"] - 0.5 and abs(boxes["dotCentre"] - boxes["screen"]) < 2, boxes
+    assert not page.evaluate("document.getElementById('motion-topline')?.classList.contains('on') || false")
     assert page.locator("#stat-avg").inner_text() == "187"                         # the old data stays on screen
     assert 30 < page.evaluate("new DOMMatrix(getComputedStyle(document.getElementById('home-view')).transform).m42") < 70   # resting spot
     assert "更新中" not in page.locator("#home-view").inner_text() and page.locator(".pull-hint").count() == 0

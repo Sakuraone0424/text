@@ -236,7 +236,7 @@
           <div class="button-row">
             <button id="weekly" class="secondary">近7天章节统计</button
             ><button id="insights" class="secondary">学习建议</button
-            ><button id="history" class="secondary">历史只读档案</button>
+            ><button id="history" class="secondary">历史试卷</button>
             <button id="source-status" class="secondary">教材与题库核验</button>
           </div>
           <div id="stats-content"></div>
@@ -248,7 +248,7 @@
           <section class="card settings-list">
             <button id="profile-history" data-action="history">
               <span
-                >历史只读档案<small>保留原始成绩与题目，不改写历史</small></span
+                >历史试卷<small>每套卷子的成绩、错题和整卷回看</small></span
               ><span aria-hidden="true">→</span></button
             ><button data-action="insights">
               <span>学习建议<small>仅显示已有真实报告</small></span
@@ -322,6 +322,12 @@
         <section class="card" aria-labelledby="h-waste">
           <h2 id="h-waste">近 24 小时被挡原因</h2>
           <div id="waste"></div>
+        </section>
+        <section class="card" id="grading-card" aria-labelledby="h-grading" hidden>
+          <h2 id="h-grading">待判分的题</h2>
+          <p id="grading-note" class="muted"></p>
+          <ul id="grading-reasons" class="plain-list"></ul>
+          <div id="grading-papers" class="button-row"></div>
         </section>
         <section class="card" aria-labelledby="h-jobs">
           <h2 id="h-jobs">最近任务</h2>

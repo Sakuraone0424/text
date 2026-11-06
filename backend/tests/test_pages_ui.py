@@ -40,7 +40,7 @@ def item(qid, subject, qtype, chapter, group, **over):
 
 BOOK = {
     "today": "2026-11-05", "total": 6, "open": 5, "unmapped": {},
-    "groups": [{"key": "today", "label": "今天到期", "count": 2}, {"key": "tomorrow", "label": "明天到期", "count": 1}, {"key": "later", "label": "以后", "count": 1},
+    "groups": [{"key": "today", "label": "今天及之前到期", "count": 2}, {"key": "tomorrow", "label": "明天到期", "count": 1}, {"key": "later", "label": "以后", "count": 1},
                {"key": "consolidate", "label": "待巩固", "count": 1}, {"key": "mastered", "label": "已掌握", "count": 1}],
     "items": [
         item(1, "biochemistry", "single_choice", "第二章 蛋白质的结构与功能", "today", stem="下列关于蛋白质二级结构的叙述，哪一项是正确的", wrong_times=3, dots=1),
@@ -140,7 +140,7 @@ def test_the_mistake_book_is_cards_grouped_by_due_date_with_a_one_line_filter(en
     page, errors = start(engine, live_app, ROUTES, path="/training#/mistakes")
     page.wait_for_selector("#mistake-groups .mistake-card")
     groups = page.locator("#mistake-groups .mg-head")
-    assert [t.split("\n")[0] for t in groups.all_inner_texts()] == ["今天到期", "明天到期", "以后", "待巩固", "已掌握"]
+    assert [t.split("\n")[0] for t in groups.all_inner_texts()] == ["今天及之前到期", "明天到期", "以后", "待巩固", "已掌握"]
     first = page.locator("#mistake-groups .mistake-card").first
     assert first.get_attribute("href") == "#/mistake/m1"
     text = first.inner_text()
@@ -225,4 +225,75 @@ def test_the_whole_paper_view_opens_from_the_result_page_and_the_history_page(en
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / "app" / "static"
     js = (root / "training.js").read_text()
-    assert 'id = "view-whole-paper"' in js and '"#/review/p" + paper.paper_id' in js and '"整卷回看"' in js and '"#/review/p" + item.paper_id' in js
+    assert 'id = "view-whole-paper"' in js and '"#/review/p" + paper.paper_id' in js and 'card.href = "#/review/p" + item.paper_id' in js      # the history card itself links in: no separate button
+
+
+def test_the_type_and_chapter_numbers_follow_the_subject_filter(engine, live_app):
+    page, _ = start(engine, live_app, ROUTES, path="/training#/mistakes")
+    page.wait_for_selector("#mistake-groups .mistake-card")
+    page.locator("#filter-toggle").click()
+    all_types = page.locator("#filter-type button").all_inner_texts()
+    assert "单选 2" in all_types and "填空 1" in all_types                       # all subjects: 5 open ones (the mastered one is not counted)
+    page.locator("#filter-subject button", has_text="细胞").click()
+    types = dict(t.rsplit(" ", 1) for t in page.locator("#filter-type button").all_inner_texts() if t[-1].isdigit())
+    assert types == {"单选": "1", "填空": "0", "名词解释": "1", "简答": "0", "问答": "0"}, types
+    assert sum(int(v) for v in types.values()) == int(page.locator("#filter-subject button", has_text="细胞").inner_text().split()[-1])
+    chapters = page.locator("#filter-chapter option").all_inner_texts()
+    assert chapters[1:] == ["细胞 · 第二章 细胞膜（2）"], chapters                 # only that subject's chapters, with their own counts
+    page.close()
+
+
+def test_the_number_on_top_and_the_first_group_are_the_same_count(engine, live_app):
+    due = {**FULL, "reviews": {"due_now": 2, "next_7_days": [{"day": f"2026-11-{5 + k:02d}", "count": 2 if k == 0 else 0} for k in range(7)], "mastered": 0}}
+    page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": due}, path="/training#/mistakes")
+    page.wait_for_selector("#mistake-groups .mistake-card")
+    page.wait_for_function("document.getElementById('due-number').textContent !== '0'")
+    first = page.locator("#mistake-groups .mg-head").first
+    assert "今天及之前到期" in first.inner_text()
+    assert page.locator("#due-number").inner_text() == first.locator(".mg-count").inner_text() == "2"
+    # the seven bars use the width to the right of the count
+    box = page.evaluate("""() => { const b = document.getElementById('due-mini').getBoundingClientRect(), c = document.querySelector('.due-card').getBoundingClientRect(),
+        n = document.getElementById('due-number').getBoundingClientRect(); return { right: c.right - b.right, gap: b.left - n.right }; }""")
+    assert box["right"] < 40 and box["gap"] < 120, box
+    page.close()
+
+
+HISTORY = {"papers": [
+    {"paper_id": 9, "date": "2026-11-05", "spec": "xiaohan-60q-300pt-v4", "graded": False, "pending": 12, "points": None, "max_points": None, "objective_points": 38, "objective_max": 60,
+     "subjects": {}, "seconds": 3010, "mistakes": 4, "consolidate": 1},
+    {"paper_id": 8, "date": "2026-11-04", "spec": "xiaohan-60q-300pt-v4", "graded": True, "pending": 0, "points": 212, "max_points": 300, "objective_points": 50, "objective_max": 60,
+     "subjects": {"biochemistry": {"points": 110, "max": 150}, "cell_biology": {"points": 102, "max": 150}}, "seconds": 3300, "mistakes": 7, "consolidate": 3},
+]}
+
+
+def test_the_history_page_is_one_card_per_paper_that_opens_the_review(engine, live_app):
+    routes = {**ROUTES, "/v2/stats/history": HISTORY, "/v2/history": {"training": [], "legacy": []}, "/v2/stats/profile": {"trend": [], "timing": {"papers": []}}}
+    page, _ = start(engine, live_app, routes, path="/training#/stats/history")
+    page.wait_for_selector(".history-card")
+    cards = page.locator(".history-card")
+    expect(cards).to_have_count(2)
+    expect(page.locator("#learning h2")).to_have_text("历史试卷")
+    first, second = cards.nth(0).inner_text(), cards.nth(1).inner_text()
+    assert "38" in first and "/ 60 分" in first and "客观题" in first and "主观题判分中" in first and "0 /" not in first.replace("10 / ", "")      # the objective part, never a total of 0
+    assert "212" in second and "/ 300 分" in second and "生化 110/150" in second and "细胞 102/150" in second and "用时 55 分钟" in second and "错题 7" in second
+    assert cards.nth(0).get_attribute("href") == "#/review/p9"                                  # the card is the link: no separate button
+    assert page.locator("#learning button", has_text="整卷回看").count() == 0
+    page.close()
+
+
+REVIEW_PENDING = {**REVIEW, "pending": 12, "score": None, "objective_points": 38, "objective_max": 60, "grading_late": {"count": 5, "minutes": 30},
+                  "items": [{**i, "pending_text": "排队等待 AI 判分"} if i["status"] == "pending" else i for i in REVIEW["items"]]}
+
+
+def test_a_review_with_waiting_answers_shows_the_objective_part_the_reasons_and_the_regrade_button(engine, live_app):
+    routes = {**ROUTES, "/v2/papers/9/review": REVIEW_PENDING, "/v2/papers/9/regrade": {"new_task": 12}}
+    page, _ = start(engine, live_app, routes, path="/training#/review/p9")
+    page.wait_for_selector("#review-body .review-q")
+    head = page.locator("#review-body .review-head").inner_text()
+    assert "38" in head and "/ 60 分" in head and "客观题" in head and "主观题判分中" in head
+    assert "有 5 题交卷后超过 30 分钟仍未判完" in head
+    assert "排队等待 AI 判分" in page.locator("#review-body .review-q.pending").first.inner_text()
+    page.locator("#review-body .review-head button", has_text="整卷重新判分").click()
+    page.wait_for_function("window.__calls && window.__calls['/v2/papers/9/regrade'] === 1")
+    expect(page.locator("#review-body .review-head button", has_text="已重新排队")).to_have_count(1)
+    page.close()

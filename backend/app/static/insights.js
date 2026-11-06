@@ -55,7 +55,8 @@
       }
     }
     // with a kept copy on screen the refresh happens in the background: only a hair-thin line at the top says so
-    const background = paths.every((path) => Data.peek(path));
+    // (not while the pull-to-refresh indicator is showing: one indicator at a time)
+    const background = paths.every((path) => Data.peek(path)) && !window.Live?.pulling?.();
     if (background) window.Motion?.topline.start();
     try {
       await loader();
@@ -213,7 +214,8 @@
     const result = $("today-result");
     result.hidden = !(today.state === "submitted");
     if (today.state === "submitted")
-      result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分` : "今日已交卷，等待判分完成";
+      result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分`
+        : today.objective_max ? `今日客观题 ${today.objective_points} / ${today.objective_max} 分 · 主观题判分中` : "今日已交卷，等待判分完成";
     // bank readiness: tag, progress line and the start button
     const bank = o.tomorrow;
     homeToday = today.state;
@@ -237,7 +239,13 @@
       }
     };
     const last7 = o.last7;
-    none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", Math.round(last7.avg_points));
+    if ((last7.avg_points === null || last7.avg_points === undefined) && o.objective_only) {
+      // nothing fully graded yet: the objective part of the papers still being graded, not "判分中" for ever
+      const node = $("stat-avg");
+      node.classList.remove("none");
+      node.textContent = `客观 ${Math.round(o.objective_only.points)}/${Math.round(o.objective_only.max)}`;
+      $("stat-avg-note").textContent = "主观题判分中，判完后显示总分";
+    } else none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", Math.round(last7.avg_points));
     const note = $("stat-avg-note");
     note.className = "";
     if (last7.avg_points !== null) {
@@ -371,7 +379,8 @@
       return;
     }
     const latest = rows[rows.length - 1];
-    const use = trendMode === "points" ? rows.filter((r) => r.spec === latest.spec) : rows;
+    const partial = rows.filter((r) => r.partial).length;       // handed in, subjective answers still being graded: objective part only
+    const use = trendMode === "points" ? rows.filter((r) => r.spec === latest.spec && !r.partial) : rows;
     const label = (r) => dateLabel(r.date);
     const subjectSeries = (subject) => ({
       name: SHORT[subject], color: COLOR[subject],
@@ -382,7 +391,7 @@
     });
     const series = [subjectSeries("biochemistry"), subjectSeries("cell_biology"), {
       name: "两科总分", color: C.COLORS.total,
-      points: use.map((r) => ({ label: label(r), value: trendMode === "points" ? r.points : r.rate, note: `${r.points}/${r.max}分` })),
+      points: use.map((r) => ({ label: label(r), value: trendMode === "points" ? r.points : r.rate, note: r.partial ? `客观题 ${r.points}/${r.max}分（主观题判分中）` : `${r.points}/${r.max}分` })),
     }];
     const last7 = rows.slice(-7), prev7 = rows.slice(-14, -7);
     const mean = (list, subject) => {
@@ -398,7 +407,7 @@
       title: "成绩趋势", hideTitle: true, unit: trendMode === "points" ? "分" : "得分率", series,
       yMin: 0, yMax: trendMode === "points" ? latest.max : 1,
       format: trendMode === "points" ? C.num : (v) => Math.round(v * 100) + "%",
-      conclusion: sameSpec + (parts.length ? parts.join("；") + "。" : "再完成一套就能看到变化。"),
+      conclusion: sameSpec + (partial && trendMode !== "points" ? `其中 ${partial} 套主观题还在判分，先只按客观题计算；` : "") + (parts.length ? parts.join("；") + "。" : "再完成一套就能看到变化。"),
     });
   }
   const MIN_ANSWERS_FOR_CONCLUSION = 2;     // a cell with fewer answered questions says nothing yet

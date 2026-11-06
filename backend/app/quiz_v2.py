@@ -660,6 +660,15 @@ def grade(
     return result(conn, paper["user_id"], paper_id)
 
 
+OBJECTIVE_TYPES = ("single_choice", "fill_blank")
+
+
+def _grading_late(conn, user_id, paper_id):
+    from app import grading_recovery
+
+    return grading_recovery.late(conn, user_id, paper_id)
+
+
 def result(conn, user_id, paper_id):
     owned_paper(conn, user_id, paper_id)
     attempt = conn.execute(
@@ -721,6 +730,11 @@ def result(conn, user_id, paper_id):
         "status": "pending_review" if pending else "graded",
         "pending": pending,
         "score": None if pending else sum(r["points"] for r in counted),
+        # while subjective answers are still being graded the page shows the objective part, never a total (and never 0)
+        "objective_points": sum(r["points"] or 0 for r in counted if r["snapshot"]["question_type"] in OBJECTIVE_TYPES),
+        "objective_max": sum(r["snapshot"]["max_points"] for r in counted if r["snapshot"]["question_type"] in OBJECTIVE_TYPES and r["points"] is not None),
+        "subjective_pending": sum(r["points"] is None for r in counted if r["snapshot"]["question_type"] not in OBJECTIVE_TYPES),
+        "grading_late": _grading_late(conn, user_id, paper_id) if pending else dict(count=0, minutes=30),
         "graded_points": sum(r["points"] or 0 for r in counted),
         "max_points": excluded["max_points"],
         "nominal_max_points": excluded["nominal_max_points"],

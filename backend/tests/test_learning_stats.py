@@ -67,7 +67,11 @@ def test_a_paper_with_a_pending_answer_is_not_scored_yet(db, uid):
     paper(db, uid, t, [item(got=4), item("biochemistry", "short_answer", 12, None)], when=at(t))
     o = stats.overview(db, uid)
     assert o["last7"]["papers"] == 0 and o["has_data"] is False
-    assert stats.profile(db, uid)["trend"] == []
+    trend = stats.profile(db, uid)["trend"]
+    assert len(trend) == 1 and trend[0]["partial"] is True and (trend[0]["points"], trend[0]["max"]) == (4, 4)      # the objective part, marked
+    assert o["objective_only"] == dict(papers=1, points=4.0, max=4.0)
+    cards = stats.history(db, uid)["papers"]
+    assert len(cards) == 1 and cards[0]["graded"] is False and cards[0]["points"] is None and (cards[0]["objective_points"], cards[0]["objective_max"]) == (4, 4)
 
 
 def test_scores_of_different_totals_are_compared_as_rates_never_mixed(db, uid):
@@ -307,3 +311,14 @@ def test_chapters_with_fewer_than_three_graded_answers_never_count_even_with_fiv
     t = today(db)
     paper(db, uid, t, [item(chapter=f"{n}章", got=0) for n in "ABCDE" for _ in range(2)], when=at(t))
     assert stats.overview(db, uid)["weak_chapters"] == []
+
+
+def test_a_history_card_has_the_total_the_subjects_the_time_and_the_mistakes(db, uid):
+    t = today(db)
+    paper(db, uid, t, [item("biochemistry", "single_choice", 4, 4), item("biochemistry", "single_choice", 4, 0), item("cell_biology", "short_answer", 12, 9),
+                       item("cell_biology", "term", 6, 6)], when=at(t))
+    card = stats.history(db, uid)["papers"][0]
+    assert card["graded"] is True and (card["points"], card["max_points"]) == (19, 26)
+    assert card["subjects"] == {"biochemistry": dict(points=4, max=8), "cell_biology": dict(points=15, max=18)}
+    assert card["mistakes"] == 1 and card["consolidate"] == 1                 # 0/4 wrong; 9/12 = 75 % is "to consolidate"
+    assert card["seconds"] is not None

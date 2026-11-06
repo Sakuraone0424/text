@@ -740,13 +740,18 @@ async function showResult() {
   element(
     "h2",
     (result.score === null
-      ? `待判分 ${result.pending} 题 · 已得 ${result.graded_points} 分`
+      ? (result.objective_max ? `客观题 ${result.objective_points} / ${result.objective_max} 分 · 主观题判分中` : `判分中 · 已判 ${result.graded_points} 分，${result.pending} 题待判`)
       : `成绩 ${result.score} / ${result.max_points}`) +
       (excludedCount
         ? `（原满分 ${result.nominal_max_points}，已扣除 ${excludedCount} 道反馈题共 ${result.excluded.points} 分）`
         : ""),
     $("result"),
   );
+  if (result.grading_late?.count) {
+    const late = element("p", `有 ${result.grading_late.count} 题交卷后超过 ${result.grading_late.minutes} 分钟仍未判完，可点题目旁的「重新判分」。`, $("result"));
+    late.className = "notice late-grading";
+    late.setAttribute("role", "status");
+  }
   let number = 0;
   for (const answer of result.answers) {
     number += 1;
@@ -775,6 +780,20 @@ async function showResult() {
       waiting.className = "grading-status";
       waiting.dataset.qid = answer.question_id;
       waiting.setAttribute("role", "status");
+      const again = element("button", "重新判分", article);
+      again.type = "button";
+      again.className = "secondary regrade-one";
+      again.onclick = async () => {
+        again.disabled = true;
+        try {
+          await api(`/v2/papers/${result.paper_id}/regrade/${answer.question_id}`, { method: "POST" });
+          waiting.textContent = "已重新排队，等待 AI 判分";
+          status("已重新排队判分。");
+        } catch (error) {
+          status(error.message);
+          again.disabled = false;
+        }
+      };
     }
     let response;
     try {
@@ -947,6 +966,25 @@ function startGradingActivity(paperId) {
   const refreshScores = element("button", "刷新成绩与解析", section);
   refreshScores.type = "button";
   refreshScores.onclick = () => showResult().catch((e) => status(e.message));
+  const regradeAll = element("button", "整卷重新判分", section);
+  regradeAll.type = "button";
+  regradeAll.className = "secondary";
+  regradeAll.hidden = true;
+  regradeAll.onclick = async () => {
+    regradeAll.disabled = true;
+    try {
+      await api(`/v2/papers/${paperId}/regrade`, { method: "POST" });
+      status("未判完的题已重新排队。");
+      poll();
+    } catch (error) {
+      status(error.message);
+    } finally {
+      regradeAll.disabled = false;
+    }
+  };
+  const lateNote = element("p", undefined, section);
+  lateNote.className = "notice";
+  lateNote.hidden = true;
   let busy = false;
   let priorGraded = null;
   const labels = {
@@ -974,7 +1012,7 @@ function startGradingActivity(paperId) {
     provider_authorization_required: "尚未授权调用AI",
   };
   const reasonText = (row) =>
-    (reasons[row.pending_reason] || labels[row.state] || "待判分") +
+    (row.pending_text || reasons[row.pending_reason] || labels[row.state] || "待判分") +
     (row.pending_detail ? "：" + row.pending_detail : "");
   async function poll() {
     if (busy || paper?.paper_id !== paperId || document.visibilityState !== "visible") return;
@@ -991,6 +1029,9 @@ function startGradingActivity(paperId) {
           (data.auto_queue_available ? "" : "自动判分尚未启用或授权不足；不会假装已发送AI任务。")
         : "全部 " + data.total + " 题已判分。";
       refreshScores.hidden = !data.pending;
+      regradeAll.hidden = !data.pending;
+      lateNote.hidden = !data.late?.count;
+      if (data.late?.count) lateNote.textContent = `有 ${data.late.count} 题交卷后超过 ${data.late.minutes} 分钟仍未判完。可点「整卷重新判分」重新排队。`;
       events.replaceChildren();
       for (const row of data.questions) {
         const mark = document.querySelector(
@@ -1767,24 +1808,44 @@ function renderAnalysis(analysis, parent) {
 $("history").onclick = async () => {
   try {
     if (deadline) throw new Error("请先完成当前限时训练，再查看历史档案。");
-    const data = await api("/v2/history");
+    const [data, cards] = await Promise.all([api("/v2/history"), api("/v2/stats/history")]);
     $("learning").replaceChildren();
-    element("h2", "历史只读档案", $("learning"));
-    // a mini trend on top (percent of each paper's own total), then one row per paper
-    const detail = (await window.Insights?.historyChart($("learning"))) || new Map();
+    element("h2", "历史试卷", $("learning"));
+    // a mini trend on top (one handed-in paper is enough; a paper still being graded counts with its objective part)
+    await window.Insights?.historyChart($("learning"));
     const names = { biochemistry: "生化", cell_biology: "细胞" };
-    for (const item of data.training) {
-      const extra = detail.get(item.paper_id);
-      const split = extra
-        ? ` · ${Object.entries(extra.subjects).map(([s, v]) => `${names[s]} ${v.points}/${v.max}`).join(" · ")}${extra.seconds ? ` · 用时 ${Math.round(extra.seconds / 60)} 分钟` : ""}`
-        : "";
-      const article = element(
-        "article",
-        `${item.mode === "reviewed_60" ? "60 题" : "28 题 · 旧版"} · ${item.paper_date} · ${item.score === null ? "待判分" : item.score + "/" + (item.max_points || 150) + "分"}${split}${item.excluded ? ` · 已扣除${item.excluded}道反馈题` : ""}`,
-        $("learning"),
-      );
-      const button = element("button", "整卷回看", article);
-      button.onclick = () => { location.hash = "#/review/p" + item.paper_id; };
+    const list = element("div", undefined, $("learning"));
+    list.className = "history-list";
+    if (!cards.papers.length) element("p", "还没有交过的试卷。交卷后会出现在这里。", list).className = "note";
+    for (const item of cards.papers) {
+      // the whole card is the way into the paper's review; no separate button
+      const card = element("a", undefined, list);
+      card.className = "card history-card tappable";
+      card.href = "#/review/p" + item.paper_id;
+      const top = element("div", undefined, card);
+      top.className = "hc-top";
+      element("span", item.date.slice(5).replace("-", " 月 ") + " 日", top).className = "hc-date";
+      if (item.spec === "xiaohan-150-60-v1") element("span", "28 题 · 旧版", top).className = "pill";
+      const score = element("p", undefined, card);
+      score.className = "hc-score";
+      if (item.graded) {
+        element("strong", String(item.points), score);
+        element("span", ` / ${item.max_points} 分`, score);
+      } else {
+        element("strong", String(item.objective_points), score);
+        element("span", ` / ${item.objective_max} 分 · 客观题`, score);
+        element("span", "主观题判分中", score).className = "pill hc-pending";
+      }
+      const meta = element("p", undefined, card);
+      meta.className = "hc-meta";
+      if (item.graded) {
+        const parts = Object.entries(item.subjects).map(([sub, v]) => `${names[sub] || sub} ${v.points}/${v.max}`);
+        if (parts.length) element("span", parts.join(" · "), meta);
+      }
+      if (item.seconds) element("span", `用时 ${Math.round(item.seconds / 60)} 分钟`, meta);
+      element("span", `错题 ${item.mistakes}`, meta);
+      if (item.consolidate) element("span", `待巩固 ${item.consolidate}`, meta);
+      element("span", "›", card).className = "chev";
     }
     for (const item of data.legacy) {
       const article = element(
@@ -1814,13 +1875,13 @@ $("history").onclick = async () => {
       };
     }
   } catch (e) {
-    learningError($("history").onclick, e, "历史只读档案");
+    learningError($("history").onclick, e, "历史试卷");
   }
 };
 
 $("insights").onclick = async () => {
   try {
-    const reports = await api("/v2/model/insights");
+    const [reports, readiness] = await Promise.all([api("/v2/model/insights"), api("/v2/model/insights/status").catch(() => null)]);
     const root = $("learning");
     root.replaceChildren();
     if (!reports.length) {
@@ -1828,7 +1889,8 @@ $("insights").onclick = async () => {
       const line = element("div", undefined, root);
       line.className = "empty-line";
       line.innerHTML = '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></svg>';
-      element("span", "还没有学习建议，做完几套卷子后会出现", line);
+      // say what is missing (and when it generates by itself), not just that there is nothing
+      element("span", readiness?.text || "判分完成后自动生成学习建议", line);
     }
     for (const report of reports) {
       element(

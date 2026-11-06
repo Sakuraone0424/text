@@ -89,6 +89,10 @@ def schedule(conn, uid, paper_id):
         q = r["snapshot"]
         if answer.get("image_ids"):
             continue  # No unverified vision capability or guessed handwriting.
+        from app import grading_recovery
+
+        if not grading_recovery.has_rubric(q):
+            continue  # an entry without scoring points cannot be graded: it is shown as such (never sent to the model, never zero)
         key = f"grade:{r['attempt_id']}:{r['question_id']}:{content_sha(answer)}"
         if _length(answer) > MAX_ANSWER_CHARS:
             _refuse(conn, uid, key, dict(paper_id=paper_id, question_id=r["question_id"],
