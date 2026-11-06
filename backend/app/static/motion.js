@@ -26,14 +26,26 @@
     else if (kind === "pop") play(node, [{ opacity: 0.4 }, { opacity: 1 }], { duration: 160 });
     else play(node, [{ opacity: 0 }, { opacity: 1 }], { duration: 180 });
   }
-  /* A page leaving to the right (back). Resolves when it is gone; the caller navigates, then calls `done()` of the result. */
-  function leave(node, distance) {
-    if (!node || reduced() || typeof node.animate !== "function") return Promise.resolve({ cancel() {} });
-    const animation = node.animate(
-      [{ transform: `translateX(${distance || 0}px)`, opacity: 1 }, { transform: "translateX(100%)", opacity: 0.2 }],
-      { duration: 200, easing: EASE_IN, fill: "forwards" },
-    );
-    return animation.finished.then(() => animation, () => animation);
+  /* A page leaving to the right (back). The navigation itself happens at once (so nothing waits and nothing can race); a picture
+     of the page slides out over the new one: transform and opacity only. `from` is where the finger left it (swipe back). */
+  function leave(node, from = 0) {
+    if (!node || reduced() || typeof node.animate !== "function") return;
+    const area = document.querySelector(".workspace") || document.body;
+    const clip = area.getBoundingClientRect();
+    const rect = node.getBoundingClientRect();
+    const frame = document.createElement("div");
+    frame.setAttribute("aria-hidden", "true");
+    Object.assign(frame.style, { position: "fixed", left: clip.left + "px", top: clip.top + "px", width: clip.width + "px", height: Math.max(0, Math.min(clip.height, window.innerHeight - clip.top)) + "px", overflow: "hidden", pointerEvents: "none", zIndex: "30", background: "var(--bg, #fff)" });
+    const ghost = node.cloneNode(true);
+    ghost.hidden = false;
+    ghost.removeAttribute("id");
+    ghost.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+    ghost.setAttribute("inert", "");
+    Object.assign(ghost.style, { position: "absolute", left: rect.left - clip.left + "px", top: rect.top - clip.top + "px", width: rect.width + "px", margin: "0", transform: "", opacity: "", animation: "none" });
+    frame.append(ghost);
+    document.body.append(frame);
+    const out = frame.animate([{ transform: `translateX(${from}px)`, opacity: 1 }, { transform: "translateX(100%)", opacity: 0.2 }], { duration: 200, easing: EASE_IN, fill: "forwards" });
+    out.finished.then(() => frame.remove(), () => frame.remove());
   }
 
   /* ---------- 6. cards come in one after the other, first six only, first opening of a page only ---------- */
@@ -234,10 +246,10 @@
       startX = null;
       if (!locked) return;
       if (dx > window.innerWidth / 3 || (fast && dx > 40)) {
+        const from = dx;
         target.style.transform = ""; target.style.opacity = "";
-        const a = await leave(target, dx);
+        leave(target, from);                 // a picture of the page carries on from where the finger left it
         back();
-        setTimeout(() => a.cancel?.(), 60);
       } else {
         target.style.transition = `transform ${reduced() ? 0 : 180}ms ${EASE_OUT}, opacity ${reduced() ? 0 : 180}ms ${EASE_OUT}`;
         target.style.transform = ""; target.style.opacity = "";

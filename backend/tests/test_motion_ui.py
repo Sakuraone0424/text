@@ -98,16 +98,24 @@ def test_a_sub_page_slides_in_from_the_right_and_a_tab_change_only_fades(engine,
     page.close()
 
 
-def test_the_back_button_slides_the_page_out_to_the_right_then_shows_the_one_below(engine, live_app):
+def test_the_back_button_navigates_at_once_while_the_page_slides_out_to_the_right(engine, live_app):
     page, _ = start(engine, live_app)
     page.locator('nav.primary-nav [data-view="profile"]').click()
     page.evaluate("location.hash = '#/progress'")
     page.wait_for_timeout(400)
     page.locator("#progress-view [data-back]").first.click()
-    page.wait_for_timeout(60)
-    out = page.evaluate("""() => document.getAnimations().some((a) => a.effect.getKeyframes && a.effect.getKeyframes().some((k) => (k.transform || '').includes('100%')))""")
-    assert out                                                              # sliding out to the right
+    assert page.evaluate("location.hash") in ("#/profile", "")            # no waiting for the animation: the route is already back
     page.wait_for_function("location.hash === '#/profile'")
+    out = page.evaluate("""() => document.getAnimations().some((a) => a.effect.getKeyframes && a.effect.getKeyframes().some((k) => (k.transform || '').includes('100%')))""")
+    assert out                                                              # the picture of the page is sliding out
+    page.wait_for_function("document.querySelectorAll('body > div[aria-hidden=true][style*=\"z-index: 30\"]').length === 0", timeout=2000)
+    # tapping a tab straight after back is not undone by a late history.back()
+    page.evaluate("location.hash = '#/progress'")
+    page.wait_for_timeout(300)
+    page.locator("#progress-view [data-back]").first.click()
+    page.locator('nav.primary-nav [data-view="mistakes"]').click()
+    page.wait_for_timeout(500)
+    assert page.evaluate("location.hash") == "#/mistakes"
     page.close()
 
 

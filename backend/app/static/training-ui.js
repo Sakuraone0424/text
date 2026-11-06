@@ -152,13 +152,11 @@
     if (routeChanges > 1 && history.length > 1) history.back();
     else go(PARENT[view] || "home", null, { replace: true });
   }
-  // the in-app back button: the page slides out to the right first, then the one below is shown
-  async function back() {
+  // the in-app back button: the navigation is immediate; a picture of the page slides out to the right over the one below
+  function back() {
     const node = pageOf(view);
-    if (!window.Motion || window.Motion.reduced() || !node || TABS.includes(view)) return backNow();
-    const gone = await window.Motion.leave(node, 0);
+    if (window.Motion && node && !TABS.includes(view)) window.Motion.leave(node, 0);
     backNow();
-    setTimeout(() => gone.cancel?.(), 80);
   }
   window.Motion?.edgeSwipe({
     canGoBack: () => !TABS.includes(view) || !!hashSub(location.hash),
