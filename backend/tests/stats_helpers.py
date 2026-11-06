@@ -40,8 +40,8 @@ def paper(db, uid, day, items, when=None, spec=SPEC, minutes=50):
         qid = it.get("question_id") or question(db, it["subject"], it["qtype"], it["max_points"], it["chapter"])
         content = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]
         db.execute("INSERT INTO paper_items_v2(paper_id,question_id,position,snapshot) VALUES (%s,%s,%s,%s)", (pid, qid, position, Jsonb(content)))
-        db.execute("INSERT INTO answers_v2(attempt_id,question_id,answer,points) VALUES (%s,%s,%s,%s)",
-                   (aid, qid, it.get("answer", '{"text":"x"}'), it["points"]))
+        db.execute("INSERT INTO answers_v2(attempt_id,question_id,answer,points,feedback) VALUES (%s,%s,%s,%s,%s)",
+                   (aid, qid, it.get("answer", '{"text":"x"}'), it["points"], Jsonb(it["feedback"]) if it.get("feedback") else None))
         if it.get("seconds"):
             db.execute("INSERT INTO answer_timings(attempt_id,question_id,seconds) VALUES (%s,%s,%s)", (aid, qid, it["seconds"]))
         qids.append(qid)

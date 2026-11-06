@@ -40,59 +40,11 @@ def score(content, value):
     return (q["max_points"] if ok else 0), None
 
 
-def candidates(conn, uid, chapters):
-    """Ready, published, objective questions of the given (subject, chapter) pairs, best first."""
-    from app.auto_quality import ready
+def start(conn, uid, mode, subject=None, chapter=None, size=None, question_type=None, year=None, seconds=None):
+    """All kinds of practice live in practice_center (the old chapter / weak-point practice is two of its six kinds)."""
+    from app import practice_center
 
-    pairs = list(chapters)
-    if not pairs:
-        return []
-    rows = conn.execute(
-        "SELECT q.id,q.content FROM reviewed_questions q JOIN auto_question_states s ON s.question_id=q.id "
-        "WHERE q.status='published' AND s.status='ready' AND q.content->>'question_type'=ANY(%s) "
-        "AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.user_id=%s AND qr.question_id=q.id) "
-        # not a question of a paper that is still being sat: it would spoil the answer
-        "AND NOT EXISTS(SELECT 1 FROM paper_items_v2 i JOIN papers_v2 p ON p.id=i.paper_id LEFT JOIN training_sessions ts ON ts.paper_id=p.id "
-        "WHERE p.user_id=%s AND i.question_id=q.id AND ts.submitted_at IS NULL AND ts.started_at IS NOT NULL) "
-        "ORDER BY q.id",
-        (list(stats.OBJECTIVE), uid, uid),
-    ).fetchall()
-    wanted = set(pairs)
-    chosen = [r for r in rows if (r["content"]["subject"], (r["content"].get("evidence") or [{}])[0].get("chapter")) in wanted]
-    wrong = {
-        r["question_id"]
-        for r in stats.graded_rows(conn, uid)
-        if r["points"] is not None and r["points"] < r["max_points"]
-    } | {r["question_id"] for r in stats.practice_rows(conn, uid) if r["points"] < r["max_points"]}
-    seen = {r["question_id"] for r in stats.graded_rows(conn, uid)} | {r["question_id"] for r in stats.practice_rows(conn, uid)}
-    chosen = [r for r in chosen if ready(conn, r["id"])]
-    chosen.sort(key=lambda r: (0 if r["id"] in wrong else 1 if r["id"] not in seen else 2, r["id"]))
-    return chosen
-
-
-def start(conn, uid, mode, subject=None, chapter=None, size=10):
-    size = max(1, min(int(size), MAX_SET))
-    if mode == "chapter":
-        if subject not in stats.SUBJECTS or not chapter:
-            raise ValueError("subject_and_chapter_required")
-        pairs = [(subject, chapter)]
-    elif mode == "weak":
-        rows, practice = stats.graded_rows(conn, uid), stats.practice_rows(conn, uid)
-        weak = [c for c in stats.chapter_table(rows, practice) if c["answers"] >= stats.MIN_CHAPTER_ANSWERS and c["rate"] < 1][:3]
-        pairs = [(c["subject"], c["chapter"]) for c in weak]
-        if not pairs:
-            raise ValueError("no_weak_chapters_yet")
-    else:
-        raise ValueError("unknown_practice_mode")
-    rows = candidates(conn, uid, pairs)
-    if not rows:
-        raise ValueError("no_practice_questions_in_these_chapters")
-    picked = rows[:size]  # wrong ones first, then never seen, then the longest ago
-    set_id = conn.execute(
-        "INSERT INTO practice_sets(user_id,mode,subject,chapter,question_ids) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-        (uid, mode, subject, chapter, [r["id"] for r in picked]),
-    ).fetchone()["id"]
-    return dict(set_id=set_id, mode=mode, counts_toward_daily_paper=False, questions=[public(r["content"], r["id"]) for r in picked])
+    return practice_center.start(conn, uid, mode, subject, chapter, question_type, year, seconds, size)
 
 
 def owned(conn, uid, set_id):
@@ -118,6 +70,10 @@ def answer(conn, uid, set_id, question_id, value, seconds=None):
         "INSERT INTO practice_answers(set_id,question_id,answer,points,max_points,seconds) VALUES (%s,%s,%s,%s,%s,%s)",
         (set_id, question_id, Jsonb(value), points, content["max_points"], seconds),
     )
+    if points < content["max_points"]:
+        from app import memory
+
+        memory.record_practice_failure(conn, uid, question_id, set_id)        # a missed practice question joins the mistake book
     return dict(
         question_id=question_id, correct=points == content["max_points"], points=points, max_points=content["max_points"],
         answer=content["answer"], accepted_answers=content.get("accepted_answers") or [], blank_points=per_blank,
