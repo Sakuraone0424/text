@@ -7,7 +7,7 @@ read the same way and stay read-only (nothing here writes).
 import json
 from collections import defaultdict
 
-from app import chapters, memory
+from app import chapters, grading_activity, grading_recovery, memory, quiz_v2
 from app.learning_stats import SHANGHAI, TYPES
 from app.mistake_book import plain_answer, sources_of
 
@@ -74,13 +74,22 @@ def summary(conn, uid, paper_id):
             by_subject[snap["subject"]][2] += 1 if r["points"] is None else 0
     total_points = sum(v[0] for v in by_subject.values())
     total_max = sum(v[1] for v in by_subject.values())
+    obj_points = sum(i["points"] for i in items if i["status"] != "reported" and i["points"] is not None and i["question_type"] in quiz_v2.OBJECTIVE_TYPES)
+    obj_max = sum(i["max_points"] for i in items if i["status"] != "reported" and i["points"] is not None and i["question_type"] in quiz_v2.OBJECTIVE_TYPES)
+    texts = {}
+    if pending:
+        texts = {q["question_id"]: q.get("pending_text") for q in grading_activity.progress(conn, uid, paper_id)["questions"] if q["points"] is None and not q["excluded"]}
+        for i in items:
+            if i["status"] == "pending":
+                i["pending_text"] = texts.get(i["question_id"]) or "待判分"
     spec = (paper["blueprint"] or {}).get("specification")
     seconds = int((session["submitted_at"] - session["started_at"]).total_seconds()) if session and session["submitted_at"] and session["started_at"] else None
     return dict(
         paper_id=paper_id, kind="paper", date=paper["paper_date"].isoformat(), specification=spec, specification_name=SPEC_NAMES.get(spec, spec),
         read_only=spec == "xiaohan-150-60-v1", pending=pending, score=None if pending else total_points, graded_points=total_points, max_points=total_max,
         subject_scores={s: dict(points=v[0], max_points=v[1], pending=v[2]) for s, v in sorted(by_subject.items())},
-        seconds=seconds,
+        seconds=seconds, objective_points=obj_points, objective_max=obj_max,
+        grading_late=grading_recovery.late(conn, uid, paper_id) if pending else dict(count=0, minutes=grading_recovery.LATE_AFTER_MINUTES),
         type_rates=[dict(subject=s, question_type=t, points=v[0], max_points=v[1], rate=round(v[0] / v[1], 4) if v[1] else None)
                     for (s, t), v in sorted(by_type.items(), key=lambda kv: (kv[0][0], TYPES.index(kv[0][1]) if kv[0][1] in TYPES else 9))],
         items=items,
@@ -113,6 +122,7 @@ def detail(conn, uid, paper_id, question_id):
         blank_points=feedback.get("blank_points"), comment=feedback.get("comment"),
         concept_errors=feedback.get("concept_errors") or [], imprecisions=feedback.get("imprecisions") or [], suggestions=feedback.get("suggestions") or [],
         evidence=sources_of(snap),
+        pending_text=next((q.get("pending_text") for q in grading_activity.progress(conn, uid, paper_id)["questions"] if q["question_id"] == question_id), None) if row["points"] is None and not reported else None,
     )
 
 
@@ -130,16 +140,16 @@ def practice_summary(conn, uid, set_id):
         if not content:
             continue
         raw = (content.get("evidence") or [{}])[0].get("chapter")
-        state = "blank" if not a else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong"
+        state = "blank" if not a else "pending" if a["points"] is None else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong"
         items.append(dict(position=position, question_id=qid, subject=content["subject"], question_type=content["question_type"],
                           chapter=mapper.name(content["subject"], raw) if raw else chapters.OTHER, points=a["points"] if a else None,
-                          max_points=content["max_points"], status=state, flag="mistake" if a and a["points"] < a["max_points"] else None,
+                          max_points=content["max_points"], status=state, flag="mistake" if a and a["points"] is not None and a["points"] < a["max_points"] else None,
                           stem=" ".join((content.get("stem") or "").split())[:60]))
     got = [i for i in items if i["points"] is not None]
     seconds = sum(r["seconds"] or 0 for r in answered.values()) or None
     day = s["created_at"].astimezone(SHANGHAI).date().isoformat() if s.get("created_at") else None
     return dict(
-        paper_id=set_id, kind="practice", date=day, specification=s["mode"], specification_name="专项练习", read_only=True, pending=0,
+        paper_id=set_id, kind="practice", date=day, specification=s["mode"], specification_name="专项练习", read_only=True, pending=sum(1 for i in items if i["status"] == "pending"),
         score=sum(i["points"] for i in got), graded_points=sum(i["points"] for i in got), max_points=sum(i["max_points"] for i in items),
         subject_scores={}, seconds=seconds, type_rates=[], items=items,
         counts={k: sum(1 for i in items if i["status"] == k) for k in ("right", "partial", "wrong", "blank", "pending", "reported")},
@@ -164,9 +174,9 @@ def practice_detail(conn, uid, set_id, question_id):
         correct_choice=reference if content["question_type"] == "single_choice" else None, your_answer=mine,
         reference=(f"{reference}. {options.get(reference, '')}" if content["question_type"] == "single_choice" and reference in options else reference),
         accepted_answers=content.get("accepted_answers") or [], points=a["points"] if a else None, max_points=content["max_points"],
-        status="blank" if not a else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong", reported=False,
-        criteria=[], criterion_reasons=[], rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
-        blank_points=a["answer"].get("blank_points") if a and isinstance(a["answer"], dict) else None, comment=None, concept_errors=[], imprecisions=[], suggestions=[],
+        status="blank" if not a else "pending" if a["points"] is None else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong", reported=False,
+        criteria=((a["feedback"] or {}).get("criteria") or []) if a else [], criterion_reasons=((a["feedback"] or {}).get("criterion_reasons") or []) if a else [], rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
+        blank_points=a["answer"].get("blank_points") if a and isinstance(a["answer"], dict) else None, comment=((a["feedback"] or {}).get("comment") if a else None), concept_errors=[], imprecisions=[], suggestions=[],
         evidence=sources_of(content),
     )
 
@@ -192,13 +202,13 @@ def recent(conn, uid, limit=5):
             seconds=int((r["submitted_at"] - r["started_at"]).total_seconds()) if r["started_at"] else None, at=r["submitted_at"].isoformat(),
         ))
     for r in conn.execute(
-        "SELECT s.id,s.mode,s.created_at,count(a.*) AS n,sum(a.points) AS points,sum(a.max_points) AS max_points,sum(a.seconds) AS seconds,max(a.answered_at) AS last "
+        "SELECT s.id,s.mode,s.created_at,count(a.*) AS n,count(*) FILTER (WHERE a.points IS NULL) AS pending,sum(a.points) AS points,sum(a.max_points) AS max_points,sum(a.seconds) AS seconds,max(a.answered_at) AS last "
         "FROM practice_sets s JOIN practice_answers a ON a.set_id=s.id WHERE s.user_id=%s GROUP BY s.id ORDER BY max(a.answered_at) DESC LIMIT %s",
         (uid, limit),
     ).fetchall():
         out.append(dict(
             kind="practice", id=r["id"], date=r["last"].astimezone(SHANGHAI).date().isoformat(), label=PRACTICE_NAMES.get(r["mode"], "专项练习"),
-            points=int(r["points"] or 0), max_points=int(r["max_points"] or 0), pending=0, seconds=int(r["seconds"]) if r["seconds"] else None, at=r["last"].isoformat(),
+            points=None if r["pending"] else int(r["points"] or 0), max_points=int(r["max_points"] or 0), pending=int(r["pending"]), seconds=int(r["seconds"]) if r["seconds"] else None, at=r["last"].isoformat(),
         ))
     out.sort(key=lambda x: x["at"], reverse=True)
     return out[:limit]

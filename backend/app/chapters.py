@@ -44,6 +44,41 @@ def words_of(label):
     return re.sub(r"[\s·\-—:：、，,（）()]+", "", text)
 
 
+def to_chinese(n):
+    digits = "零一二三四五六七八九"
+    if n < 10:
+        return digits[n]
+    if n < 20:
+        return "十" + (digits[n - 10] if n > 10 else "")
+    if n < 100:
+        return digits[n // 10] + "十" + (digits[n % 10] if n % 10 else "")
+    return str(n)
+
+
+def canonical(name):
+    """The textbook's way of writing a chapter: 「第二十三章 脂质合成」. A name that is only a number and words ('23 脂质合成') is written that way."""
+    if _NUMBER.search(name or "") or not re.match(r"^\s*\d", name or ""):
+        return name
+    number, words = number_of(name), re.sub(r"^\s*(?:第\s*)?[0-9]+\s*[章篇讲.、．:：)）\s-]*", "", name).strip()
+    return f"第{to_chinese(number)}章 {words}" if number and words else name
+
+
+_GENERIC = ("合成", "分解", "代谢", "作用", "调节", "基础", "生物")
+_FILLER = set("的与和及之在中对以其等")
+
+
+def _keys(words):
+    text = words
+    for g in _GENERIC:
+        text = text.replace(g, "")
+    return {c for c in text if c not in _FILLER} or {c for c in words if c not in _FILLER}
+
+
+def _similarity(a, b):
+    ka, kb = _keys(a), _keys(b)
+    return 2 * len(ka & kb) / (len(ka) + len(kb)) if ka and kb else 0.0
+
+
 def compact(label):
     return re.sub(r"\s+", "", label or "")
 
@@ -92,11 +127,11 @@ class ChapterMap:
     def _map(self, subject, raw):
         chapters = textbook_chapters(self.conn, subject)
         if any(raw == name for name, _, _ in chapters):
-            return raw                                          # already the textbook's own name
+            return canonical(raw)                               # already the textbook's own name
         wanted = compact(raw)
         for name, _, _ in chapters:
             if compact(name) == wanted:
-                return name
+                return canonical(name)
         if _NUMBER.search(raw) and not re.match(r"^\s*\d", raw):
             # '第 6 章 核酸': the textbook's own wording with other spacing or digits
             number = number_of(raw)
@@ -108,17 +143,48 @@ class ChapterMap:
             return raw        # not a past-exam label ("6 核酸"): it is already a chapter name (第六章 …, or whatever the question cites)
         number, words = number_of(raw), words_of(raw)
         same_number = [c for c in chapters if number is not None and c[1] == number]
-        if len(same_number) == 1:
-            return same_number[0][0]
-        if len(same_number) > 1 and words:
-            best = max(same_number, key=lambda c: _overlap(words, c[2]))
-            if _overlap(words, best[2]):
-                return best[0]
+        # the number is the exam's own numbering: it only counts when the words agree a little (or there are no words to compare)
+        agreeing = [c for c in same_number if not words or _similarity(words, c[2]) >= 0.3]
+        if len(agreeing) == 1:
+            return canonical(agreeing[0][0])
+        if len(agreeing) > 1:
+            best = max(agreeing, key=lambda c: _similarity(words, c[2]))
+            return canonical(best[0])
+        # otherwise by the words alone: the one chapter that clearly fits best
+        if words:
+            scored = sorted(((_similarity(words, c[2]), c) for c in chapters), key=lambda x: -x[0])
+            if scored and scored[0][0] >= 0.6 and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.15):
+                return canonical(scored[0][1][0])
         return OTHER
 
 
 def _overlap(a, b):
     return sum(1 for ch in set(a) if ch in b)
+
+
+def mapping_report(conn):
+    """Before and after: how many distinct chapter labels of the bank's questions (and how many questions) are only 'number + words'
+    (the past exams' own style), how many of those now map to a textbook chapter, and which ones still cannot (shown as 其他)."""
+    mapper = ChapterMap(conn)
+    labels = questions = still = still_questions = 0
+    left = []
+    for r in conn.execute(
+        "SELECT content->>'subject' AS subject,content->'evidence'->0->>'chapter' AS chapter,count(*) AS n FROM reviewed_questions "
+        "WHERE status='published' GROUP BY 1,2"
+    ).fetchall():
+        raw = (r["chapter"] or "").strip()
+        if not raw:
+            continue
+        digit_style = bool(re.match(r"^\s*\d", raw))
+        name = mapper.name(r["subject"], raw)
+        if digit_style:
+            labels += 1
+            questions += r["n"]
+        if name == OTHER:
+            still += 1
+            still_questions += r["n"]
+            left.append(f"{r['subject']}:{raw}({r['n']})")
+    return dict(number_style_labels=labels, number_style_questions=questions, unmapped_labels=still, unmapped_questions=still_questions, left=sorted(left)[:30])
 
 
 def unmapped_labels(conn):

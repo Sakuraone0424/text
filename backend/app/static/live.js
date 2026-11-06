@@ -101,17 +101,23 @@
   let ptrNode = null;
   function indicator() {
     if (ptrNode) return ptrNode;
+    // one stack: the round indicator with its words BELOW it (they can never overlap), above the content, centred
     const wrap = document.createElement("div");
     wrap.className = "ptr";
     wrap.setAttribute("aria-hidden", "true");
-    wrap.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"></circle></svg>';
+    const dot = document.createElement("div");
+    dot.className = "ptr-dot";
+    dot.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1"></circle></svg>';
     const label = document.createElement("div");
     label.className = "ptr-label";
     label.setAttribute("aria-live", "polite");
-    document.body.append(wrap, label);
+    wrap.append(dot, label);
+    document.body.append(wrap);
     ptrNode = { wrap, label, circle: wrap.querySelector("circle") };
     return ptrNode;
   }
+  let pullers = 0;
+  const pulling = () => pullers > 0;
   const PTR_READY = 54;      // damped distance (px) at which releasing refreshes (about the 70 px of finger travel it always took)
   const PTR_HOLD = 52;       // where the content rests while refreshing
   const PTR_MAX = 120;
@@ -168,15 +174,15 @@
         return;
       }
       busy = true;
+      pullers += 1;
       settle(PTR_HOLD, 180);
       ptr.circle.style.strokeDashoffset = "0";
       ptr.wrap.classList.add("spin");
       ptr.label.textContent = "正在刷新";
-      window.Motion?.topline?.start();
       try {
         await Promise.all([onRefresh(), new Promise((r) => setTimeout(r, reduce() ? 0 : 450))]);   // (no blink on a fast answer)
       } finally {
-        window.Motion?.topline?.done();
+        pullers -= 1;
         ptr.wrap.classList.remove("spin");
         ptr.wrap.style.opacity = "0";
         ptr.label.style.opacity = "0";
@@ -199,5 +205,5 @@
   // a view that has just loaded itself by hand counts as refreshed (no second read a tick later)
   const touch = (name) => { const v = views.get(name); if (v) v.last = Date.now(); };
 
-  window.Live = { register, touch, pullToRefresh, stamp, POLL_MS, state: () => ({ connected, streaming: !!source, views: views.size }) };
+  window.Live = { register, touch, pullToRefresh, pulling, stamp, POLL_MS, state: () => ({ connected, streaming: !!source, views: views.size }) };
 })();

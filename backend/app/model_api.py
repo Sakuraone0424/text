@@ -383,6 +383,13 @@ def insights(name=Depends(require_auth)):
     )
 
 
+@router.get("/insights/status")
+def insights_status(name=Depends(require_auth)):
+    from app.auto_insights import readiness
+
+    return operation(name, readiness)
+
+
 @router.get("/billing")
 def billing(name=Depends(require_auth)):
     from app.cny_billing import summary

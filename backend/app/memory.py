@@ -1,6 +1,7 @@
 """FSRS-6 scheduling; existing fixed-interval history is never fabricated."""
 
 import json
+from zoneinfo import ZoneInfo
 from datetime import timezone
 from fsrs import Card, Rating, Scheduler
 from psycopg.types.json import Jsonb
@@ -132,6 +133,7 @@ def due(conn, user_id):
     ).fetchall()
 
 
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 STATE_KEY = "mistake_reclassify_v1"
 
 
@@ -171,17 +173,17 @@ def reclassify_existing(conn):
     return result
 
 
-def record_practice_failure(conn, uid, question_id, set_id):
-    """A practice question answered wrongly becomes a mistake card too (practice never counts toward the daily score, but the
-    mistake is real). Objective questions only: a wrong one is a mistake, rated Again."""
+def record_practice_failure(conn, uid, question_id, set_id, kind="mistake"):
+    """A practice question answered wrongly (or a subjective one scored below the lines) becomes a review card too: practice never
+    counts toward the daily score, but the mistake is real. kind 'mistake' is rated Again, 'consolidate' Hard."""
     if conn.execute("SELECT 1 FROM question_reports WHERE user_id=%s AND question_id=%s", (uid, question_id)).fetchone():
         return
     now = server_now(conn).astimezone(timezone.utc)
     conn.execute(
-        "INSERT INTO fsrs_cards(user_id,question_id,card,due,status) VALUES (%s,%s,%s,%s,'mistake') ON CONFLICT DO NOTHING",
-        (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now),
+        "INSERT INTO fsrs_cards(user_id,question_id,card,due,status) VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (uid, question_id, Jsonb(Card(card_id=question_id, due=now).to_dict()), now, kind),
     )
-    review(conn, uid, question_id, 1, f"practice-failure:{set_id}:{question_id}", None, require_due=False)
+    review(conn, uid, question_id, 1 if kind == "mistake" else 2, f"practice-failure:{set_id}:{question_id}", None, require_due=False)
 
 
 def item(conn, user_id, question_id):

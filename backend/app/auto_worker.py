@@ -158,6 +158,16 @@ def plan(conn, uid, target=None, report=None):
     done = memory.reclassify_existing(conn)        # once: review cards sorted by the new mistake rule (nothing deleted)
     if done and report is not None:
         report["reclassified"] = ";".join(f"{k}:{'/'.join(f'{s}{n}' for s, n in sorted(v.items())) or '-'}" for k, v in done.items())
+    if report is not None:
+        try:
+            from app import chapters
+
+            chapters.clear_cache()
+            m = chapters.mapping_report(conn)
+            report["chapter_map"] = (f"number_style={m['number_style_labels']}labels/{m['number_style_questions']}q;"
+                                     f"unmapped={m['unmapped_labels']}labels/{m['unmapped_questions']}q;left={'|'.join(m['left'][:12])}")
+        except Exception:  # noqa: BLE001  (a log nicety must never stop a run)
+            pass
     auto_quality.discard_unfixable(conn)
     mark("retire")
     for row in conn.execute(
@@ -187,11 +197,21 @@ def plan(conn, uid, target=None, report=None):
             "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='repairing' WHERE question_id=%s AND EXISTS(SELECT 1 FROM ai_jobs j WHERE j.job_key=%s AND j.state IN ('pending','running','retrying'))",
             (row["question_id"], "repair:" + str(row["question_id"])),
         )
+    # Newest papers first: old papers whose leftover answers can never be graded (photos, too long) must not fill the slots.
     for row in conn.execute(
-        "SELECT DISTINCT p.id FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id WHERE p.user_id=%s AND a.points IS NULL ORDER BY p.id LIMIT 10",
+        "SELECT DISTINCT p.id FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id "
+        "WHERE p.user_id=%s AND a.points IS NULL AND t.submitted_at IS NOT NULL AND a.answer NOT LIKE '%%image_ids%%' "
+        "AND NOT EXISTS (SELECT 1 FROM question_reports r WHERE r.paper_id=p.id AND r.question_id=a.question_id) "
+        "ORDER BY p.id DESC LIMIT 30",
         (uid,),
     ).fetchall():
         auto_grading.schedule(conn, uid, row["id"])
+    # Grading tasks blocked for a reason that has passed (budget, price, busy provider ...) go back; once, every stuck answer.
+    try:
+        from app import grading_recovery
+        grading_recovery.recover(conn, uid, report)
+    except Exception:  # noqa: BLE001  (housekeeping must never stop a run)
+        pass
     # Past-exam questions need no corpus-wide sweep: each request carries only
     # the few textbook paragraphs relevant to that one question.
     mark("checks")

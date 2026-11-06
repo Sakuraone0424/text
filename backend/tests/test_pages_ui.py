@@ -14,14 +14,15 @@ from test_ui_screens import engine, open_page  # noqa: F401
 SHOTS = Path(os.environ.get("SHOT_DIR", "/tmp/claude-0/shots"))
 
 OVERVIEW = {
-    "weak": {"mode": "weak", "available": 14, "ready": True, "size": 10, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "rate": 0.3}]},
-    "chapter": {"mode": "chapter", "available": 40, "ready": True, "size": 10, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "available": 14}, {"subject": "cell_biology", "chapter": "第二章 细胞膜", "available": 8}]},
-    "type": {"mode": "type", "available": 40, "ready": True, "size": 10, "types": [
-        {"value": "single_choice", "name": "单选", "available": 22, "supported": True}, {"value": "fill_blank", "name": "填空", "available": 18, "supported": True},
-        {"value": "term", "name": "名词解释", "available": 0, "supported": False}, {"value": "short_answer", "name": "简答", "available": 0, "supported": False}, {"value": "essay", "name": "问答", "available": 0, "supported": False}]},
-    "retry": {"mode": "retry", "available": 0, "ready": False, "size": 0},
-    "quick": {"mode": "quick", "available": 40, "ready": True, "size": 10},
-    "year": {"mode": "year", "available": 3, "ready": False, "size": 3, "years": [{"year": 2022, "available": 3}]},
+    "weak": {"mode": "weak", "available": 6, "ready": True, "size": 6, "short_by": 4, "reason": None, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "rate": 0.3}]},
+    "chapter": {"mode": "chapter", "available": 40, "ready": True, "size": 10, "short_by": 0, "reason": None, "chapters": [{"subject": "biochemistry", "chapter": "第六章 核酸", "available": 14}, {"subject": "cell_biology", "chapter": "第二章 细胞膜", "available": 26}]},
+    "type": {"mode": "type", "available": 43, "ready": True, "size": 10, "short_by": 0, "reason": None, "types": [
+        {"value": "single_choice", "name": "单选", "available": 22, "used": 22, "new": 0, "supported": True, "graded_by_ai": False}, {"value": "fill_blank", "name": "填空", "available": 18, "used": 18, "new": 0, "supported": True, "graded_by_ai": False},
+        {"value": "term", "name": "名词解释", "available": 3, "used": 0, "new": 3, "supported": True, "graded_by_ai": True}, {"value": "short_answer", "name": "简答", "available": 0, "used": 0, "new": 0, "supported": True, "graded_by_ai": True},
+        {"value": "essay", "name": "问答", "available": 0, "used": 0, "new": 0, "supported": True, "graded_by_ai": True}]},
+    "retry": {"mode": "retry", "available": 0, "ready": False, "size": 0, "short_by": 0, "reason": "还没有可重做的错题"},
+    "quick": {"mode": "quick", "available": 40, "ready": True, "size": 10, "short_by": 0, "reason": None},
+    "year": {"mode": "year", "available": 0, "ready": False, "size": 0, "short_by": 0, "reason": "这一年的真题暂时没有可练的题，还差 10 道", "years": []},
     "set_size": 10,
 }
 RECENT = {"items": [
@@ -40,7 +41,7 @@ def item(qid, subject, qtype, chapter, group, **over):
 
 BOOK = {
     "today": "2026-11-05", "total": 6, "open": 5, "unmapped": {},
-    "groups": [{"key": "today", "label": "今天到期", "count": 2}, {"key": "tomorrow", "label": "明天到期", "count": 1}, {"key": "later", "label": "以后", "count": 1},
+    "groups": [{"key": "today", "label": "已到期", "count": 2}, {"key": "tomorrow", "label": "今天稍后及明天", "count": 1}, {"key": "later", "label": "以后", "count": 1},
                {"key": "consolidate", "label": "待巩固", "count": 1}, {"key": "mastered", "label": "已掌握", "count": 1}],
     "items": [
         item(1, "biochemistry", "single_choice", "第二章 蛋白质的结构与功能", "today", stem="下列关于蛋白质二级结构的叙述，哪一项是正确的", wrong_times=3, dots=1),
@@ -104,8 +105,9 @@ def test_the_practice_page_has_the_papers_card_six_kinds_and_the_recent_list(eng
     expect(cards).to_have_count(6)
     expect(cards.nth(0)).to_contain_text("薄弱章节练习")
     assert cards.nth(3).is_disabled() and "还没有可重做的错题" in cards.nth(3).inner_text()        # retry: nothing to redo yet
-    assert cards.nth(5).is_disabled() and "题库准备中" in cards.nth(5).inner_text()               # year: fewer than five new questions
+    assert cards.nth(5).is_disabled() and "还差 10 道" in cards.nth(5).inner_text() and "题库准备中" not in cards.nth(5).inner_text()      # year: its own reason, not a general one
     assert not cards.nth(4).is_disabled() and "可练 40 题" in cards.nth(4).inner_text()
+    assert not cards.nth(0).is_disabled() and "可练 6 题 · 不足 10" in cards.nth(0).inner_text()          # fewer than ten: it may start with what there is
     rows = page.locator("#recent-list .recent-row")
     expect(rows).to_have_count(3)
     expect(rows.nth(0)).to_contain_text("212 / 300")
@@ -120,8 +122,8 @@ def test_the_practice_page_has_the_papers_card_six_kinds_and_the_recent_list(eng
 def test_one_state_on_the_home_card_and_the_practice_card(engine, live_app):
     page, _ = start(engine, live_app, ROUTES)
     page.wait_for_function("document.getElementById('prepare').dataset.kind && document.getElementById('prepare').dataset.kind !== 'loading'")
-    home = page.evaluate("[document.getElementById('prepare').textContent, document.getElementById('paper-state').textContent, document.getElementById('prepare').disabled]")
-    practice = page.evaluate("[document.getElementById('practice-today-btn').textContent, document.getElementById('practice-paper-state').textContent, document.getElementById('practice-today-btn').disabled]")
+    home, practice = page.evaluate("""() => { const v = (b, p) => [document.getElementById(b).textContent, document.getElementById(p).textContent, document.getElementById(b).disabled];
+        return [v('prepare', 'paper-state'), v('practice-today-btn', 'practice-paper-state')]; }""")        # read together: the state may change between two calls
     assert home == practice                                                    # the same label, pill and state, always
     page.close()
 
@@ -140,7 +142,7 @@ def test_the_mistake_book_is_cards_grouped_by_due_date_with_a_one_line_filter(en
     page, errors = start(engine, live_app, ROUTES, path="/training#/mistakes")
     page.wait_for_selector("#mistake-groups .mistake-card")
     groups = page.locator("#mistake-groups .mg-head")
-    assert [t.split("\n")[0] for t in groups.all_inner_texts()] == ["今天到期", "明天到期", "以后", "待巩固", "已掌握"]
+    assert [t.split("\n")[0] for t in groups.all_inner_texts()] == ["已到期", "今天稍后及明天", "以后", "待巩固", "已掌握"]
     first = page.locator("#mistake-groups .mistake-card").first
     assert first.get_attribute("href") == "#/mistake/m1"
     text = first.inner_text()
@@ -225,4 +227,126 @@ def test_the_whole_paper_view_opens_from_the_result_page_and_the_history_page(en
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / "app" / "static"
     js = (root / "training.js").read_text()
-    assert 'id = "view-whole-paper"' in js and '"#/review/p" + paper.paper_id' in js and '"整卷回看"' in js and '"#/review/p" + item.paper_id' in js
+    assert 'id = "view-whole-paper"' in js and '"#/review/p" + paper.paper_id' in js and 'card.href = "#/review/p" + item.paper_id' in js      # the history card itself links in: no separate button
+
+
+def test_the_type_and_chapter_numbers_follow_the_subject_filter(engine, live_app):
+    page, _ = start(engine, live_app, ROUTES, path="/training#/mistakes")
+    page.wait_for_selector("#mistake-groups .mistake-card")
+    page.locator("#filter-toggle").click()
+    all_types = page.locator("#filter-type button").all_inner_texts()
+    assert "单选 2" in all_types and "填空 1" in all_types                       # all subjects: 5 open ones (the mastered one is not counted)
+    page.locator("#filter-subject button", has_text="细胞").click()
+    types = dict(t.rsplit(" ", 1) for t in page.locator("#filter-type button").all_inner_texts() if t[-1].isdigit())
+    assert types == {"单选": "1", "填空": "0", "名词解释": "1", "简答": "0", "问答": "0"}, types
+    assert sum(int(v) for v in types.values()) == int(page.locator("#filter-subject button", has_text="细胞").inner_text().split()[-1])
+    chapters = page.locator("#filter-chapter option").all_inner_texts()
+    assert chapters[1:] == ["细胞 · 第二章 细胞膜（2）"], chapters                 # only that subject's chapters, with their own counts
+    page.close()
+
+
+def test_the_number_on_top_and_the_first_group_are_the_same_count(engine, live_app):
+    due = {**FULL, "reviews": {"due_now": 2, "next_7_days": [{"day": f"2026-11-{5 + k:02d}", "count": 2 if k == 0 else 0} for k in range(7)], "mastered": 0}}
+    page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": due}, path="/training#/mistakes")
+    page.wait_for_selector("#mistake-groups .mistake-card")
+    page.wait_for_function("document.getElementById('due-number').textContent !== '0'")
+    first = page.locator("#mistake-groups .mg-head").first
+    assert "已到期" in first.inner_text()
+    assert page.locator("#due-number").inner_text() == first.locator(".mg-count").inner_text() == "2"
+    # the seven bars use the width to the right of the count
+    box = page.evaluate("""() => { const b = document.getElementById('due-mini').getBoundingClientRect(), c = document.querySelector('.due-card').getBoundingClientRect(),
+        n = document.getElementById('due-number').getBoundingClientRect(); return { right: c.right - b.right, gap: b.left - n.right }; }""")
+    assert box["right"] < 40 and box["gap"] < 120, box
+    page.close()
+
+
+HISTORY = {"papers": [
+    {"paper_id": 9, "date": "2026-11-05", "spec": "xiaohan-60q-300pt-v4", "graded": False, "pending": 12, "points": None, "max_points": None, "objective_points": 38, "objective_max": 60,
+     "subjects": {}, "seconds": 3010, "mistakes": 4, "consolidate": 1},
+    {"paper_id": 8, "date": "2026-11-04", "spec": "xiaohan-60q-300pt-v4", "graded": True, "pending": 0, "points": 212, "max_points": 300, "objective_points": 50, "objective_max": 60,
+     "subjects": {"biochemistry": {"points": 110, "max": 150}, "cell_biology": {"points": 102, "max": 150}}, "seconds": 3300, "mistakes": 7, "consolidate": 3},
+]}
+
+
+def test_the_history_page_is_one_card_per_paper_that_opens_the_review(engine, live_app):
+    routes = {**ROUTES, "/v2/stats/history": HISTORY, "/v2/history": {"training": [], "legacy": []}, "/v2/stats/profile": {"trend": [], "timing": {"papers": []}}}
+    page, _ = start(engine, live_app, routes, path="/training#/stats/history")
+    page.wait_for_selector(".history-card")
+    cards = page.locator(".history-card")
+    expect(cards).to_have_count(2)
+    expect(page.locator("#learning h2")).to_have_text("历史试卷")
+    first, second = cards.nth(0).inner_text(), cards.nth(1).inner_text()
+    assert "38" in first and "/ 60 分" in first and "客观题" in first and "主观题判分中" in first and "0 /" not in first.replace("10 / ", "")      # the objective part, never a total of 0
+    assert "212" in second and "/ 300 分" in second and "生化 110/150" in second and "细胞 102/150" in second and "用时 55 分钟" in second and "错题 7" in second
+    assert cards.nth(0).get_attribute("href") == "#/review/p9"                                  # the card is the link: no separate button
+    assert page.locator("#learning button", has_text="整卷回看").count() == 0
+    page.close()
+
+
+REVIEW_PENDING = {**REVIEW, "pending": 12, "score": None, "objective_points": 38, "objective_max": 60, "grading_late": {"count": 5, "minutes": 30},
+                  "items": [{**i, "pending_text": "排队等待 AI 判分"} if i["status"] == "pending" else i for i in REVIEW["items"]]}
+
+
+def test_a_review_with_waiting_answers_shows_the_objective_part_the_reasons_and_the_regrade_button(engine, live_app):
+    routes = {**ROUTES, "/v2/papers/9/review": REVIEW_PENDING, "/v2/papers/9/regrade": {"new_task": 12}}
+    page, _ = start(engine, live_app, routes, path="/training#/review/p9")
+    page.wait_for_selector("#review-body .review-q")
+    head = page.locator("#review-body .review-head").inner_text()
+    assert "38" in head and "/ 60 分" in head and "客观题" in head and "主观题判分中" in head
+    assert "有 5 题交卷后超过 30 分钟仍未判完" in head
+    assert "排队等待 AI 判分" in page.locator("#review-body .review-q.pending").first.text_content()
+    page.locator("#review-body .review-head button", has_text="整卷重新判分").click()
+    page.wait_for_function("window.__calls && window.__calls['/v2/papers/9/regrade'] === 1")
+    expect(page.locator("#review-body .review-head button", has_text="已重新排队")).to_have_count(1)
+    page.close()
+
+
+def test_the_type_picker_offers_all_five_types_and_says_which_are_graded_by_the_ai(engine, live_app):
+    page, _ = start(engine, live_app, ROUTES, path="/training#/practice")
+    page.wait_for_selector("#practice-grid .practice-card")
+    page.locator("#practice-grid .practice-card").nth(2).click()
+    options = page.locator(".pick-dialog .pick-option")
+    expect(options).to_have_count(5)
+    texts = options.all_inner_texts()
+    assert [t.split("\n")[0] for t in texts] == ["单选", "填空", "名词解释", "简答", "问答"]
+    assert "AI 判分" in texts[2] and "可练 3 题" in texts[2] and not options.nth(2).is_disabled()          # a spare 名词解释 can be practised although 单选 is short
+    assert options.nth(3).is_disabled() and "暂时没有可练的题" in texts[3]
+    page.close()
+
+
+SHORT_CELLS = {**SHORT_BANK, "tomorrow": {**SHORT_BANK["tomorrow"], "ready": 53, "needed": 60, "missing": 7, "short_cells": [
+    {"subject": "cell_biology", "question_type": "single_choice", "have": 3, "need": 10, "missing": 7}]}}
+
+
+def test_a_cell_that_is_short_makes_the_paper_not_ready_and_says_which(engine, live_app):
+    page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": SHORT_CELLS, "/v2/model/progress/bank": SHORT_CELLS["tomorrow"], "/v2/papers": [None, 0]}, path="/training#/practice")
+    page.wait_for_function("document.getElementById('prepare').dataset.kind === 'short'")
+    for button, pill, note in (("#prepare", "#paper-state", "#prepare-note"), ("#practice-today-btn", "#practice-paper-state", "#practice-today-note")):
+        assert page.locator(button).is_disabled() and page.locator(button).inner_text().startswith("题库还差 7 道")
+        assert page.locator(pill).inner_text() == "题库准备中"
+        assert "细胞单选缺 7" in page.locator(note).inner_text()
+    page.close()
+
+
+def test_the_paper_is_never_ready_before_the_bank_is_known(engine, live_app):
+    page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": [FULL, 6000], "/v2/model/progress/bank": [FULL["tomorrow"], 6000], "/v2/papers": [None, 0]}, path="/training#/practice")
+    page.wait_for_timeout(800)
+    assert page.locator("#practice-paper-state").inner_text() != "已就绪" and page.locator("#practice-today-btn").is_disabled()
+    page.close()
+
+
+def test_the_paper_description_has_an_arrow_and_the_card_texts_do_not_wrap_a_lone_character(engine, live_app):
+    page, _ = start(engine, live_app, ROUTES, path="/training#/practice")
+    page.wait_for_selector("#practice-grid .practice-card")
+    summary = page.locator(".paper-info summary")
+    assert summary.evaluate("n => getComputedStyle(n, '::after').content") not in ("none", "normal")           # the arrow
+    assert summary.bounding_box()["height"] >= 40                                                              # a finger-sized target
+    page.locator(".paper-info summary").click()
+    assert page.locator(".paper-info").evaluate("n => n.open") and "60 题" in page.locator(".paper-info").inner_text()
+    lines = page.evaluate("""() => [...document.querySelectorAll('.practice-card small, .practice-card .practice-count')].map((n) => {
+        const r = document.createRange(); r.selectNodeContents(n); const rects = [...r.getClientRects()].filter((x) => x.width > 0);
+        const tops = [...new Set(rects.map((x) => Math.round(x.top)))]; const last = rects.filter((x) => Math.round(x.top) === tops[tops.length - 1]);
+        return { text: n.textContent, lines: tops.length, lastWidth: last.reduce((a, x) => a + x.width, 0), font: parseFloat(getComputedStyle(n).fontSize) }; })""")
+    for line in lines:
+        assert line["lines"] == 1 or line["lastWidth"] >= line["font"] * 2.5, line          # never one character alone on the last line
+    page.close()

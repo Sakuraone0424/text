@@ -53,7 +53,7 @@ def practice_rows(conn, uid):
         "SELECT pa.question_id,pa.points,pa.max_points,pa.seconds,pa.answered_at,"
         "q.content->>'subject' AS subject,q.content->>'question_type' AS qtype,q.content->'evidence'->0->>'chapter' AS chapter "
         "FROM practice_answers pa JOIN practice_sets ps ON ps.id=pa.set_id JOIN reviewed_questions q ON q.id=pa.question_id "
-        "WHERE ps.user_id=%s ORDER BY pa.answered_at",
+        "WHERE ps.user_id=%s AND pa.points IS NOT NULL ORDER BY pa.answered_at",
         (uid,),
     ).fetchall())
 
@@ -79,6 +79,22 @@ def papers(rows):
         t[2] += 1
         t[3] += r["seconds"] or 0
     return sorted((p for p in by.values() if not p["pending"] and p["max"]), key=lambda p: (p["submitted_at"], p["paper_id"]))
+
+
+def partial_papers(rows):
+    """Handed-in papers whose subjective answers are still being graded: what is already marked (the objective part)."""
+    by = {}
+    for r in rows:
+        p = by.setdefault(r["paper_id"], dict(paper_id=r["paper_id"], date=r["paper_date"], submitted_at=r["submitted_at"], spec=r["spec"],
+                                              pending=0, points=0, max=0, subjects=defaultdict(lambda: [0, 0])))
+        if r["points"] is None:
+            p["pending"] += 1
+        elif r["qtype"] in OBJECTIVE:
+            p["points"] += r["points"]
+            p["max"] += r["max_points"]
+            p["subjects"][r["subject"]][0] += r["points"]
+            p["subjects"][r["subject"]][1] += r["max_points"]
+    return sorted((p for p in by.values() if p["pending"] and p["max"]), key=lambda p: (p["submitted_at"], p["paper_id"]))
 
 
 def rate(points, maximum):
@@ -153,7 +169,10 @@ def tomorrow_ready(conn, uid):
     ready = sum(min(b["stocked"], b["required"]) for b in buckets)
     needed = sum(b["required"] for b in buckets)
     paper = progress.next_paper(conn, buckets, conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"])
-    return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed,
+    # every subject x type cell must hold one paper's worth of NEW verified questions by itself: a surplus in one cell never covers another
+    short = [dict(subject=b["subject"], question_type=b["question_type"], have=b["stocked"], need=b["required"], missing=b["required"] - b["stocked"])
+             for b in buckets if b["stocked"] < b["required"]]
+    return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed and not short, short_cells=short,
                 platform_busy=progress.platform_status(conn)["busy"],
                 eta_at=paper["eta_at"], eta_hours=paper["eta_hours"], eta_state=paper["eta_state"], per_hour=paper["per_hour"], budget=paper["budget"])
 
@@ -177,6 +196,10 @@ def overview(conn, uid):
         finished = next((p for p in done if p["paper_id"] == paper["id"]), None)
         if finished:
             today_paper.update(points=finished["points"], max=finished["max"])
+        else:
+            part = next((p for p in partial_papers(rows) if p["paper_id"] == paper["id"]), None)
+            if part:
+                today_paper.update(objective_points=part["points"], objective_max=part["max"])
     last7, before7 = done[-7:], done[-14:-7]
     same = [p for p in last7 if done and p["max"] == done[-1]["max"]]
     objective = [0, 0]
@@ -201,6 +224,7 @@ def overview(conn, uid):
             max_points=latest_max,
             delta_points=round((this_avg - prev_avg) * latest_max, 1) if this_avg is not None and prev_avg is not None else None,
         ),
+        objective_only=_objective_only(rows),
         objective_rate=rate(*objective), subjective_rate=rate(*subjective),
         weak_chapters=[c for c in chapter_table(rows, practice) if c["answers"] >= MIN_CHAPTER_ANSWERS][:WEAK_CHAPTERS_SHOWN],
         reviews=due_reviews(conn, uid, today),
@@ -208,6 +232,14 @@ def overview(conn, uid):
         has_data=bool(done),
         pending_papers=len(pending_ids),
     )
+
+
+def _objective_only(rows):
+    """When no paper is fully graded yet: the average objective score of the papers still being graded (shown as 客观题 X / Y)."""
+    part = partial_papers(rows)[-7:]
+    if not part:
+        return None
+    return dict(papers=len(part), points=round(sum(p["points"] for p in part) / len(part), 1), max=round(sum(p["max"] for p in part) / len(part), 1))
 
 
 def profile(conn, uid):
@@ -228,6 +260,13 @@ def profile(conn, uid):
              subjects={s: dict(points=v[0], max=v[1], rate=rate(*v)) for s, v in p["subjects"].items()})
         for p in done[-30:]
     ]
+    # papers still being graded join the trend with their objective score (marked partial): one handed-in paper is enough
+    trend += [
+        dict(paper_id=p["paper_id"], date=p["date"].isoformat(), spec=p["spec"], points=p["points"], max=p["max"], rate=rate(p["points"], p["max"]), partial=True,
+             subjects={s: dict(points=v[0], max=v[1], rate=rate(*v)) for s, v in p["subjects"].items()})
+        for p in partial_papers(rows)[-30:]
+    ]
+    trend.sort(key=lambda t: (t["date"], t["paper_id"]))
     types = defaultdict(lambda: [0, 0, 0])
     for r in rows:
         if r["points"] is not None:
@@ -357,3 +396,45 @@ def mistakes(conn, uid, subject=None, question_type=None, chapter=None, limit=50
             chapter=[dict(subject=k[0], value=k[1], count=v) for k, v in sorted(facets["chapter"].items(), key=lambda kv: (-kv[1], kv[0])) if k[1]],
         ),
     )
+
+
+def history(conn, uid):
+    """One card per handed-in paper for the history page: date, total (or the objective part while subjective answers are
+    still being graded), the two subjects, time taken and the number of mistakes. Newest first."""
+    from app import memory
+
+    rows = graded_rows(conn, uid)
+    mistake_below, consolidate_below = memory.lines(conn, uid)
+    by = {}
+    for r in rows:
+        p = by.setdefault(r["paper_id"], dict(
+            paper_id=r["paper_id"], date=r["paper_date"].isoformat(), submitted_at=r["submitted_at"], spec=r["spec"], pending=0, points=0, max=0,
+            obj_points=0, obj_max=0, subjects={}, mistakes=0, consolidate=0, questions=0))
+        p["questions"] += 1
+        if r["points"] is None:
+            p["pending"] += 1
+            continue
+        p["points"] += r["points"]
+        p["max"] += r["max_points"]
+        if r["qtype"] in OBJECTIVE:
+            p["obj_points"] += r["points"]
+            p["obj_max"] += r["max_points"]
+        sub = p["subjects"].setdefault(r["subject"], dict(points=0, max=0))
+        sub["points"] += r["points"]
+        sub["max"] += r["max_points"]
+        kind = memory.classify(r["qtype"], r["points"], r["max_points"], mistake_below, consolidate_below)
+        p["mistakes"] += kind == "mistake"
+        p["consolidate"] += kind == "consolidate"
+    seconds = {r["paper_id"]: int(r["seconds"]) for r in conn.execute(
+        "SELECT p.id AS paper_id,EXTRACT(EPOCH FROM (t.submitted_at-s.started_at)) AS seconds FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id "
+        "JOIN training_sessions s ON s.paper_id=p.id WHERE p.user_id=%s AND s.started_at IS NOT NULL", (uid,)).fetchall()}
+    cards = []
+    for p in sorted(by.values(), key=lambda p: (p["submitted_at"], p["paper_id"]), reverse=True):
+        done = not p["pending"]
+        cards.append(dict(
+            paper_id=p["paper_id"], date=p["date"], spec=p["spec"], graded=done, pending=p["pending"],
+            points=p["points"] if done else None, max_points=p["max"] if done else None,
+            objective_points=p["obj_points"], objective_max=p["obj_max"],
+            subjects=p["subjects"], seconds=seconds.get(p["paper_id"]), mistakes=p["mistakes"], consolidate=p["consolidate"],
+        ))
+    return dict(papers=cards)

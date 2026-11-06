@@ -55,7 +55,8 @@
       }
     }
     // with a kept copy on screen the refresh happens in the background: only a hair-thin line at the top says so
-    const background = paths.every((path) => Data.peek(path));
+    // (not while the pull-to-refresh indicator is showing: one indicator at a time)
+    const background = paths.every((path) => Data.peek(path)) && !window.Live?.pulling?.();
     if (background) window.Motion?.topline.start();
     try {
       await loader();
@@ -81,7 +82,8 @@
   };
   const PRACTICE_REASON = {
     no_weak_chapters_yet: "还没有足够的已判分记录来找出薄弱章节（每章至少 3 题）。",
-    no_practice_questions_in_these_chapters: "这些章节暂时没有可练的已入库客观题；题库补充后再试。",
+    no_practice_questions_in_these_chapters: "这一类暂时没有可练的题（每日试卷的储备不会被占用）。新题补充后再试。",
+    answer_required: "请先写下作答。",
     subject_and_chapter_required: "请选择科目和章节。",
   };
 
@@ -171,7 +173,6 @@
     if (!lock || window.__hasPaper?.()) startReady();
     else window.Pages?.todayLoaded();
     window.Pages?.paintToday();
-    $("prepare-note").hidden = !(lock && lock.complete) && !!lock;
   }
   async function loadHomeNow() {
     a2hsHint();
@@ -213,7 +214,8 @@
     const result = $("today-result");
     result.hidden = !(today.state === "submitted");
     if (today.state === "submitted")
-      result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分` : "今日已交卷，等待判分完成";
+      result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分`
+        : today.objective_max ? `今日客观题 ${today.objective_points} / ${today.objective_max} 分 · 主观题判分中` : "今日已交卷，等待判分完成";
     // bank readiness: tag, progress line and the start button
     const bank = o.tomorrow;
     homeToday = today.state;
@@ -237,7 +239,13 @@
       }
     };
     const last7 = o.last7;
-    none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", Math.round(last7.avg_points));
+    if ((last7.avg_points === null || last7.avg_points === undefined) && o.objective_only) {
+      // nothing fully graded yet: the objective part of the papers still being graded, not "判分中" for ever
+      const node = $("stat-avg");
+      node.classList.remove("none");
+      node.textContent = `客观 ${Math.round(o.objective_only.points)}/${Math.round(o.objective_only.max)}`;
+      $("stat-avg-note").textContent = "主观题判分中，判完后显示总分";
+    } else none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", Math.round(last7.avg_points));
     const note = $("stat-avg-note");
     note.className = "";
     if (last7.avg_points !== null) {
@@ -371,7 +379,8 @@
       return;
     }
     const latest = rows[rows.length - 1];
-    const use = trendMode === "points" ? rows.filter((r) => r.spec === latest.spec) : rows;
+    const partial = rows.filter((r) => r.partial).length;       // handed in, subjective answers still being graded: objective part only
+    const use = trendMode === "points" ? rows.filter((r) => r.spec === latest.spec && !r.partial) : rows;
     const label = (r) => dateLabel(r.date);
     const subjectSeries = (subject) => ({
       name: SHORT[subject], color: COLOR[subject],
@@ -382,7 +391,7 @@
     });
     const series = [subjectSeries("biochemistry"), subjectSeries("cell_biology"), {
       name: "两科总分", color: C.COLORS.total,
-      points: use.map((r) => ({ label: label(r), value: trendMode === "points" ? r.points : r.rate, note: `${r.points}/${r.max}分` })),
+      points: use.map((r) => ({ label: label(r), value: trendMode === "points" ? r.points : r.rate, note: r.partial ? `客观题 ${r.points}/${r.max}分（主观题判分中）` : `${r.points}/${r.max}分` })),
     }];
     const last7 = rows.slice(-7), prev7 = rows.slice(-14, -7);
     const mean = (list, subject) => {
@@ -398,7 +407,7 @@
       title: "成绩趋势", hideTitle: true, unit: trendMode === "points" ? "分" : "得分率", series,
       yMin: 0, yMax: trendMode === "points" ? latest.max : 1,
       format: trendMode === "points" ? C.num : (v) => Math.round(v * 100) + "%",
-      conclusion: sameSpec + (parts.length ? parts.join("；") + "。" : "再完成一套就能看到变化。"),
+      conclusion: sameSpec + (partial && trendMode !== "points" ? `其中 ${partial} 套主观题还在判分，先只按客观题计算；` : "") + (parts.length ? parts.join("；") + "。" : "再完成一套就能看到变化。"),
     });
   }
   const MIN_ANSWERS_FOR_CONCLUSION = 2;     // a cell with fewer answered questions says nothing yet
@@ -556,12 +565,12 @@
   }
   const chapterPractice = (subject, chapter) => startPractice({ mode: "chapter", subject, chapter, size: 10 });
   function runPractice(panel, set) {
-    let index = 0, correct = 0;
+    let index = 0, correct = 0, waiting = 0;
     const questions = set.questions;
     const finish = () => {
       panel.replaceChildren();
       el("h2", "练习完成", panel);
-      el("p", `${questions.length} 道里答对 ${correct} 道。`, panel, "grade-title");
+      el("p", waiting ? `${questions.length} 道：答对 ${correct} 道，${waiting} 道写作题等 AI 判分。` : `${questions.length} 道里答对 ${correct} 道。`, panel, "grade-title");
       el("p", "练习成绩不计入每日成绩，但会更新章节正确率。", panel, "muted");
       const again = el("button", "再练一套薄弱题", panel, "primary");
       again.onclick = () => startPractice({ mode: "weak", size: 10 });
@@ -597,6 +606,13 @@
             box.querySelectorAll(".option").forEach((x) => x.classList.toggle("chosen", x === option));
           };
         });
+      } else if (["term", "short_answer", "essay"].includes(q.question_type)) {
+        // written answers: the AI grades them after they are handed in (the score shows in the practice review)
+        const area = el("textarea", undefined, panel);
+        area.rows = q.question_type === "essay" ? 9 : 5;
+        area.setAttribute("aria-label", "作答");
+        area.placeholder = "写下你的作答，交卷后由 AI 判分";
+        fields.push(area);
       } else {
         for (let i = 0; i < q.blank_count; i++) {
           const input = el("input", undefined, panel);
@@ -610,14 +626,23 @@
       submit.onclick = async () => {
         submit.disabled = true;
         const seconds = Math.min(7200, Math.round((Date.now() - started) / 1000));
-        const body = q.question_type === "single_choice" ? { question_id: q.id, text: chosen, seconds } : q.blank_count > 1 ? { question_id: q.id, blanks: fields.map((f) => f.value), seconds } : { question_id: q.id, text: fields[0].value, seconds };
+        const body = ["term", "short_answer", "essay"].includes(q.question_type) ? { question_id: q.id, text: fields[0].value, seconds } : q.question_type === "single_choice" ? { question_id: q.id, text: chosen, seconds } : q.blank_count > 1 ? { question_id: q.id, blanks: fields.map((f) => f.value), seconds } : { question_id: q.id, text: fields[0].value, seconds };
         try {
           const r = await send(`/v2/practice/${set.set_id}/answer`, body);
+          if (r.pending) {
+            waiting++;
+            feedback.className = "practice-feedback";
+            el("strong", "已交，AI 判分中", feedback);
+            el("p", r.queued ? "分数出来后会显示在这套的练习回看里；低于合格线的会进入错题本。" : "暂时无法发送给 AI 判分，分数会在可判时补上（不会记 0 分）。", feedback, "muted small");
+            if (r.answer) el("p", "参考答案：" + r.answer, feedback);
+            r.why.forEach((w) => el("p", "得分点：" + w, feedback, "muted small"));
+          } else {
           if (r.correct) correct++;
           feedback.className = "practice-feedback " + (r.correct ? "ok" : "bad");
           el("strong", r.correct ? "回答正确" : `未答对（${r.points}/${r.max_points} 分）`, feedback);
           el("p", "参考答案：" + [r.answer, ...r.accepted_answers.filter((x) => x !== r.answer)].join(" / "), feedback);
           r.why.forEach((w) => el("p", "得分点：" + w, feedback, "muted small"));
+          }
           const next = el("button", index + 1 >= questions.length ? "查看结果" : "下一题", panel, "primary");
           next.onclick = () => {
             index++;

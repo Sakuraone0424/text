@@ -681,6 +681,42 @@ function showError(message, hadCache) {
 }
 
 const drawn = {};
+function gradingCard(g) {
+  const card = $("grading-card");
+  card.hidden = !g || !g.pending;
+  if (card.hidden) return;
+  $("grading-note").textContent = g.late
+    ? `有 ${g.late} 题交卷后超过 ${g.minutes} 分钟仍未判完，请检查下面的原因，或重新判分。`
+    : `共 ${g.pending} 题等待判分（不受高峰暂停影响，会自动处理）。`;
+  card.classList.toggle("late-grading", Boolean(g.late));
+  const list = $("grading-reasons");
+  list.replaceChildren();
+  for (const r of g.by_reason) {
+    const li = document.createElement("li");
+    li.textContent = `${r.text}：${r.count} 题`;
+    list.append(li);
+  }
+  const box = $("grading-papers");
+  box.replaceChildren();
+  for (const p of g.papers.slice(0, 5)) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "secondary";
+    b.textContent = `第 ${p.paper_id} 号卷重新判分（${p.count} 题）`;
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await fetch(`/v2/papers/${p.paper_id}/regrade`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" });
+        b.textContent = r.ok ? "已重新排队" : `失败（${r.status}）`;
+      } catch (e) {
+        b.textContent = "网络错误";
+        b.disabled = false;
+      }
+    };
+    box.append(b);
+  }
+}
+
 function render(report, meta) {
   $("pv-skeleton").hidden = true;
   $("pv-error").hidden = true;
@@ -696,6 +732,7 @@ function render(report, meta) {
   };
   if (!same("batch", "totals", "target_kind", "review_today")) batch(report);
   paper(report);
+  if (!same("grading", "grading")) gradingCard(report.grading);
   status(report);
   if (!same("bank", "buckets", "legacy", "target_kind")) bank(report);
   if (!same("funnel", "funnel")) funnel(report);

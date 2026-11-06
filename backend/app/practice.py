@@ -8,6 +8,7 @@ from app import learning_stats as stats
 from app.question_quality import normalize_answer
 
 MAX_SET = 20
+SUBJECTIVE = ("term", "short_answer", "essay")      # graded by the AI, not at once
 
 
 def public(content, qid):
@@ -63,9 +64,25 @@ def answer(conn, uid, set_id, question_id, value, seconds=None):
     if conn.execute("SELECT 1 FROM practice_answers WHERE set_id=%s AND question_id=%s", (set_id, question_id)).fetchone():
         raise ValueError("already_answered")
     content = conn.execute("SELECT content FROM reviewed_questions WHERE id=%s", (question_id,)).fetchone()["content"]
-    points, per_blank = score(content, value)
     if seconds is not None and not (type(seconds) is int and 0 <= seconds <= 7200):
         raise ValueError("invalid_time")
+    if content["question_type"] in SUBJECTIVE:
+        # term / short answer / essay: no score yet; the AI grades it like a paper answer and writes the score (and the mistake card) later
+        if not (value.get("text") or "").strip():
+            raise ValueError("answer_required")
+        conn.execute(
+            "INSERT INTO practice_answers(set_id,question_id,answer,points,max_points,seconds) VALUES (%s,%s,%s,NULL,%s,%s)",
+            (set_id, question_id, Jsonb(value), content["max_points"], seconds),
+        )
+        from app import auto_grading
+
+        job = auto_grading.schedule_practice(conn, uid, set_id, question_id, content, value)
+        return dict(
+            question_id=question_id, correct=None, points=None, max_points=content["max_points"], pending=True, queued=job is not None,
+            answer=content.get("answer"), accepted_answers=[], blank_points=None,
+            why=[c["description"] for c in content.get("rubric", [])][:6],
+        )
+    points, per_blank = score(content, value)
     conn.execute(
         "INSERT INTO practice_answers(set_id,question_id,answer,points,max_points,seconds) VALUES (%s,%s,%s,%s,%s,%s)",
         (set_id, question_id, Jsonb(value), points, content["max_points"], seconds),
@@ -90,7 +107,7 @@ def summary(conn, uid, set_id):
     done = list(answered.values())
     return dict(
         set_id=set_id, mode=practice["mode"], total=len(practice["question_ids"]), answered=len(done),
-        points=sum(r["points"] for r in done), max_points=sum(r["max_points"] for r in done),
-        correct=sum(1 for r in done if r["points"] == r["max_points"]),
+        points=sum(r["points"] or 0 for r in done), max_points=sum(r["max_points"] for r in done), pending=sum(1 for r in done if r["points"] is None),
+        correct=sum(1 for r in done if r["points"] is not None and r["points"] == r["max_points"]),
         remaining=[qid for qid in practice["question_ids"] if qid not in answered],
     )

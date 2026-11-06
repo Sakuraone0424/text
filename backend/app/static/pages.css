@@ -13,15 +13,20 @@
 .training-app .today-card .today-block { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .training-app .today-card .hero-action { margin-top: 12px; width: 100%; }
 .training-app .paper-info { margin-top: 8px; }
-.training-app .paper-info summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+.training-app .paper-info summary { color: var(--muted); font-size: 13px; cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 4px; border-radius: 8px; transition: background-color var(--t-fast) var(--ease-out); }
+.training-app .paper-info summary::-webkit-details-marker { display: none; }
+.training-app .paper-info summary::after { content: ""; width: 8px; height: 8px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); transition: transform var(--t-base) var(--ease-out); margin-right: 4px; }
+.training-app .paper-info[open] summary::after { transform: rotate(45deg); }
+.training-app .paper-info summary:active { background: var(--tag); }
 
 /* ---- practice grid ---- */
 .training-app .practice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 8px 0 16px; }
 .training-app .practice-card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left; padding: 14px; min-height: 132px; }
 .training-app .practice-card b { font-size: 15px; }
-.training-app .practice-card small { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.training-app .practice-card small { color: var(--muted); font-size: 12px; line-height: 1.4; text-wrap: balance; line-break: strict; word-break: keep-all; overflow-wrap: anywhere; }
 .training-app .practice-card .practice-count { margin-top: auto; font-size: 12px; color: var(--primary); font-weight: 700; }
-.training-app .practice-card .practice-count.off { color: var(--muted); font-weight: 500; }
+.training-app .practice-card .practice-count.off { color: var(--muted); font-weight: 500; text-wrap: balance; }
+.training-app .practice-card .practice-count.few { color: var(--accent-ink); }
 .training-app .practice-card:disabled { opacity: 0.6; }
 .training-app .practice-icon { width: 36px; height: 36px; border-radius: 12px; background: var(--primary-soft); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; }
 .training-app .practice-icon .ico { width: 20px; height: 20px; }
@@ -140,3 +145,20 @@
 .training-app .pick-option small { color: var(--muted); }
 .training-app .start-dialog .button-row { display: flex; gap: 8px; margin-top: 12px; }
 .training-app .start-dialog .button-row button { flex: 1; }
+
+/* history: one card per paper */
+.training-app .history-list { display: grid; gap: 12px; margin-top: 12px; }
+.training-app .history-card { position: relative; display: block; text-decoration: none; color: inherit; padding: 16px 40px 16px 16px; }
+.training-app .hc-top { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+.training-app .hc-score { margin: 6px 0 4px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.training-app .hc-score strong { font-size: 28px; font-variant-numeric: tabular-nums; }
+.training-app .hc-score span { color: var(--muted); font-size: 14px; }
+.training-app .hc-pending { margin-left: 4px; }
+.training-app .hc-meta { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 13px; }
+.training-app .history-card .chev { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 20px; }
+.training-app .rq-pending { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.training-app .late-grading { margin: 8px 0; }
+/* the seven bars take all the width to the right of the count (no blank block on their left) */
+.training-app .due-card .due-side { flex: 1 1 auto; min-width: 0; align-items: stretch; }
+.training-app .due-card .due-side .stat-label { text-align: right; }
+.training-app .due-card .week-bars { width: 100%; min-width: 0; }

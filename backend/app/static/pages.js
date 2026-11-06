@@ -57,13 +57,17 @@
     if (t.status === "in_progress") return { kind: "continue", label: `继续作答（剩余 ${t.clock && /\d/.test(t.clock) ? t.clock : "--:--"}）`, pill: "正在作答" };
     if (t.status === "submitted") {
       const done = mine && mine.points !== undefined && mine.points !== null;
-      return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : "查看成绩（判分中）", pill: "已提交", green: true };
+      return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : mine && mine.objective_max ? `查看成绩（客观题 ${mine.objective_points} / ${mine.objective_max}）` : "查看成绩（判分中）", pill: "已提交", green: true };
     }
     if (t.status === "not_started") return { kind: "start", label: "开始（60 分钟）", pill: "尚未开始", green: true };
-    if (!loaded) return { kind: "loading", label: "开始", pill: "状态待载入" };
-    if (lock && !lock.complete) {
+    // never "已就绪" before the state is actually known: the bank (no paper yet) or the paper itself (one exists; opening it loads it)
+    if (!loaded || (!lock && !mine)) return { kind: "loading", label: "开始", pill: "状态待载入" };
+    if (!lock) return { kind: "prepare", label: "准备今日试卷", pill: "已就绪" };
+    if (!lock.complete) {
       const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clockText(lock.eta_at)} 可开始` : "，暂不能开始";
-      return { kind: "short", label: `题库还差 ${lock.missing} 道${when}`, pill: "题库准备中", reason: "新题还没出够一张卷子，不会用旧题凑。" };
+      const cells = (lock.short_cells || []).map((c) => `${SHORT[c.subject]}${TYPE[c.question_type]}缺 ${c.missing}`).join("、");
+      const missing = (lock.short_cells || []).reduce((n, c) => n + c.missing, 0) || lock.missing;
+      return { kind: "short", label: `题库还差 ${missing} 道${when}`, pill: "题库准备中", reason: `每科每个题型都要凑够一张卷子的新题，不会用旧题凑。${cells ? "还差：" + cells + "。" : ""}` };
     }
     return { kind: "prepare", label: "准备今日试卷", pill: "已就绪" };
   }
@@ -76,7 +80,7 @@
   function paintToday() {
     const s = todayState();
     lastKind = s.kind;
-    const pairs = [[$("prepare"), $("paper-state"), null], [$("practice-today-btn"), $("practice-paper-state"), $("practice-today-note")]];
+    const pairs = [[$("prepare"), $("paper-state"), $("prepare-note")], [$("practice-today-btn"), $("practice-paper-state"), $("practice-today-note")]];
     for (const [button, pill, note] of pairs) {
       if (!button) continue;
       const off = s.kind === "loading" || s.kind === "short";
@@ -91,7 +95,12 @@
         pill.textContent = s.pill;
         pill.classList.toggle("green-pill", Boolean(s.green));
       }
-      if (note) note.textContent = s.reason || "";
+      if (note) {
+        if (!note.dataset.plain) note.dataset.plain = note.textContent;      // the home card's usual line (shown when nothing needs saying)
+        note.textContent = s.reason || (note.id === "prepare-note" ? note.dataset.plain : "");
+        if (note.id === "prepare-note") note.hidden = !(s.reason || s.kind === "prepare");        // the home card's line: the usual hint, or why it cannot start
+        else if (s.reason) note.hidden = false;
+      }
     }
   }
   function todayLoaded() {
@@ -120,12 +129,12 @@
      Practice centre
      ------------------------------------------------------------------------------------------------------------------ */
   const KINDS = [
-    { mode: "weak", name: "薄弱章节练习", desc: "正确率最低的章节，一套 10 题", icon: "M12 3l9 16H3L12 3zM12 10v4M12 17h.01" },
-    { mode: "chapter", name: "按章节练习", desc: "选一章，一套 10 题", icon: "M4 5h16M4 12h16M4 19h10" },
-    { mode: "type", name: "按题型专项", desc: "只练单选或填空，一套 10 题", icon: "M5 5h6v6H5zM13 13h6v6h-6zM13 5h6M5 15h6" },
-    { mode: "retry", name: "错题重做", desc: "从错题本随机抽 10 道", icon: "M4 12a8 8 0 1 0 3-6.2M4 4v5h5" },
-    { mode: "quick", name: "随机快练", desc: "两科混合 10 道客观题，限时可选", icon: "M13 3L5 14h6l-1 7 8-11h-6l1-7z" },
-    { mode: "year", name: "真题按年份", desc: "选年份，练该年真题", icon: "M7 3v3M17 3v3M4 8h16M5 5h14v15H5z" },
+    { mode: "weak", name: "薄弱章节练习", desc: "正确率最低的章节", icon: "M12 3l9 16H3L12 3zM12 10v4M12 17h.01" },
+    { mode: "chapter", name: "按章节练习", desc: "选一章来练", icon: "M4 5h16M4 12h16M4 19h10" },
+    { mode: "type", name: "按题型专项", desc: "五种题型任选", icon: "M5 5h6v6H5zM13 13h6v6h-6zM13 5h6M5 15h6" },
+    { mode: "retry", name: "错题重做", desc: "从错题本里抽", icon: "M4 12a8 8 0 1 0 3-6.2M4 4v5h5" },
+    { mode: "quick", name: "随机快练", desc: "两科混合，可限时", icon: "M13 3L5 14h6l-1 7 8-11h-6l1-7z" },
+    { mode: "year", name: "真题按年份", desc: "选年份练真题", icon: "M7 3v3M17 3v3M4 8h16M5 5h14v15H5z" },
   ];
   /* a bottom sheet with a list of choices; resolves with the chosen value, or null */
   function choose(title, options, note) {
@@ -157,11 +166,11 @@
       if (!value) return;
       Object.assign(body, { subject: value.subject, chapter: value.chapter });
     } else if (kind.mode === "type") {
-      const value = await choose("选一个题型", data.type.types.map((t) => ({ label: t.name, sub: t.supported ? `可练 ${t.available} 题` : "需要 AI 判分，暂不能练习", value: t.value, disabled: !t.supported || t.available < 5 })));
+      const value = await choose("选一个题型", data.type.types.map((t) => ({ label: t.name, sub: t.available ? `可练 ${t.available} 题${t.graded_by_ai ? " · AI 判分" : ""}` : "暂时没有可练的题", value: t.value, disabled: t.available < 1 })), "选好题型再开始；名词解释、简答、问答交卷后由 AI 判分。");
       if (!value) return;
       body.question_type = value;
     } else if (kind.mode === "year") {
-      const value = await choose("选一个年份", data.year.years.map((y) => ({ label: `${y.year} 年`, sub: `可练 ${y.available} 题`, value: y.year, disabled: y.available < 5 })));
+      const value = await choose("选一个年份", data.year.years.map((y) => ({ label: `${y.year} 年`, sub: `可练 ${y.available} 题`, value: y.year, disabled: y.available < 1 })));
       if (!value) return;
       body.year = value;
     } else if (kind.mode === "quick") {
@@ -186,7 +195,8 @@
       icon.append(svgIcon(kind.icon));
       el("b", kind.name, button);
       el("small", kind.desc, button);
-      el("span", ok ? `可练 ${info.available} 题` : kind.mode === "retry" ? "还没有可重做的错题" : "题库准备中", button, "practice-count" + (ok ? "" : " off"));
+      // the number comes from this kind's own sources; when it cannot start the specific reason is said, when it can but is short the shortage is
+      el("span", ok ? `可练 ${info.available} 题${info.short_by ? " · 不足 10" : ""}` : (info.reason || "暂时没有可练的题"), button, "practice-count" + (ok ? (info.short_by ? " few" : "") : " off"));
       button.onclick = () => pickAndStart(kind, data);
     });
   }
@@ -256,6 +266,9 @@
     const data = book;
     const open = data.items.filter((i) => i.group !== "mastered");
     const count = (subject) => open.filter((i) => i.subject === subject).length;
+    // the numbers on the type chips and in the chapter list follow the subject (and each other): what you would get if you tapped it
+    const inScope = (i, skip) => (skip === "subject" || !view.subject || i.subject === view.subject) && (skip === "type" || !view.type || i.question_type === view.type)
+      && (skip === "chapter" || !view.chapter || i.chapter === view.chapter);
     // the one-line filter: 全部 · 生化 N · 细胞 N   筛选 ▾
     const subjects = $("filter-subject");
     subjects.replaceChildren();
@@ -271,7 +284,7 @@
     $("filter-toggle").setAttribute("aria-expanded", String(view.open));
     const types = $("filter-type");
     types.replaceChildren();
-    [["", "全部题型"], ...TYPES.map((t) => [t, `${TYPE[t]} ${(data.types.find((x) => x.value === t) || { count: 0 }).count}`])].forEach(([value, label]) => {
+    [["", "全部题型"], ...TYPES.map((t) => [t, `${TYPE[t]} ${open.filter((i) => i.question_type === t && inScope(i, "type")).length}`])].forEach(([value, label]) => {
       const chip = el("button", label, types);
       chip.type = "button";
       chip.setAttribute("aria-pressed", String(view.type === value));
@@ -281,7 +294,8 @@
     select.replaceChildren();
     el("option", "全部章节", select).value = "";
     data.chapters.filter((c) => !view.subject || c.subject === view.subject).forEach((c) => {
-      const option = el("option", `${SHORT[c.subject]} · ${c.value}（${c.count}）`, select);
+      const n = open.filter((i) => i.subject === c.subject && i.chapter === c.value && inScope(i, "chapter")).length;
+      const option = el("option", `${SHORT[c.subject]} · ${c.value}（${n}）`, select);
       option.value = c.value;
     });
     select.value = view.chapter;
@@ -407,6 +421,11 @@
   /* ------------------------------------------------------------------------------------------------------------------
      Whole-paper review: light summary first, one question in full when it is opened
      ------------------------------------------------------------------------------------------------------------------ */
+  async function postJSON(path) {
+    const response = await fetch(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" });
+    if (!response.ok) throw new Error(`操作失败（${response.status}）`);
+    return response.json();
+  }
   const STATUS = { right: "对", wrong: "错", partial: "部分", blank: "未答", pending: "判分中", reported: "已反馈 · 不计分" };
   const rv = { filter: "all", subject: "", type: "" };
   let review = null;
@@ -416,8 +435,15 @@
     const card = el("section", undefined, root, "card key-card review-head");
     el("p", `${md(s.date)} · ${s.specification_name}`, card, "date-line");
     const total = el("div", undefined, card, "rh-total");
-    el("strong", s.pending ? "判分中" : String(s.score ?? s.graded_points), total);
-    el("span", ` / ${s.max_points} 分`, total);
+    if (s.pending && s.kind === "paper") {
+      // the subjective answers are still being graded: the objective part, never a total (and never 0)
+      el("strong", String(s.objective_points), total);
+      el("span", ` / ${s.objective_max} 分 · 客观题`, total);
+      el("span", "主观题判分中", total, "pill");
+    } else {
+      el("strong", s.pending ? "判分中" : String(s.score ?? s.graded_points), total);
+      el("span", ` / ${s.max_points} 分`, total);
+    }
     if (s.read_only && s.kind === "paper") el("span", "旧卷 · 只读", total, "pill");
     const subjects = el("div", undefined, card, "rh-subjects");
     Object.entries(s.subject_scores || {}).forEach(([subject, v]) => {
@@ -429,6 +455,21 @@
       const box = el("div", undefined, subjects);
       el("span", "用时", box, "rh-subj");
       el("b", mmss(s.seconds), box);
+    }
+    if (s.pending && s.kind === "paper") {
+      if (s.grading_late && s.grading_late.count) el("p", `有 ${s.grading_late.count} 题交卷后超过 ${s.grading_late.minutes} 分钟仍未判完。`, card, "notice late-grading");
+      const again = el("button", "整卷重新判分", card, "secondary");
+      again.type = "button";
+      again.onclick = async () => {
+        again.disabled = true;
+        try {
+          await postJSON("/v2/papers/" + s.paper_id + "/regrade");
+          again.textContent = "已重新排队";
+        } catch (error) {
+          again.disabled = false;
+          again.textContent = error.message;
+        }
+      };
     }
     if (s.type_rates && s.type_rates.length) {
       const rates = el("div", undefined, card, "rh-rates");
@@ -493,6 +534,7 @@
       el("span", `${SHORT[item.subject]} · ${TYPE[item.question_type]}`, head, "rq-type");
       el("span", item.status === "reported" ? STATUS.reported : item.points === null ? "判分中" : `${item.points} / ${item.max_points}`, head, "rq-score");
       el("span", item.stem, box, "rq-stem");
+      if (item.status === "pending" && item.pending_text) el("span", item.pending_text, box, "rq-pending");
       head.onclick = () => openQuestion(box, item);
     });
   }
@@ -512,6 +554,21 @@
       target.className = "rq-body";
       if (d.reported) el("p", "已反馈 · 不计分", target, "notice");
       drawQuestion(target, d);
+      if (d.points === null && !d.reported) {
+        el("p", d.pending_text || "待判分", target, "notice");
+        const again = el("button", "重新判分", target, "secondary");
+        again.type = "button";
+        again.onclick = async () => {
+          again.disabled = true;
+          try {
+            await postJSON(reviewPath(reviewKey).replace("/review", "/regrade") + "/" + item.question_id);
+            again.textContent = "已重新排队";
+          } catch (error) {
+            again.disabled = false;
+            again.textContent = error.message;
+          }
+        };
+      }
     } catch (error) {
       target.textContent = error.message;
     }

@@ -307,6 +307,24 @@ UNUSED_SQL = (
 )
 
 
+def eligible_reserve_rows(conn, uid, subject, kind):
+    """The questions that count as this learner's daily-paper stock for one subject x type (same rules as the count below):
+    new to the learner, published, current scoring, pinned science evidence and a current AI verification."""
+    from app.auto_quality import ready_many
+
+    eligible = conn.execute(
+        "SELECT q.id,q.content FROM auto_question_states s "
+        "JOIN reviewed_questions q ON q.id=s.question_id "
+        "WHERE s.status='ready' AND q.status='published' "
+        "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
+        "AND q.content->>'max_points'=%s AND " + UNUSED_SQL + " ORDER BY q.id",
+        (subject, kind, str(POINTS[kind]), uid, uid),
+    ).fetchall()
+    pinned = [row for row in eligible if pinned_science_evidence(row["content"])]
+    verdict = ready_many(conn, [row["id"] for row in pinned])
+    return [row for row in pinned if verdict.get(row["id"])]
+
+
 def eligible_reserve_count(conn, uid, subject, kind, cached=False):
     # A merely "ready" state does not prove current science/answer
     # review, publication or v2 scoring compatibility.

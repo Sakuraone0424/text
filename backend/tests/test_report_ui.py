@@ -80,7 +80,7 @@ def test_a_graded_answer_shows_each_criterion_score_with_its_reason_and_pending_
                       details=dict(criterion_reasons=["要点一答对了。"] + ["该要点未涉及，未得分。"] * (len(rubric) - 1),
                                    blank_points=[], knowledge_tags=[]))
         conn.commit()
-    page.locator("#grading-activity button").click()
+    page.locator("#grading-activity button", has_text="刷新成绩与解析").click()
     row = page.locator(f'#result article[data-qid="{graded["id"]}"]')
     row.locator("summary.result-question-summary").click()
     expect(row).to_contain_text("评分点 1")

@@ -102,6 +102,8 @@ def progress(conn, user_id, paper_id):
         r["question_id"]
         for r in conn.execute("SELECT question_id FROM question_reports WHERE paper_id=%s", (paper_id,)).fetchall()
     }
+    snapshots = {r["question_id"]: r["snapshot"] for r in conn.execute(
+        "SELECT question_id,snapshot FROM paper_items_v2 WHERE paper_id=%s", (paper_id,)).fetchall()}
     questions = []
     pending = 0
     for row in rows:
@@ -124,6 +126,13 @@ def progress(conn, user_id, paper_id):
             if row["question_id"] in reported
             else pending_reason(row["points"], job, photo_pending, allowed, why)
         )
+        if reason["pending_reason"]:
+            from app import grading_recovery
+
+            snapshot = (snapshots.get(row["question_id"]) or {})
+            if job is None and not grading_recovery.has_rubric(snapshot):
+                reason["pending_reason"] = "no_scoring_points"      # a past-exam entry without scoring points
+            reason["pending_text"] = grading_recovery.reason_text(reason["pending_reason"])
         # No answer text, handwritten image bytes, private prompt or raw logs.
         questions.append({
             "position": row["position"],
@@ -150,6 +159,7 @@ def progress(conn, user_id, paper_id):
         "graded": len(rows) - pending - len(reported & {r["question_id"] for r in rows if r["points"] is None}),
         "pending": pending,
         "complete": pending == 0,
+        "late": __import__("app.grading_recovery", fromlist=["late"]).late(conn, user_id, paper_id) if pending else dict(count=0, minutes=30),
         "auto_queue_available": allowed,
         "auto_queue_unavailable_reason": why,
         "jobs": {

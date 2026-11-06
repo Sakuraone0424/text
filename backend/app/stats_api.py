@@ -15,6 +15,11 @@ def overview(username: str = Depends(require_auth)):
     return operation(stats.overview, username)
 
 
+@router.get("/stats/history")
+def history(username: str = Depends(require_auth)):
+    return operation(stats.history, username)
+
+
 @router.get("/stats/profile")
 def profile(username: str = Depends(require_auth)):
     return operation(stats.profile, username)

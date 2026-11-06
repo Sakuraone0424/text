@@ -472,4 +472,5 @@ def report(conn, uid):
         prices=cny_prices.status(conn),
         pace=cost_control.pace(conn, uid),
         next_paper=next_paper(conn, rows, now),
+        grading=__import__("app.grading_recovery", fromlist=["summary"]).summary(conn, uid),
     )
