@@ -97,6 +97,13 @@ class ChapterMap:
         for name, _, _ in chapters:
             if compact(name) == wanted:
                 return name
+        if _NUMBER.search(raw) and not re.match(r"^\s*\d", raw):
+            # '第 6 章 核酸': the textbook's own wording with other spacing or digits
+            number = number_of(raw)
+            same = [c for c in chapters if number is not None and c[1] == number]
+            if len(same) == 1:
+                return same[0][0]
+            return raw
         if not re.match(r"^\s*\d", raw):
             return raw        # not a past-exam label ("6 核酸"): it is already a chapter name (第六章 …, or whatever the question cites)
         number, words = number_of(raw), words_of(raw)

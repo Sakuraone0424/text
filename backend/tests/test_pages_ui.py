@@ -84,6 +84,7 @@ def start(engine, live_app, routes, path="/training", scheme="light"):
     page.goto(base + path)
     page.reload()                      # open_page had already loaded the page: only a reload runs the answers installed above
     page.wait_for_selector('nav.primary-nav [data-view="home"]')
+    errors.clear()                     # requests of the document that was replaced are cancelled by the reload and are not this page's
     return page, errors
 
 

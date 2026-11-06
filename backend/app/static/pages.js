@@ -535,7 +535,7 @@
 
   /* ------------------------------------------------------------------------------------------------------------------ */
   function show(name, param) {
-    $("start-dialog")?.open && $("start-dialog").close();          // going somewhere else (back button, a link) leaves the start sheet
+    if (!["home", "practice", "exam"].includes(name)) $("start-dialog")?.close();          // going somewhere else (back button, a link) leaves the start sheet
     if (name === "practice") loadPractice();
     else if (name === "mistakes") loadMistakes();
     else if (name === "mistake" && /^m\d+$/.test(param || "")) loadMistakeDetail(Number(param.slice(1)));
