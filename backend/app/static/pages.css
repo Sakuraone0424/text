@@ -140,8 +140,11 @@
 
 /* ---- bottom sheet with choices ---- */
 .training-app .pick-dialog h2 { margin: 4px 0 8px; font-size: 16px; }
-.training-app .pick-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; max-height: 52vh; overflow: auto; }
-.training-app .pick-option { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); min-height: 48px; }
+.training-app .pick-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; max-height: 52vh; overflow-y: auto; padding: 3px; -webkit-overflow-scrolling: touch; }
+.training-app .pick-group { flex: none; margin: 8px 2px 0; font-size: 13px; color: var(--muted); font-weight: 700; }
+.training-app .pick-option { flex: none; height: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); min-height: 56px; line-height: 1.4; overflow: visible; }
+.training-app .pick-option .pick-label { overflow-wrap: anywhere; }
+.training-app .pick-option[aria-pressed="true"] { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
 .training-app .pick-option small { color: var(--muted); }
 .training-app .start-dialog .button-row { display: flex; gap: 8px; margin-top: 12px; }
 .training-app .start-dialog .button-row button { flex: 1; }
@@ -162,3 +165,54 @@
 .training-app .due-card .due-side { flex: 1 1 auto; min-width: 0; align-items: stretch; }
 .training-app .due-card .due-side .stat-label { text-align: right; }
 .training-app .due-card .week-bars { width: 100%; min-width: 0; }
+
+/* ---- grading by hand (bottom sheet) ---- */
+.training-app .manual-dialog { display: flex; flex-direction: column; max-height: 90dvh; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.training-app .manual-dialog[open] { display: flex; }
+.training-app .manual-scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; flex: 1 1 auto; min-height: 0; padding-right: 2px; }
+.training-app .manual-stem { margin: 0 0 8px; font-weight: 600; }
+.training-app .manual-box { background: var(--tag); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+.training-app .manual-box b { font-size: 12px; color: var(--muted); }
+.training-app .manual-box p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.training-app .manual-criterion { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; }
+.training-app .manual-desc { margin: 0 0 8px; overflow-wrap: anywhere; }
+.training-app .manual-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.training-app .manual-seg button { min-height: 36px; padding: 0 12px; }
+.training-app .manual-step { display: inline-flex; align-items: center; gap: 6px; }
+.training-app .manual-step button { width: 36px; height: 36px; padding: 0; border-radius: 50%; }
+.training-app .manual-value { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; font-weight: 700; }
+.training-app .manual-total { margin: 8px 0 0; font-weight: 700; color: var(--primary); }
+.training-app .manual-note { width: 100%; margin-top: 8px; }
+.training-app .manual-original { margin-top: 8px; color: var(--muted); font-size: 13px; }
+.training-app .manual-message { min-height: 18px; margin: 4px 0 0; color: var(--danger); font-size: 13px; }
+.training-app .manual-dialog .button-row { display: flex; gap: 8px; margin-top: 8px; }
+.training-app .manual-dialog .button-row button { flex: 1; }
+.training-app .manual-ai { margin-top: 8px; }
+.training-app .grader-tag { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--tag); color: var(--muted); font-size: 11px; }
+
+/* iOS Safari zooms the page when a field under 16px gets focus: every field is at least 16px (zooming itself stays allowed) */
+input, textarea, select, .training-app input, .training-app textarea, .training-app select { font-size: 16px; }
+
+/* ---- the keyboard is up: nothing fixed at the bottom competes with the field ---- */
+.training-app.keyboard-open .sidebar,
+.training-app.keyboard-open .focus-actions,
+.training-app.keyboard-open .status-message,
+.training-app.keyboard-open .sticky-action { display: none; }
+.training-app.keyboard-open .focus-mode .shell,
+.training-app.keyboard-open.focus-mode .shell { padding-bottom: 24px; }
+
+/* ---- the practice answer page: full screen, its own top bar and bottom bar ---- */
+.training-app .drill { box-sizing: border-box; overflow: hidden; position: fixed; top: 0; left: 0; right: 0; height: var(--app-h, 100dvh); z-index: 35; display: flex; flex-direction: column; background: var(--bg); padding-top: env(safe-area-inset-top, 0px); }
+.training-app .drill[hidden] { display: none; }
+.training-app .drill-top { display: flex; align-items: center; gap: 8px; padding: 6px 8px; flex: none; }
+.training-app .drill-title { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; line-height: 1.3; }
+.training-app .drill-title b { font-size: 16px; }
+.training-app .drill-title span { font-size: 12px; color: var(--muted); }
+.training-app .drill-top::after { content: ""; width: 44px; flex: none; }
+.training-app .drill-progress { flex: none; display: block; -webkit-appearance: none; appearance: none; width: calc(100% - 24px); margin: 0 12px; height: 4px; min-height: 4px; border: 0; }
+.training-app .drill-body { flex: 1 1 0; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 16px; width: 100%; max-width: 720px; margin: 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; }
+.training-app .drill-body .question-stem { margin: 0; font-size: 17px; line-height: 1.6; }
+.training-app .drill-actions { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--card); border-top: 1px solid var(--line); }
+.training-app.keyboard-open .drill-actions { padding-bottom: 8px; }
+.training-app .drill-actions button { width: 100%; }
+@media (min-width: 900px) { .training-app .drill-actions { grid-template-columns: 200px 200px; justify-content: center; } }

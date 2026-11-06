@@ -203,3 +203,14 @@ def test_the_paper_is_ready_only_when_every_cell_has_a_papers_worth_of_new_quest
     paper(db, uid, today(db), [dict(item("cell_biology", "single_choice", 4, 4, "2 膜"), question_id=ids[0])], when=at(today(db)))
     again = learning_stats.tomorrow_ready(db, uid)
     assert again["complete"] is False and again["short_cells"][0]["missing"] == 1
+
+
+def test_the_chapter_list_is_grouped_by_subject_in_the_textbooks_order_not_by_how_many(db, uid, monkeypatch):
+    monkeypatch.setattr(chapters, "textbook_chapters", lambda conn, subject: [("第二章 蛋白质", 2, "蛋白质"), ("第十二章 糖代谢", 12, "糖代谢"), ("第二章 细胞膜", 2, "细胞膜"), ("第十一章 细胞信号转导", 11, "细胞信号转导")])
+    make(db, "biochemistry", "single_choice", 25, chapter="12 糖代谢", prefix="糖")         # many questions, but chapter 12
+    make(db, "biochemistry", "single_choice", 21, chapter="2 蛋白质", prefix="蛋")
+    make(db, "cell_biology", "single_choice", 21, chapter="11 细胞信号转导", prefix="信")
+    make(db, "cell_biology", "single_choice", 21, chapter="2 细胞膜", prefix="膜")
+    listed = [(c["subject"], c["chapter"]) for c in practice_center.overview(db, uid)["chapter"]["chapters"]]
+    assert listed == [("biochemistry", "第二章 蛋白质"), ("biochemistry", "第十二章 糖代谢"), ("cell_biology", "第二章 细胞膜"), ("cell_biology", "第十一章 细胞信号转导")]
+    assert not any(c[1][:1].isdigit() for c in listed)

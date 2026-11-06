@@ -23,7 +23,7 @@ REASON_TEXT = {
     "ai_result_being_applied": "判分结果写入中",
     "reassessing": "结果不确定，正在自动复判一次",
     "uncertain_after_second_assessment": "复判后仍无法确定，暂不计分（不会记 0 分），可点「重新判分」",
-    "ai_budget_exhausted": "本月 AI 额度已用完，额度恢复后继续判分",
+    "ai_budget_exhausted": "本月 AI 总上限已用完，下月恢复后继续判分",
     "ai_grading_stopped": "AI 判分已暂停",
     "answer_too_long_for_automatic_grading": "作答过长，无法自动判分",
     "photo_answers_not_supported": "照片作答暂不支持自动判分",
@@ -194,5 +194,6 @@ def summary(conn, uid):
     return dict(
         pending=len(rows), late=late_n, minutes=LATE_AFTER_MINUTES,
         by_reason=[dict(code=k, text=reason_text(k), count=v) for k, v in sorted(detail["by_reason"].items(), key=lambda kv: -kv[1])],
-        papers=[dict(paper_id=k, count=v) for k, v in sorted(detail["by_paper"].items(), reverse=True)],
+        papers=[dict(paper_id=k, count=v, date=conn.execute("SELECT paper_date FROM papers_v2 WHERE id=%s", (k,)).fetchone()["paper_date"].isoformat())
+                for k, v in sorted(detail["by_paper"].items(), reverse=True)],
     )

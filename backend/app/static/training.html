@@ -227,6 +227,7 @@
           <div class="subbar"><button class="icon-button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1 id="review-title">整卷回看</h1><span></span></div>
           <div id="review-body"></div>
         </section>
+        <section data-page="drill" id="drill-view" class="drill" hidden aria-label="专项练习答题"></section>
         <section data-page="stats" id="stats-view" hidden>
           <div class="subbar">
             <button id="stats-back" class="icon-button" aria-label="返回我的"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button>
@@ -397,6 +398,7 @@
             <div class="tile"><span class="label">本月剩余</span><b id="bl-month"></b></div>
             <div class="tile"><span class="label">累计预留</span><b id="bl-reserved"></b></div>
             <div class="tile"><span class="label">待对账预留</span><b id="bl-unknown"></b></div>
+            <div class="tile"><span class="label">判分预留剩余</span><b id="bl-grading">—</b></div>
             <div class="tile"><span class="label">调用次数</span><b id="bl-calls"></b></div>
             <div class="tile"><span class="label">官方账单</span><b id="bl-invoice"></b></div>
           </div>
@@ -549,6 +551,8 @@
     <script src="/static/insights.js" defer></script>
     <script src="/static/progress.js" defer></script>
     <script src="/static/model.js" defer></script>
+    <script src="/static/manual.js" defer></script>
+    <script src="/static/drill.js" defer></script>
     <script src="/static/pages.js" defer></script>
     <script src="/static/shell.js" defer></script>
     <script src="/static/training.js" defer></script>

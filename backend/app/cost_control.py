@@ -149,6 +149,11 @@ def tomorrow_short(conn, uid):
     )
 
 
+def pace_enabled():
+    """AI_DAILY_PACE=0 turns the day-by-day split off: writing/review is then bound by the month's limit and the gap alone."""
+    return os.environ.get("AI_DAILY_PACE", "1").strip() != "0"
+
+
 def pace(conn, uid, at=None, short=None):
     """Today's writing/review allowance and use (CNY), and how far this month's money goes at the current speed."""
     cap, reserve = caps()
@@ -172,6 +177,8 @@ def pace(conn, uid, at=None, short=None):
 
         runs_out = (local + timedelta(days=covers)).date().isoformat()
     return dict(
+        enabled=pace_enabled(), month_writing_used_cny=str(other.quantize(Decimal("0.01"))), month_writing_limit_cny=str(limit.quantize(Decimal("0.01"))),
+        grading_reserve_left_cny=str(max(Decimal(0), reserve - reserved).quantize(Decimal("0.01"))),
         quota_cny=str(quota), allowed_cny=str(allowed.quantize(Decimal("0.0001"))), used_cny=str(today_other.quantize(Decimal("0.0001"))),
         exceeded=today_other >= allowed, exception=bool(short), days_left=days_left, remaining_cny=str(remaining.quantize(Decimal("0.01"))),
         runs_out_on=runs_out, lasts_to_month_end=runs_out is None,
@@ -180,6 +187,8 @@ def pace(conn, uid, at=None, short=None):
 
 def pace_exhausted(conn, uid):
     """Today's writing/review allowance is used up (jobs wait until Beijing midnight)."""
+    if not pace_enabled():
+        return False
     p = pace(conn, uid)
     # (a month that is already used up is the monthly cap's business: it blocks with budget_exceeded)
     return bool(p["exceeded"]) and Decimal(p["remaining_cny"]) > 0

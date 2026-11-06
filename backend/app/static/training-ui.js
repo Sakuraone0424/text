@@ -59,13 +59,13 @@
   const scroller = () => document.querySelector(".workspace");
   const scrollMemory = {};
   let currentKey = null;
-  const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", practice: "home", exam: "practice", profile: "home", review: "stats", mistake: "mistakes" };
-  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile", exam: "practice", review: "profile", mistake: "mistakes" };
+  const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", practice: "home", exam: "practice", profile: "home", review: "stats", mistake: "mistakes", drill: "practice" };
+  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile", exam: "practice", review: "profile", mistake: "mistakes", drill: "practice" };
   // how deep a route is: the four tabs are 0, their sub-pages 1, a sub-page's own sub-page 2
   const TABS = ["home", "practice", "mistakes", "profile"];
   const depthOf = (name, sub) => (TABS.includes(name) ? 0 : 1) + (sub ? 1 : 0);
   const pageOf = (name) => document.querySelector(`[data-page="${name}"]`);
-  const PARAM_VIEWS = ["review", "mistake"];          // their last part is a parameter (p123 = paper 123, m7 = mistake 7), not a sub-page
+  const PARAM_VIEWS = ["review", "mistake", "drill"];          // their last part is a parameter (p123 = paper 123, m7 = mistake 7), not a sub-page
   const hashSub = (key) => {
     const m = /^#\/([a-z]+)\/([a-z0-9-]+)/.exec(key || "");
     return m && !PARAM_VIEWS.includes(m[1]) ? m[2] : null;
@@ -83,7 +83,7 @@
       if (node.dataset.view === (NAV_FOR[view] || view)) node.setAttribute("aria-current", "page");
       else node.removeAttribute("aria-current");
     });
-    document.body.classList.toggle("focus-mode", view === "exam" && active());
+    document.body.classList.toggle("focus-mode", (view === "exam" && active()) || view === "drill");       // full-screen answering: no bottom navigation
     byId("focus-actions").hidden = view !== "exam" || !active();
     byId("question-tags").hidden = view !== "exam" || !active();
     if (view !== "exam") flushDwell();
@@ -114,7 +114,7 @@
   }
 
   /* ---- routes: one shell, hash URLs, the browser's own back stack ---- */
-  const VIEWS = ["home", "practice", "exam", "mistakes", "mistake", "review", "stats", "profile", "progress", "model"];
+  const VIEWS = ["home", "practice", "exam", "mistakes", "mistake", "review", "drill", "stats", "profile", "progress", "model"];
   const SUBS = ["weekly", "history", "insights", "archive", "source-status"];
   let routeChanges = 0;
   let suppressRoute = false;
@@ -628,13 +628,7 @@
   window.addEventListener("online", connection);
   window.addEventListener("offline", connection);
   connection();
-  if (window.visualViewport) {
-    const viewport = () => {
-      const covered = window.innerHeight - window.visualViewport.height > 150;
-      document.body.classList.toggle("keyboard-open", covered);
-    };
-    window.visualViewport.addEventListener("resize", viewport);
-  }
+  // (the keyboard-open class is kept by shell.js)
   byId("logout").onclick = async () => {
     if (
       active() &&

@@ -142,7 +142,8 @@ def overview(conn, uid):
         n = count_available(src, lambda r, s=subject, c=chapter: objective(r) and r["subject"] == s and r["chapter"] == c)[0]
         if n:
             by_chapter.append(dict(subject=subject, chapter=chapter, available=n))
-    by_chapter.sort(key=lambda x: (-x["available"], x["subject"], x["chapter"]))
+    # grouped by subject, each in the textbook's chapter order (not by how many questions there are)
+    by_chapter.sort(key=lambda x: (stats.SUBJECTS.index(x["subject"]), chapters.number_of(x["chapter"]) or 999, x["chapter"]))
     types = []
     for t in TYPE_NAMES:
         n, used_n, new_n = count_available(src, lambda r, t=t: r["type"] == t)
