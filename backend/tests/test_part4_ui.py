@@ -102,7 +102,7 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     shot(page, "part4-profile.png")
     # a chapter row opens a chapter practice (the synthetic bank has no ready questions: the reason is shown)
     page.locator("#profile-data .chapter-row").first.click()
-    expect(page.locator("#practice-panel")).to_contain_text("暂时没有可练的已入库客观题")
+    expect(page.locator("#practice-panel")).to_contain_text("这一类暂时没有可练的题")
     # ---- mistakes with filters
     page.locator('nav.primary-nav [data-view="mistakes"]').click()
     expect(page.locator("#mistake-groups .mistake-card").first).to_be_visible()

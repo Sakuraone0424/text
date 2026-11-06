@@ -60,7 +60,9 @@
       return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : mine && mine.objective_max ? `查看成绩（客观题 ${mine.objective_points} / ${mine.objective_max}）` : "查看成绩（判分中）", pill: "已提交", green: true };
     }
     if (t.status === "not_started") return { kind: "start", label: "开始（60 分钟）", pill: "尚未开始", green: true };
-    if (!loaded || !lock) return { kind: "loading", label: "开始", pill: "状态待载入" };          // never "已就绪" before the bank is actually known
+    // never "已就绪" before the state is actually known: the bank (no paper yet) or the paper itself (one exists; opening it loads it)
+    if (!loaded || (!lock && !mine)) return { kind: "loading", label: "开始", pill: "状态待载入" };
+    if (!lock) return { kind: "prepare", label: "准备今日试卷", pill: "已就绪" };
     if (!lock.complete) {
       const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clockText(lock.eta_at)} 可开始` : "，暂不能开始";
       const cells = (lock.short_cells || []).map((c) => `${SHORT[c.subject]}${TYPE[c.question_type]}缺 ${c.missing}`).join("、");
