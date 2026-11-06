@@ -26,7 +26,8 @@ GRADING = {**FULL, "last7": {"papers": 0, "avg_rate": None, "avg_points": None, 
 def serve(page, **routes):
     """Answer fetches in the page itself (WebKit's route() cannot see requests a service worker handles).
     routes: path -> (json, delay_ms). A callable may replace the json to vary it per call."""
-    page.context.add_init_script("""(() => { const routes = %s, real = window.fetch.bind(window); window.__calls = {};
+    page.context.add_init_script("""(() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}      // a first visit: nothing kept (even if the first load was still writing)
+        const routes = %s, real = window.fetch.bind(window); window.__calls = {};
         window.__routes = routes;
         window.fetch = (input, init) => { const url = String(input && input.url || input); const hit = Object.keys(window.__routes).find((k) => url.includes(k));
           if (!hit) return real(input, init);
@@ -42,7 +43,6 @@ def start(engine, live_app, scheme="light", reduced=False, routes=None, path="/t
     page, errors = open_page(engine, "safari", base, scheme=scheme)
     if reduced:
         page.emulate_media(reduced_motion="reduce")
-    page.evaluate("localStorage.clear(); sessionStorage.clear()")        # (open_page already loaded the page once against the real server)
     serve(page, **(routes or {"/v2/stats/overview": FULL}))
     page.goto(base + path)
     page.wait_for_selector('nav.primary-nav [data-view="home"]')

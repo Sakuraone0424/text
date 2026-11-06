@@ -112,10 +112,10 @@
     ptrNode = { wrap, label, circle: wrap.querySelector("circle") };
     return ptrNode;
   }
-  const PTR_READY = 60;      // damped distance (px) at which releasing refreshes
+  const PTR_READY = 54;      // damped distance (px) at which releasing refreshes (about the 70 px of finger travel it always took)
   const PTR_HOLD = 52;       // where the content rests while refreshing
   const PTR_MAX = 120;
-  const damp = (raw) => PTR_MAX * (1 - Math.exp(-raw / (PTR_MAX * 1.6)));      // rubber band: ever harder to pull
+  const damp = (raw) => PTR_MAX * (1 - Math.exp(-raw / PTR_MAX));      // rubber band: ever harder to pull
   function pullToRefresh(view, onRefresh) {
     const scroller = () => view.closest(".workspace, main.page") || document.scrollingElement;
     const reduce = () => window.Motion?.reduced?.() || false;

@@ -39,7 +39,11 @@
     const ghost = node.cloneNode(true);
     ghost.hidden = false;
     ghost.removeAttribute("id");
-    ghost.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+    // a picture, not a second page: no ids and no data-* hooks, so nothing (a script, a test) can find it by them
+    [ghost, ...ghost.querySelectorAll("*")].forEach((n) => {
+      n.removeAttribute("id");
+      [...n.attributes].forEach((a) => { if (a.name.startsWith("data-")) n.removeAttribute(a.name); });
+    });
     ghost.setAttribute("inert", "");
     Object.assign(ghost.style, { position: "absolute", left: rect.left - clip.left + "px", top: rect.top - clip.top + "px", width: rect.width + "px", margin: "0", transform: "", opacity: "", animation: "none" });
     frame.append(ghost);
@@ -164,8 +168,10 @@
       if (!this.open || reduced() || !this.classList.contains("sheet") || typeof this.animate !== "function") return nativeClose.call(this, value);
       const rect = this.getBoundingClientRect();
       const ghost = this.cloneNode(true);
-      ghost.removeAttribute("id");
-      ghost.querySelectorAll("[id]").forEach((n) => n.removeAttribute("id"));
+      [ghost, ...ghost.querySelectorAll("*")].forEach((n) => {
+        n.removeAttribute("id");
+        [...n.attributes].forEach((a) => { if (a.name.startsWith("data-")) n.removeAttribute(a.name); });
+      });
       ghost.setAttribute("open", "");
       ghost.setAttribute("inert", "");
       ghost.setAttribute("aria-hidden", "true");
