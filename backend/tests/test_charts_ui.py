@@ -179,7 +179,7 @@ def test_progress_page_charts_stay_inside_their_cards(engine, live_app, scheme):
     page.wait_for_selector("#funnel .funnel-row")
     # while the page slides in (it is 32px to the right for a moment) the content area cannot scroll sideways
     assert page.evaluate("['clip', 'hidden'].includes(getComputedStyle(document.querySelector('.workspace')).overflowX)")
-    page.wait_for_timeout(350)
+    page.wait_for_function("document.getAnimations().every((a) => a.effect.getTiming().iterations === Infinity || a.playState !== 'running')", timeout=5000)   # (the slide-in is over)
     assert page.evaluate("document.querySelector('.workspace, main.page').scrollWidth <= innerWidth + 1")
     assert inside(page, "#funnel, .funnel-row, #spend-chart svg, #spend-chart .chart-block, #spend-split .split, .spend-legend", "section.card, .card") == 0
     assert inside(page, "#spend-chart svg text", "svg") == 0
