@@ -242,9 +242,14 @@ def fresh_progress_cache():
 @pytest.fixture(autouse=True)
 def forget_module_caches():
     """In-process caches (stock check, chapter names, readiness) must not leak from one test's database into the next."""
-    from app import auto_generation, auto_quality, chapters
+    from app import auto_generation, auto_quality
 
     auto_generation._SATISFIED.clear()
-    chapters.clear_cache()
+    try:
+        from app import chapters
+
+        chapters.clear_cache()
+    except ImportError:                        # (the chapter-name module arrives with the mistake-page work)
+        pass
     getattr(auto_quality, "_READY_SEEN", {}).clear()
     yield
