@@ -37,13 +37,15 @@ def serve(page, **routes):
           return new Promise((resolve) => setTimeout(() => resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })), delay)); }; })();""" % json.dumps(routes))
 
 
-def start(engine, live_app, scheme="light", reduced=False, routes=None, path="/training"):
+def start(engine, live_app, scheme="light", reduced=False, routes=None, path="/training", init=None):
     client, _, _ = live_app
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base, scheme=scheme)
     if reduced:
         page.emulate_media(reduced_motion="reduce")
     serve(page, **(routes or {"/v2/stats/overview": FULL}))
+    if init:
+        page.context.add_init_script(init)
     page.goto(base + path)
     page.wait_for_selector('nav.primary-nav [data-view="home"]')
     return page, errors
@@ -169,18 +171,24 @@ def test_the_home_numbers_roll_in_once_and_a_refresh_does_not_start_from_zero(en
 
 # ---- 5. charts ------------------------------------------------------------------------------------------------------------
 
-def test_a_progress_bar_fills_from_the_left_once(engine, live_app):
-    page, _ = start(engine, live_app)
-    fill = page.locator("#weak-chapters .hbar-track > i").first
-    page.evaluate("() => { window.__seen = []; const f = document.querySelector('#weak-chapters .hbar-track > i'); const t = setInterval(() => window.__seen.push(f.getBoundingClientRect().width), 20); setTimeout(() => clearInterval(t), 700); }")
-    page.wait_for_timeout(800)
-    widths = page.evaluate("window.__seen")
-    assert widths and max(widths) > 4 and min(widths) < max(widths)             # it was growing, then full
-    assert page.evaluate("Motion.played.size") > 0
-    before = page.evaluate("Motion.played.size")
+RECORD_ANIMATE = """(() => { window.__anims = []; const real = Element.prototype.animate;
+    Element.prototype.animate = function (keyframes, options) { try { window.__anims.push(JSON.stringify(keyframes)); } catch (e) {} return real.call(this, keyframes, options); }; })();"""
+
+
+def test_a_progress_bar_fills_from_the_left_once_when_it_comes_into_view(engine, live_app):
+    page, _ = start(engine, live_app, init=RECORD_ANIMATE)
+    page.wait_for_selector("#weak-chapters .hbar-track > i", state="attached")
+    bar = page.locator("#weak-chapters .hbar-track > i").first
+    bar.scroll_into_view_if_needed()
+    page.wait_for_function("Motion.played.size > 0")                                # it plays when it is in view ...
+    assert any("scaleX(0)" in a and "scaleX(1)" in a for a in page.evaluate("window.__anims"))      # ... growing from the left
+    assert page.evaluate("document.querySelector('#weak-chapters .hbar-track > i').classList.contains('motion-grow-x')")
+    page.wait_for_function("document.querySelector('#weak-chapters .hbar-track > i').style.transform === ''")       # and ends at its real width
+    before, calls = page.evaluate("Motion.played.size"), len(page.evaluate("window.__anims"))
     page.evaluate("Insights.loadHome()")
-    page.wait_for_timeout(200)
-    assert page.evaluate("Motion.played.size") == before                        # a refresh does not play it again
+    page.wait_for_timeout(300)
+    assert page.evaluate("Motion.played.size") == before                          # a refresh does not play it again
+    assert not any("scaleX(0)" in a for a in page.evaluate("window.__anims")[calls:])
     page.close()
 
 
