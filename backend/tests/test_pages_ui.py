@@ -107,7 +107,7 @@ def test_the_practice_page_has_the_papers_card_six_kinds_and_the_recent_list(eng
     assert cards.nth(3).is_disabled() and "还没有可重做的错题" in cards.nth(3).inner_text()        # retry: nothing to redo yet
     assert cards.nth(5).is_disabled() and "还差 10 道" in cards.nth(5).inner_text() and "题库准备中" not in cards.nth(5).inner_text()      # year: its own reason, not a general one
     assert not cards.nth(4).is_disabled() and "可练 40 题" in cards.nth(4).inner_text()
-    assert not cards.nth(0).is_disabled() and "可练 6 题（不足 10 道，还差 4 道）" in cards.nth(0).inner_text()          # fewer than ten: it may start with what there is
+    assert not cards.nth(0).is_disabled() and "可练 6 题 · 不足 10" in cards.nth(0).inner_text()          # fewer than ten: it may start with what there is
     rows = page.locator("#recent-list .recent-row")
     expect(rows).to_have_count(3)
     expect(rows.nth(0)).to_contain_text("212 / 300")

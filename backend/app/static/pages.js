@@ -195,7 +195,7 @@
       el("b", kind.name, button);
       el("small", kind.desc, button);
       // the number comes from this kind's own sources; when it cannot start the specific reason is said, when it can but is short the shortage is
-      el("span", ok ? `可练 ${info.available} 题${info.short_by ? `（不足 10 道，还差 ${info.short_by} 道）` : ""}` : (info.reason || "暂时没有可练的题"), button, "practice-count" + (ok ? (info.short_by ? " few" : "") : " off"));
+      el("span", ok ? `可练 ${info.available} 题${info.short_by ? " · 不足 10" : ""}` : (info.reason || "暂时没有可练的题"), button, "practice-count" + (ok ? (info.short_by ? " few" : "") : " off"));
       button.onclick = () => pickAndStart(kind, data);
     });
   }
