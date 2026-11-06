@@ -103,3 +103,6 @@
 .training-app #home-view[data-loading] .stat-card strong, .training-app #home-view[data-loading] .hero-stat strong { position: relative; overflow: hidden; display: inline-block; min-width: 56px; color: transparent; background: var(--tag); border-radius: 8px; }
 .training-app #home-view[data-loading] .stat-card strong::after, .training-app #home-view[data-loading] .hero-stat strong::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 34%; background: color-mix(in srgb, var(--card, #fff) 70%, transparent); box-shadow: 0 0 16px 8px color-mix(in srgb, var(--card, #fff) 70%, transparent); transform: translateX(-140%); animation: shimmer 1.2s var(--ease-out) infinite; }
 .training-app #home-view[data-loading] .stat-card small { visibility: hidden; }
+
+/* a page sliding in from the right must never make the content area scroll sideways while it moves */
+.training-app .workspace { overflow-x: clip; }
