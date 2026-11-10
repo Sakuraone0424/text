@@ -147,3 +147,29 @@ def test_a_detail_says_who_graded_it(db, uid):
     made = graded(db, uid, date.today(), [item("biochemistry", "single_choice", 4, 0)])
     d = paper_review.detail(db, uid, made["paper_id"], made["question_ids"][0])
     assert "graded_by" in d and d["points"] == 0
+
+
+def test_the_mistake_book_asks_the_database_a_fixed_number_of_times_whatever_the_number_of_cards(db, uid, monkeypatch):
+    def count_for(n_cards):
+        made = graded(db, uid, date.today() - timedelta(days=n_cards), [item("biochemistry", "single_choice", 4, 0, "6 核酸") for _ in range(n_cards)])
+        for qid in made["question_ids"]:
+            if not db.execute("SELECT 1 FROM fsrs_cards WHERE user_id=%s AND question_id=%s", (uid, qid)).fetchone():
+                card(db, uid, qid)
+        seen = []
+        real = db.execute
+
+        def spy(query, *args, **kwargs):
+            seen.append(1)
+            return real(query, *args, **kwargs)
+
+        monkeypatch.setattr(db, "execute", spy, raising=False)
+        try:
+            out = mistake_book.book(db, uid)
+        finally:
+            monkeypatch.undo()
+            monkeypatch.setattr(chapters, "textbook_chapters", lambda conn, subject: [("第二章 蛋白质的结构与功能", 2, "蛋白质的结构与功能"), ("第六章 核酸", 6, "核酸")])
+        return len(seen), len(out["items"])
+
+    few, n_few = count_for(3)
+    many, n_many = count_for(25)
+    assert n_many >= n_few + 25 and many == few, (few, many)        # 28 cards cost exactly what 3 did

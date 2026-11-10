@@ -67,6 +67,9 @@ async def lifespan(app):
         progress_events.start(stop_listening)     # database changes -> open progress pages (server-sent events)
     yield
     stop_listening.set()
+    from app import db as _db
+
+    _db.close_pools()
     from app import progress_events as _events
 
     _events.HUB.closing = True
