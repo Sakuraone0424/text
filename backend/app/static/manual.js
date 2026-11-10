@@ -49,7 +49,7 @@
         row.minus.disabled = values[i] <= 0;
         row.plus.disabled = values[i] >= c.points;
         row.buttons.forEach(([kind, button]) => {
-          const on = kind === "none" ? values[i] === 0 : kind === "full" ? values[i] === c.points : values[i] > 0 && values[i] < c.points;
+          const on = window.Logic.criterionKind(values[i], c.points) === kind;
           button.setAttribute("aria-pressed", String(on));
         });
       });
@@ -61,7 +61,7 @@
       const seg = h("div", undefined, line, "segmented manual-seg");
       seg.setAttribute("role", "group");
       const buttons = [];
-      const kinds = c.points > 1 ? [["none", "不得分", 0], ["part", "部分", Math.floor(c.points) / 2], ["full", "得分", c.points]] : [["none", "不得分", 0], ["full", "得分", c.points]];
+      const kinds = window.Logic.criterionChoices(c.points);
       kinds.forEach(([kind, text, to]) => {
         const b = h("button", text, seg);
         b.type = "button";
@@ -76,8 +76,8 @@
       const plus = h("button", "+", step);
       plus.type = "button";
       plus.setAttribute("aria-label", "加 1 分");
-      minus.onclick = () => { values[i] = Math.max(0, values[i] - 1); paint(); };
-      plus.onclick = () => { values[i] = Math.min(c.points, values[i] + 1); paint(); };
+      minus.onclick = () => { values[i] = window.Logic.step(values[i], -1, c.points); paint(); };
+      plus.onclick = () => { values[i] = window.Logic.step(values[i], 1, c.points); paint(); };
       rows.push({ value, minus, plus, buttons });
     });
     const note = h("input", undefined, scroll, "manual-note");

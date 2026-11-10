@@ -1,0 +1,13 @@
+{
+  "name": "quiz-frontend-checks",
+  "private": true,
+  "description": "Checks for the hand-written browser scripts (no build step: the scripts are served as they are).",
+  "scripts": {
+    "lint": "eslint app/static",
+    "test": "node --test tests/js/*.test.js"
+  },
+  "devDependencies": {
+    "eslint": "9.39.1",
+    "globals": "16.5.0"
+  }
+}
