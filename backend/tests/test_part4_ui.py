@@ -227,7 +227,9 @@ def test_the_app_can_be_added_to_the_home_screen(live_app, browser):
         response = client.get(icon["src"])
         assert response.status_code == 200 and response.headers["content-type"] == "image/png"
     html = client.get("/training").text
-    for needle in ('rel="manifest"', 'rel="apple-touch-icon"', 'apple-mobile-web-app-capable', "Noto+Sans+SC"):
+    # no font is fetched from another host: a stylesheet on a host that cannot be reached would hold the first paint
+    assert "fonts.googleapis.com" not in html and "fonts.gstatic.com" not in html
+    for needle in ('rel="manifest"', 'rel="apple-touch-icon"', 'apple-mobile-web-app-capable'):
         assert needle in html
     # the one-time tip shows on an iPhone browser, goes away when dismissed, and stays away
     ios = browser.new_context(**PHONE, user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1")

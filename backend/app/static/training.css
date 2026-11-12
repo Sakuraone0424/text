@@ -6,7 +6,7 @@
   --nav: 56px;
   color: var(--ink);
   background: var(--bg);
-  font-family: "Noto Sans SC", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: system-ui, -apple-system, "PingFang SC", "HarmonyOS Sans SC", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   line-height: 1.6;
   overflow-wrap: anywhere;
