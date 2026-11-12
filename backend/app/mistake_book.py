@@ -52,25 +52,35 @@ def correct_text(content):
     return None            # subjective: the reference answer is long; the detail page shows it
 
 
-def history_of(conn, uid, question_id):
-    """Every graded answer to this question, newest first: (date, points, max_points, paper_id or None, answer)."""
-    rows = conn.execute(
-        "SELECT p.id AS paper_id,p.paper_date AS day,a.points,(i.snapshot->>'max_points')::int AS max_points,a.answer,t.submitted_at "
+def histories(conn, uid, question_ids):
+    """{question id: every graded answer to it, newest first} for many questions at once (two queries, whatever the number of cards)."""
+    out = {qid: [] for qid in question_ids}
+    if not out:
+        return out
+    ids = list(out)
+    for r in conn.execute(
+        "SELECT a.question_id,p.id AS paper_id,p.paper_date AS day,a.points,(i.snapshot->>'max_points')::int AS max_points,a.answer,t.submitted_at "
         "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
-        "WHERE p.user_id=%s AND a.question_id=%s AND a.points IS NOT NULL ORDER BY t.submitted_at DESC",
-        (uid, question_id),
-    ).fetchall()
-    out = [dict(paper_id=r["paper_id"], date=r["day"].isoformat(), points=r["points"], max_points=r["max_points"], answer=r["answer"], kind="paper") for r in rows]
-    for r in conn.execute(
-        "SELECT pa.set_id,pa.points,pa.max_points,pa.answer,pa.answered_at FROM practice_answers pa JOIN practice_sets ps ON ps.id=pa.set_id "
-        "WHERE ps.user_id=%s AND pa.question_id=%s AND pa.points IS NOT NULL ORDER BY pa.answered_at DESC",
-        (uid, question_id),
+        "WHERE p.user_id=%s AND a.question_id=ANY(%s) AND a.points IS NOT NULL ORDER BY t.submitted_at DESC",
+        (uid, ids),
     ).fetchall():
-        out.append(dict(paper_id=None, set_id=r["set_id"], date=r["answered_at"].astimezone(SHANGHAI).date().isoformat(),
-                        points=r["points"], max_points=r["max_points"], answer=json.dumps(r["answer"]) if not isinstance(r["answer"], str) else r["answer"], kind="practice"))
-    out.sort(key=lambda h: h["date"], reverse=True)
+        out[r["question_id"]].append(dict(paper_id=r["paper_id"], date=r["day"].isoformat(), points=r["points"], max_points=r["max_points"], answer=r["answer"], kind="paper"))
+    for r in conn.execute(
+        "SELECT pa.question_id,pa.set_id,pa.points,pa.max_points,pa.answer,pa.answered_at FROM practice_answers pa JOIN practice_sets ps ON ps.id=pa.set_id "
+        "WHERE ps.user_id=%s AND pa.question_id=ANY(%s) AND pa.points IS NOT NULL ORDER BY pa.answered_at DESC",
+        (uid, ids),
+    ).fetchall():
+        out[r["question_id"]].append(dict(paper_id=None, set_id=r["set_id"], date=r["answered_at"].astimezone(SHANGHAI).date().isoformat(),
+                                          points=r["points"], max_points=r["max_points"], answer=json.dumps(r["answer"]) if not isinstance(r["answer"], str) else r["answer"], kind="practice"))
+    for rows in out.values():
+        rows.sort(key=lambda h: h["date"], reverse=True)          # (stable: papers stay before practice on the same day)
     return out
+
+
+def history_of(conn, uid, question_id):
+    """Every graded answer to this question, newest first: (date, points, max_points, paper_id or None, answer)."""
+    return histories(conn, uid, [question_id])[question_id]
 
 
 def book(conn, uid, today=None):
@@ -91,11 +101,13 @@ def book(conn, uid, today=None):
         ).fetchall()
     }
     items = []
+    every = histories(conn, uid, [c["question_id"] for c in cards])        # all histories in two queries, not two per card
+    lines = memory.lines(conn, uid)                                        # (and the two lines once, not once per answer)
     for c in cards:
         content = c["content"]
-        history = history_of(conn, uid, c["question_id"])
+        history = every[c["question_id"]]
         last = history[0] if history else {}
-        wrong_times = sum(1 for h in history if memory.classify(content["question_type"], h["points"], h["max_points"], *memory.lines(conn, uid)) in ("mistake", "consolidate"))
+        wrong_times = sum(1 for h in history if memory.classify(content["question_type"], h["points"], h["max_points"], *lines) in ("mistake", "consolidate"))
         dots = min(MASTERED_AFTER, good.get(c["question_id"], 0))
         due_day = c["due"].astimezone(SHANGHAI).date()
         if c["status"] == "mastered" or dots >= MASTERED_AFTER:
