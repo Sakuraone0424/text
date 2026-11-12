@@ -16,6 +16,12 @@ ALTER TABLE practice_answers ALTER COLUMN points TYPE DOUBLE PRECISION;
 ALTER TABLE manual_grades ALTER COLUMN points TYPE DOUBLE PRECISION;
 ALTER TABLE manual_grades ALTER COLUMN ai_points TYPE DOUBLE PRECISION;
 
+-- A paper's time limit may differ from one hour (the subjective paper's is configurable): the deadline must still lie after the start,
+-- at most four hours away.
+ALTER TABLE training_sessions DROP CONSTRAINT IF EXISTS training_sessions_check;
+ALTER TABLE training_sessions ADD CONSTRAINT training_sessions_deadline_check
+    CHECK (deadline > started_at AND deadline <= started_at + INTERVAL '4 hours');
+
 -- 3. What a question's scoring was before it was rescaled (so its earlier quality review stays valid: the review is bound to
 --    the content as it was reviewed).
 CREATE TABLE IF NOT EXISTS question_scoring_originals (

@@ -120,7 +120,7 @@ def test_either_paper_alone_counts_for_the_days_streak(db, question_factory, pas
         uid = ensure_user(db, name)
         made = quiz_v2.create_paper(db, uid, blueprint(module), day=today)
         training_sessions.start(db, uid, made["paper_id"])
-        db.execute("UPDATE training_sessions SET started_at=clock_timestamp()-interval '2 hours',deadline=clock_timestamp()-interval '1 hour' WHERE paper_id=%s", (made["paper_id"],))
+        db.execute("UPDATE training_sessions SET started_at=now()-interval '2 hours',deadline=now()-interval '1 hour' WHERE paper_id=%s", (made["paper_id"],))
         training_sessions.state(db, uid, made["paper_id"])      # past its deadline: handed in as it stands
         overview = learning_stats.overview(db, uid)
         assert overview["streak"]["current"] == 1, name
@@ -338,3 +338,18 @@ def test_scores_and_history_are_kept_apart_by_kind(db):
     assert {k["kind"]: k["count"] for k in history["kinds"]} == {"objective": 2, "subjective": 2, "mixed": 1}
     only = learning_stats.history(db, uid, "subjective")
     assert len(only["papers"]) == 2 and {c["kind"] for c in only["papers"]} == {"subjective"}
+
+
+def test_the_subjective_papers_own_time_limit_is_what_the_clock_runs_on(db, question_factory, passing_audit, monkeypatch):
+    monkeypatch.setenv("QUIZ_SUBJECTIVE_PAPER_SECONDS", "5400")
+    seed_bank(db, question_factory, passing_audit, monkeypatch)
+    uid = ensure_user(db, "long-subjective")
+    day = date(2026, 12, 5)
+    obj = quiz_v2.create_paper(db, uid, blueprint(v5.OBJECTIVE), day=day)
+    subj = quiz_v2.create_paper(db, uid, blueprint(v5.SUBJECTIVE_PAPER), day=day)
+    assert (obj["duration_seconds"], subj["duration_seconds"]) == (3600, 5400)
+    assert subj["timing"]["remaining_seconds"] == 5400
+    for made, seconds in ((obj, 3600), (subj, 5400)):
+        started = training_sessions.start(db, uid, made["paper_id"])
+        assert (started["deadline"] - started["started_at"]).total_seconds() == seconds
+        assert started["duration_seconds"] == seconds
