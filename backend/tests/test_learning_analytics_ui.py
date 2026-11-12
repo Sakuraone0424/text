@@ -24,6 +24,7 @@ def test_dashboard_focus_navigation_and_two_step_start(live_app, browser, width,
     expect(page.locator("#stat-avg-objective")).to_have_text("—")  # no paper yet: an empty state, never a made-up number
     expect(page.locator("#stat-avg-objective-note")).to_contain_text("做完首套后显示")
     expect(page.locator("#weak-chapters")).to_contain_text("做完首套后")
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
     page.evaluate("window.TodayPaper.prepare('objective')")                         # the isolated fixture prepares its old paper
     page.wait_for_function("window.TrainingUI.today().hasPaper")
     page.evaluate("document.getElementById('start-dialog').showModal()")             # the start sheet comes next
@@ -253,6 +254,7 @@ def test_prestart_cache_and_injected_questions_cannot_be_used(live_app, browser)
     expect(page.locator("#questions")).to_be_hidden()
     page.unroute("**/start")
     page.reload(); page.evaluate("location.hash = '#/home'")
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
     page.evaluate("window.TodayPaper.prepare('objective').then(() => document.getElementById('start-dialog').showModal())")
     expect(page.locator("#start")).to_be_visible()
     assert page.locator("#questions article").count() == 0
@@ -303,6 +305,7 @@ def test_remote_start_does_not_replay_unstarted_local_answers(live_app, browser)
       localStorage.setItem(key(), JSON.stringify(stored));
     }""", qid)
     page.reload(); page.evaluate("location.hash = '#/home'")
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
     page.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     expect(page.locator("#questions article:visible")).to_have_count(1)
     assert page.evaluate("Object.keys(localDrafts).length") == 0

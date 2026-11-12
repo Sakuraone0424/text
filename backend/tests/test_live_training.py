@@ -237,6 +237,7 @@ def login(page, base):
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
     page.locator("#login").wait_for(state="hidden")
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
     page.evaluate("window.TodayPaper.prepare('objective')")                       # prepares today's paper (the isolated fixture's old paper) and stays on the page ...
     page.wait_for_function("window.TrainingUI.today().hasPaper")
     page.evaluate("document.getElementById('start-dialog').showModal()")          # ... then the start sheet asks to confirm
@@ -314,6 +315,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     page.wait_for_function("document.querySelector('#status').textContent.includes('图片已保存')")
     page.reload()
     page.evaluate("location.hash = '#/home'")      # a reload keeps the address (#/exam); go back to the home page first
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
     page.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     page.locator("#questions article:not([hidden])").wait_for()
     assert (
@@ -329,6 +331,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     second.locator("#password").fill("test-live-login")
     second.locator("#login button").click()
     second.locator("#login").wait_for(state="hidden")
+    second.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
     second.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     second.locator("#questions article:not([hidden])").wait_for()
     assert (

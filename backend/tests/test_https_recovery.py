@@ -12,7 +12,8 @@ from https_qa_support import https_app, https_browser  # noqa: F401
 
 def login_start(page, qa):
     page.goto(qa['origin']); page.locator('#password').fill(qa['password']); page.locator('#login button').click(); expect(page.locator('#login')).to_be_hidden()
-    page.evaluate("window.TodayPaper.prepare('objective')");page.wait_for_function('window.TrainingUI.today().hasPaper');page.evaluate("document.getElementById('start-dialog').showModal()");expect(page.locator('#start')).to_be_visible(); page.locator('#start').click(); expect(page.locator('#questions article:visible')).to_have_count(1)
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    page.evaluate("fetch('/v2/stats/overview').then(r=>r.json()).then(o=>window.TodayPaper.open(o.today_papers.mixed.paper_id,false))");page.wait_for_function('window.TrainingUI.today().hasPaper');page.evaluate("document.getElementById('start-dialog').showModal()");expect(page.locator('#start')).to_be_visible(); page.locator('#start').click(); expect(page.locator('#questions article:visible')).to_have_count(1)
     return page.evaluate('paper')
 
 
@@ -120,7 +121,7 @@ def test_cached_terminal_status_never_unlocks_offline(https_app,firefox_https,te
         page.locator('#submit').click();page.locator('#confirm-submit').click();expect(page.locator('#result > h2')).to_be_visible()
         assert row(qa,'SELECT submitted_at FROM training_sessions WHERE paper_id=%s',(pid,))['submitted_at']
     else:
-        page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.evaluate("window.TodayPaper.prepare('objective')");page.wait_for_function('window.TrainingUI.today().hasPaper');page.evaluate("document.getElementById('start-dialog').showModal()");expect(page.locator('#start')).to_be_visible()
+        page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'");page.evaluate("fetch('/v2/stats/overview').then(r=>r.json()).then(o=>window.TodayPaper.open(o.today_papers.mixed.paper_id,false))");page.wait_for_function('window.TrainingUI.today().hasPaper');page.evaluate("document.getElementById('start-dialog').showModal()");expect(page.locator('#start')).to_be_visible()
         assert page.locator('#questions article').count()==0
     page.route('**/auth/me',lambda route:route.fulfill(json={'username':'test-owner'}));page.route('**/v2/papers/*',lambda route:route.abort('internetdisconnected'))
     page.reload();expect(page.locator('#status')).to_contain_text('尚未开始' if terminal=='not_started' else '已提交')
@@ -186,7 +187,7 @@ def test_offline_expiry_keeps_deadline_and_rejects_late_answers(https_app,firefo
     # Only this disposable fixture is made near-expiry; keep its exact 3600-second invariant.
     with psycopg.connect(qa['dsn']) as c:
         c.execute("UPDATE training_sessions SET started_at=now()-interval '3593 seconds',deadline=now()+interval '7 seconds' WHERE paper_id=%s",(pid,))
-    page=context.new_page();page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))");expect(page.locator('#questions article:visible')).to_have_count(1);open_question(page,qid)
+    page=context.new_page();page.goto(qa['origin']);page.locator('#password').fill(qa['password']);page.locator('#login button').click();expect(page.locator('#login')).to_be_hidden();page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'");page.evaluate("fetch('/v2/stats/overview').then(r=>r.json()).then(o=>window.TodayPaper.open(o.today_papers.mixed.paper_id,true))");expect(page.locator('#questions article:visible')).to_have_count(1);open_question(page,qid)
     deadline=page.evaluate('paper.timing.deadline');page.evaluate('navigator.serviceWorker.ready');page.wait_for_function('navigator.serviceWorker.controller!==null');context.set_offline(True)
     page.locator('#questions textarea:visible').fill('离线未同步答案');page.wait_for_function('estimatedNow()>=deadline',timeout=15000)
     page.wait_for_function('document.querySelector("#questions").inert',timeout=2000)
@@ -208,7 +209,8 @@ def test_new_tab_without_session_pointer_preserves_unsynced_local_answers(https_
     page.wait_for_function('serverConfirmed===false && Object.keys(pending).length===1');page.close()
     next_page=context.new_page();next_page.goto(qa['origin']);next_page.wait_for_function('startup===null')
     assert next_page.evaluate("sessionStorage.getItem('quiz-v2-paper-key')")==None
-    next_page.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))");expect(next_page.locator('#questions article:visible')).to_have_count(1);wait_saved(next_page)
+    next_page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    next_page.evaluate("fetch('/v2/stats/overview').then(r=>r.json()).then(o=>window.TodayPaper.open(o.today_papers.mixed.paper_id,true))");expect(next_page.locator('#questions article:visible')).to_have_count(1);wait_saved(next_page)
     assert row(qa,'SELECT value FROM answer_drafts WHERE paper_id=%s AND question_id=%s',(pid,q['id']))['value']['text']=='关闭标签页前尚未同步的有效草稿'
     open_question(next_page,q['id']);expect(next_page.locator('#questions textarea:visible')).to_have_value('关闭标签页前尚未同步的有效草稿')
 
