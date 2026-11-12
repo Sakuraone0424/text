@@ -17,7 +17,7 @@ import random
 
 from app import auto_generation, chapters, cost_control, learning_stats as stats
 from app.auto_quality import ready_many
-from app.training_spec_v4 import COUNTS
+from app.training_spec_v5 import COUNTS
 
 SET_SIZE = 10
 MIN_SET = 1                # a set may be shorter than 10 when that is all there is

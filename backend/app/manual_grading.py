@@ -80,7 +80,7 @@ def view(conn, uid, paper_id, question_id):
 def _validate(q, criterion_points):
     criteria = criteria_of(q)
     if (not isinstance(criterion_points, list) or len(criterion_points) != len(criteria)
-            or any(type(p) is not int or p < 0 or p > c["points"] for p, c in zip(criterion_points, criteria))):
+            or any(not quiz_v2.valid_points(p) or p > c["points"] for p, c in zip(criterion_points, criteria))):
         raise ValueError("scores_must_match_the_scoring_points")
     return criteria
 

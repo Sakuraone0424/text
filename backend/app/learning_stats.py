@@ -16,6 +16,16 @@ WEAK_CHAPTERS_SHOWN = 5   # chapters listed on the home card
 MIN_CHAPTER_ANSWERS = 3  # fewer graded answers than this say nothing about a chapter
 
 
+KIND_LABEL = {"objective": "客观题卷", "subjective": "主观题卷", "mixed": "旧版混合卷"}
+
+
+def paper_kind(spec):
+    """objective / subjective for the two v5 papers; the old 60-question and 28-question papers are 'mixed'."""
+    from app.training_spec_v5 import kind_of
+
+    return kind_of(spec)
+
+
 def today_cn(conn):
     return conn.execute("SELECT (clock_timestamp() AT TIME ZONE 'Asia/Shanghai')::date AS d").fetchone()["d"]
 
@@ -63,7 +73,7 @@ def papers(rows):
     by = {}
     for r in rows:
         p = by.setdefault(r["paper_id"], dict(
-            paper_id=r["paper_id"], date=r["paper_date"], submitted_at=r["submitted_at"], spec=r["spec"],
+            paper_id=r["paper_id"], date=r["paper_date"], submitted_at=r["submitted_at"], spec=r["spec"], kind=paper_kind(r["spec"]),
             pending=0, points=0, max=0, subjects=defaultdict(lambda: [0, 0]), types=defaultdict(lambda: [0, 0, 0, 0]),
         ))
         if r["points"] is None:
@@ -85,7 +95,7 @@ def partial_papers(rows):
     """Handed-in papers whose subjective answers are still being graded: what is already marked (the objective part)."""
     by = {}
     for r in rows:
-        p = by.setdefault(r["paper_id"], dict(paper_id=r["paper_id"], date=r["paper_date"], submitted_at=r["submitted_at"], spec=r["spec"],
+        p = by.setdefault(r["paper_id"], dict(paper_id=r["paper_id"], date=r["paper_date"], submitted_at=r["submitted_at"], spec=r["spec"], kind=paper_kind(r["spec"]),
                                               pending=0, points=0, max=0, subjects=defaultdict(lambda: [0, 0])))
         if r["points"] is None:
             p["pending"] += 1
@@ -162,19 +172,32 @@ def due_reviews(conn, uid, today):
 
 
 def tomorrow_ready(conn, uid):
-    """Is there a whole paper's worth of approved questions in the bank, and when will there be?"""
+    """Is there a whole paper's worth of approved questions in the bank, and when will there be? Answered for the whole day's
+    demand and for each of the two papers (the objective paper only needs single choice and fill-in questions, the
+    subjective paper only the other three types), so one paper being short never holds back the other."""
     from app import progress
 
     buckets = progress.buckets(conn, uid)
-    ready = sum(min(b["stocked"], b["required"]) for b in buckets)
-    needed = sum(b["required"] for b in buckets)
-    paper = progress.next_paper(conn, buckets, conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"])
-    # every subject x type cell must hold one paper's worth of NEW verified questions by itself: a surplus in one cell never covers another
-    short = [dict(subject=b["subject"], question_type=b["question_type"], have=b["stocked"], need=b["required"], missing=b["required"] - b["stocked"])
-             for b in buckets if b["stocked"] < b["required"]]
-    return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed and not short, short_cells=short,
-                platform_busy=progress.platform_status(conn)["busy"],
-                eta_at=paper["eta_at"], eta_hours=paper["eta_hours"], eta_state=paper["eta_state"], per_hour=paper["per_hour"], budget=paper["budget"])
+    now = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
+    busy = progress.platform_status(conn)["busy"]
+
+    def summary(cells):
+        needed = sum(b["required"] for b in cells)
+        ready = sum(min(b["stocked"], b["required"]) for b in cells)
+        paper = progress.next_paper(conn, cells, now)
+        # every subject x type cell must hold one paper's worth of NEW verified questions by itself: a surplus in one cell never covers another
+        short = [dict(subject=b["subject"], question_type=b["question_type"], have=b["stocked"], need=b["required"], missing=b["required"] - b["stocked"])
+                 for b in cells if b["stocked"] < b["required"]]
+        return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed and not short, short_cells=short,
+                    platform_busy=busy, eta_at=paper["eta_at"], eta_hours=paper["eta_hours"], eta_state=paper["eta_state"],
+                    per_hour=paper["per_hour"], budget=paper["budget"])
+
+    out = summary(buckets)
+    out["kinds"] = {
+        "objective": summary([b for b in buckets if b["question_type"] in OBJECTIVE]),
+        "subjective": summary([b for b in buckets if b["question_type"] not in OBJECTIVE]),
+    }
+    return out
 
 
 def overview(conn, uid):
@@ -184,22 +207,26 @@ def overview(conn, uid):
     practice = practice_rows(conn, uid)
     done = papers(rows)
     current, longest = streaks(activity_days(rows, practice), today)
-    paper = conn.execute(
-        "SELECT p.id,p.blueprint->>'specification' AS spec,s.started_at,s.submitted_at FROM papers_v2 p "
-        "LEFT JOIN training_sessions s ON s.paper_id=p.id WHERE p.user_id=%s AND p.paper_date=%s",
+    today_rows = conn.execute(
+        "SELECT p.id,p.kind,p.blueprint->>'specification' AS spec,s.started_at,s.submitted_at,s.deadline FROM papers_v2 p "
+        "LEFT JOIN training_sessions s ON s.paper_id=p.id WHERE p.user_id=%s AND p.paper_date=%s ORDER BY p.id",
         (uid, today),
-    ).fetchone()
-    today_paper = dict(state="none")
-    if paper:
+    ).fetchall()
+    partials = partial_papers(rows)
+    today_papers = {}
+    for paper in today_rows:
         state = "submitted" if paper["submitted_at"] else "in_progress" if paper["started_at"] else "prepared"
-        today_paper = dict(state=state, paper_id=paper["id"], spec=paper["spec"])
+        entry = dict(state=state, paper_id=paper["id"], spec=paper["spec"], kind=paper["kind"])
         finished = next((p for p in done if p["paper_id"] == paper["id"]), None)
         if finished:
-            today_paper.update(points=finished["points"], max=finished["max"])
+            entry.update(points=finished["points"], max=finished["max"])
         else:
-            part = next((p for p in partial_papers(rows) if p["paper_id"] == paper["id"]), None)
+            part = next((p for p in partials if p["paper_id"] == paper["id"]), None)
             if part:
-                today_paper.update(objective_points=part["points"], objective_max=part["max"])
+                entry.update(objective_points=part["points"], objective_max=part["max"])
+        today_papers[paper["kind"]] = entry
+    # the one older field: today's paper as a single entry (the objective paper first, else the subjective, else a mixed one)
+    today_paper = next((today_papers[k] for k in ("objective", "subjective", "mixed") if k in today_papers), dict(state="none"))
     last7, before7 = done[-7:], done[-14:-7]
     same = [p for p in last7 if done and p["max"] == done[-1]["max"]]
     objective = [0, 0]
@@ -213,17 +240,24 @@ def overview(conn, uid):
             bucket = objective if r["qtype"] in OBJECTIVE else subjective
             bucket[0] += r["points"]; bucket[1] += r["max_points"]
     avg = lambda ps: round(sum(p["points"] / p["max"] for p in ps) / len(ps), 4) if ps else None
-    latest_max = done[-1]["max"] if done else None
-    this_avg, prev_avg = avg(last7), avg(before7)
+    def last_seven(kind):
+        """Recent average of ONE kind of paper (a paper is only compared with papers of its own kind and maximum)."""
+        mine = [p for p in done if p["kind"] == kind]
+        recent, earlier = mine[-7:], mine[-14:-7]
+        latest = mine[-1]["max"] if mine else None
+        now_avg, then_avg = avg(recent), avg(earlier)
+        return dict(
+            papers=len(recent), avg_rate=now_avg, avg_points=round(now_avg * latest, 1) if now_avg is not None else None, max_points=latest,
+            delta_points=round((now_avg - then_avg) * latest, 1) if now_avg is not None and then_avg is not None else None,
+        )
+
     return dict(
         today=today.isoformat(), exam_date=EXAM_DATE.isoformat(), days_left=max(0, (EXAM_DATE - today).days),
         streak=dict(current=current, longest=longest),
-        today_paper=today_paper,
-        last7=dict(
-            papers=len(last7), avg_rate=this_avg, avg_points=round(this_avg * latest_max, 1) if this_avg is not None else None,
-            max_points=latest_max,
-            delta_points=round((this_avg - prev_avg) * latest_max, 1) if this_avg is not None and prev_avg is not None else None,
-        ),
+        today_paper=today_paper, today_papers=today_papers,
+        # per kind of paper: the two v5 papers on their own, and the old mixed 60-question papers labelled separately
+        last7_by_kind={k: last_seven(k) for k in ("objective", "subjective", "mixed")},
+        last7=last_seven("mixed"),
         objective_only=_objective_only(rows),
         objective_rate=rate(*objective), subjective_rate=rate(*subjective),
         weak_chapters=[c for c in chapter_table(rows, practice) if c["answers"] >= MIN_CHAPTER_ANSWERS][:WEAK_CHAPTERS_SHOWN],
@@ -231,6 +265,8 @@ def overview(conn, uid):
         tomorrow=tomorrow_ready(conn, uid),
         has_data=bool(done),
         pending_papers=len(pending_ids),
+        pending_by_kind={k: sum(1 for r in {(r["paper_id"], paper_kind(r["spec"])) for r in rows if r["paper_id"] in pending_ids} if r[1] == k)
+                         for k in ("objective", "subjective", "mixed")},
     )
 
 
@@ -256,13 +292,13 @@ def profile(conn, uid):
     answered = sum(1 for r in rows if (r["answer"] or "").strip() and r["points"] is not None) + len(practice)
     current, longest = streaks(activity_days(rows, practice), today)
     trend = [
-        dict(paper_id=p["paper_id"], date=p["date"].isoformat(), spec=p["spec"], points=p["points"], max=p["max"], rate=rate(p["points"], p["max"]),
+        dict(paper_id=p["paper_id"], date=p["date"].isoformat(), spec=p["spec"], kind=p["kind"], points=p["points"], max=p["max"], rate=rate(p["points"], p["max"]),
              subjects={s: dict(points=v[0], max=v[1], rate=rate(*v)) for s, v in p["subjects"].items()})
         for p in done[-30:]
     ]
     # papers still being graded join the trend with their objective score (marked partial): one handed-in paper is enough
     trend += [
-        dict(paper_id=p["paper_id"], date=p["date"].isoformat(), spec=p["spec"], points=p["points"], max=p["max"], rate=rate(p["points"], p["max"]), partial=True,
+        dict(paper_id=p["paper_id"], date=p["date"].isoformat(), spec=p["spec"], kind=p["kind"], points=p["points"], max=p["max"], rate=rate(p["points"], p["max"]), partial=True,
              subjects={s: dict(points=v[0], max=v[1], rate=rate(*v)) for s, v in p["subjects"].items()})
         for p in partial_papers(rows)[-30:]
     ]
@@ -316,7 +352,7 @@ def timing(conn, uid, rows):
         if r["seconds"]:
             per[r["qtype"]][0] += r["seconds"]
             per[r["qtype"]][1] += 1
-    from app.training_spec_v4 import POINTS, TOTAL_POINTS
+    from app.training_spec_v5 import POINTS, TOTAL_POINTS
 
     # The hour is split by points: a question's suggested time is 3600 s x its points / the paper's total points.
     by_type = [dict(question_type=t, avg_seconds=round(per[t][0] / per[t][1]), questions=per[t][1],
@@ -398,7 +434,7 @@ def mistakes(conn, uid, subject=None, question_type=None, chapter=None, limit=50
     )
 
 
-def history(conn, uid):
+def history(conn, uid, only_kind=None):
     """One card per handed-in paper for the history page: date, total (or the objective part while subjective answers are
     still being graded), the two subjects, time taken and the number of mistakes. Newest first."""
     from app import memory
@@ -432,9 +468,13 @@ def history(conn, uid):
     for p in sorted(by.values(), key=lambda p: (p["submitted_at"], p["paper_id"]), reverse=True):
         done = not p["pending"]
         cards.append(dict(
-            paper_id=p["paper_id"], date=p["date"], spec=p["spec"], graded=done, pending=p["pending"],
+            paper_id=p["paper_id"], date=p["date"], spec=p["spec"], kind=paper_kind(p["spec"]), kind_label=KIND_LABEL[paper_kind(p["spec"])],
+            graded=done, pending=p["pending"],
             points=p["points"] if done else None, max_points=p["max"] if done else None,
             objective_points=p["obj_points"], objective_max=p["obj_max"],
             subjects=p["subjects"], seconds=seconds.get(p["paper_id"]), mistakes=p["mistakes"], consolidate=p["consolidate"],
         ))
-    return dict(papers=cards)
+    counts = {k: sum(1 for c in cards if c["kind"] == k) for k in ("objective", "subjective", "mixed")}
+    if only_kind in counts:
+        cards = [c for c in cards if c["kind"] == only_kind]
+    return dict(papers=cards, kinds=[dict(kind=k, label=KIND_LABEL[k], count=n) for k, n in counts.items()])

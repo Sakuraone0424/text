@@ -9,6 +9,7 @@ from app.evidence_filter import MILD_FLAGS
 from app.candidate_review import snapshot_unit
 from app.ai_jobs import content_sha, enqueue
 from app.evidence_match import locate
+from app import scoring_rescale
 
 POLICY = "auto-evidence/2"  # /2: one independent review round (older two-round events no longer count)
 MAX_REPAIRS = 1
@@ -72,6 +73,9 @@ def evidence(conn, qid):
     if not row:
         raise LookupError("question_not_found")
     q = Question.model_validate(row["content"]).model_dump()
+    # a question that was rescaled to the new point scale is read in the scoring it was reviewed under, so its review, its
+    # content hash and its queued checks stay valid (nothing but the point numbers differ)
+    q = scoring_rescale.read_in_original_scoring(conn, qid, q)
     packet = conn.execute(
         "SELECT * FROM candidate_review_packets WHERE question_id=%s", (qid,)
     ).fetchone()
@@ -165,7 +169,7 @@ def register(conn, qid):
     q = conn.execute(
         "SELECT content FROM reviewed_questions WHERE id=%s", (qid,)
     ).fetchone()["content"]
-    checksum = content_sha(q)
+    checksum = content_sha(scoring_rescale.read_in_original_scoring(conn, qid, q))
     conn.execute(
         "INSERT INTO auto_question_states(question_id,content_sha256,policy_version) VALUES(%s,%s,%s) ON CONFLICT DO NOTHING",
         (qid, checksum, POLICY),
@@ -957,13 +961,14 @@ def retire_unusable_sources(conn):
 def retire_old_scoring(conn):
     """Take questions written under an earlier point scale out of use (never edited in place).
 
-    The current specification scores single choice 4, fill-in 4, term 6, short answer 12 and
-    essay 18. A question with any other max_points cannot be put on a paper, and its rubric no
+    The current specification scores single choice 3, fill-in 2, term 5, short answer 15 and
+    essay 25. A question with any other max_points cannot be put on a paper, and its rubric no
     longer adds up to the right total, so it is retired together with unfinished work on it;
     its past-exam item (if any) goes back to the import queue to be answered again at the new
-    value. Returns how many questions were retired.
+    value. Questions of the previous (v4) scale never get here: scoring_rescale.run converts them
+    first (nothing is retired for it). Returns how many questions were retired.
     """
-    from app.training_spec_v4 import POINTS
+    from app.training_spec_v5 import POINTS
 
     old = [
         r["question_id"]

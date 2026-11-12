@@ -4,7 +4,7 @@ from pydantic import Field, StrictInt
 
 from app import learning_stats as stats, practice
 from app.auth import require_auth
-from app.question_quality import StrictModel
+from app.question_quality import Points, StrictModel
 from app.routes_v2 import operation
 
 router = APIRouter(prefix="/v2", tags=["learning-stats"])
@@ -16,8 +16,8 @@ def overview(username: str = Depends(require_auth)):
 
 
 @router.get("/stats/history")
-def history(username: str = Depends(require_auth)):
-    return operation(stats.history, username)
+def history(kind: str | None = Query(default=None, pattern="^(objective|subjective|mixed)$"), username: str = Depends(require_auth)):
+    return operation(lambda c, u: stats.history(c, u, kind), username)
 
 
 @router.get("/stats/profile")
@@ -132,7 +132,7 @@ def practice_summary(set_id: int, username: str = Depends(require_auth)):
 
 
 class ManualScore(StrictModel):
-    criterion_points: list[StrictInt] = Field(min_length=1, max_length=50)
+    criterion_points: list[Points] = Field(min_length=1, max_length=50)
     note: str | None = Field(default=None, max_length=500)
 
 

@@ -40,6 +40,8 @@ SHORT_BANK = {
     "today": "2026-11-02", "exam_date": "2026-12-19", "days_left": 47, "streak": {"current": 0, "longest": 0},
     "today_paper": {"state": "none"},
     "last7": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None},
+    "today_papers": {}, "pending_by_kind": {},
+    "last7_by_kind": {k: {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None} for k in ("objective", "subjective", "mixed")},
     "objective_rate": None, "subjective_rate": None, "weak_chapters": [],
     "reviews": {"due_now": 0, "next_7_days": [{"day": f"2026-11-{2 + k:02d}", "count": 0} for k in range(7)], "mastered": 0},
     "tomorrow": {"ready": 4, "needed": 60, "missing": 56, "complete": False, "eta_at": "2026-11-02T15:00:00+00:00", "eta_hours": 6.0, "eta_state": "estimated", "per_hour": 2.0},
@@ -120,13 +122,13 @@ def test_empty_state_pages(engine, live_app, mode, scheme):
     page, errors = open_page(engine, mode, base, overview=SHORT_BANK, scheme=scheme)
     # home with a short bank: grey button that says why, no made-up numbers
     expect(page.locator("#days-left")).not_to_have_text("—")
-    expect(page.locator("#prepare")).to_be_disabled()
-    expect(page.locator("#prepare")).to_have_text(re.compile(r"^题库还差 56 道，预计 .*\d\d:\d\d 可开始$"))      # no old question fills a paper: it says when
-    expect(page.locator("#paper-state")).to_have_text("题库准备中")
-    expect(page.locator("#bank-eta")).to_contain_text("预计")
+    expect(page.locator("#prepare-objective")).to_be_disabled()
+    expect(page.locator("#prepare-objective")).to_have_text(re.compile(r"^题库还差 56 道，预计 .*\d\d:\d\d 可开始$"))      # no old question fills a paper: it says when
+    expect(page.locator("#paper-state-objective")).to_have_text("题库准备中")
+    expect(page.locator("#bank-eta-objective")).to_contain_text("预计")
     expect(page.locator("#streak-days")).to_have_class(re.compile("zero"))
-    expect(page.locator("#stat-avg")).to_have_text("—")
-    expect(page.locator("#stat-avg-note")).to_contain_text("做完首套后显示")
+    expect(page.locator("#stat-avg-objective")).to_have_text("—")
+    expect(page.locator("#stat-avg-objective-note")).to_contain_text("做完首套后显示")
     assert page.locator("#status").evaluate("(n) => getComputedStyle(n).position") == "fixed"  # a toast, not a status line in the page
     expect(page.locator("#status")).not_to_contain_text("已登录")  # switching pages and refreshing never shows it
     toast = page.locator("#status").evaluate("(n) => getComputedStyle(n).bottom")
@@ -182,7 +184,7 @@ def test_seeded_pages(engine, live_app, mode, scheme):
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, mode, base, scheme=scheme)
-    expect(page.locator("#stat-avg")).not_to_have_text("—")
+    expect(page.locator("#stat-objective")).not_to_have_text("—")
     expect(page.locator("#weak-chapters .progress-line")).to_have_count(5)
     clear_of_the_top_inset(page, mode)
     fits(page)

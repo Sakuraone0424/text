@@ -3,15 +3,17 @@
 import re
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Literal
+from typing import Annotated, Literal, Union
 
 from app.training_spec import POINTS, DURATION_SECONDS, validate_quotas
-from app import training_spec_v2 as v2, training_spec_v4 as v4
+from app import training_spec_v2 as v2, training_spec_v4 as v4, training_spec_v5 as v5
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
+    StrictFloat,
     StrictInt,
     field_validator,
     model_validator,
@@ -68,15 +70,25 @@ class Evidence(StrictModel):
         return value
 
 
+def _half_points(value):
+    """A scoring point is a whole number or a half (rescaling a question to the new maximum can leave halves)."""
+    if isinstance(value, float) and value * 2 != int(value * 2):
+        raise ValueError("Scoring points must be whole or half points")
+    return int(value) if isinstance(value, float) and value == int(value) else value
+
+
+Points = Annotated[Union[StrictInt, StrictFloat], AfterValidator(_half_points)]
+
+
 class Criterion(StrictModel):
     knowledge_tags: list[str] = Field(default_factory=list, max_length=30)
     description: str = Field(min_length=1, max_length=2000)
-    points: int = Field(strict=True, ge=1, le=100)
+    points: Points = Field(ge=0.5, le=100)
 
 
 class Blank(StrictModel):
     accepted_answers: list[str] = Field(min_length=1, max_length=100)
-    points: int = Field(strict=True, ge=1, le=3)
+    points: Points = Field(ge=0.5, le=3)
 
     @model_validator(mode="after")
     def nonempty(self):
@@ -113,7 +125,7 @@ class Question(StrictModel):
         if sum(c.points for c in self.rubric) != self.max_points:
             raise ValueError("Rubric points must sum to max_points")
         permissible = {POINTS[self.question_type]}
-        for module in (v2, v4):
+        for module in (v2, v4, v5):
             if self.question_type in module.POINTS:
                 permissible.add(module.POINTS[self.question_type])
         if self.max_points not in permissible:
@@ -181,7 +193,7 @@ class Audit(StrictModel):
 
 class Blueprint(StrictModel):
     points: dict[QuestionType, StrictInt] = Field(default_factory=lambda: dict(POINTS))
-    duration_seconds: Literal[3600] = DURATION_SECONDS
+    duration_seconds: StrictInt = Field(default=DURATION_SECONDS, ge=60, le=14400)
     specification: str = Field(min_length=1, max_length=300)
     quotas: dict[Subject, dict[QuestionType, StrictInt]]
 
@@ -189,17 +201,21 @@ class Blueprint(StrictModel):
     @classmethod
     def versioned_default_scoring(cls, value):
         if isinstance(value, dict) and "points" not in value:
-            for module in (v2, v4):
+            for module in (v2, v4, *v5.PAPERS.values()):
                 if value.get("specification") == module.SPECIFICATION:
-                    return {**value, "points": dict(module.POINTS)}
+                    points = {k: module.POINTS[k] for k in module.QUESTION_TYPES} if module in v5.PAPERS.values() else dict(module.POINTS)
+                    extra = {"duration_seconds": module.DURATION_SECONDS} if "duration_seconds" not in value and module in v5.PAPERS.values() else {}
+                    return {**value, **extra, "points": points}
         return value
 
     @model_validator(mode="after")
     def total(self):
-        for module in (v2, v4):
+        for module in (v2, v4, *v5.PAPERS.values()):
             if self.specification == module.SPECIFICATION:
                 module.validate_blueprint(self.model_dump())
                 return self
+        if self.duration_seconds != DURATION_SECONDS:
+            raise ValueError("Legacy training lasts exactly 3600 seconds")
         if set(self.quotas) != {"biochemistry", "cell_biology"}:
             raise ValueError("Both subjects are required")
         if any(set(q) != set(TYPES) for q in self.quotas.values()):

@@ -41,7 +41,7 @@ TYPE_GUIDANCE = {
         "definition with essential molecular components, defining mechanism or function "
         "and boundaries distinguishing close concepts. Rubric must identify independent "
         "gradable content; do not award points just for repeating the term, verbosity "
-        "or copying a neighboring sentence."
+        "or copying a neighboring sentence. Give EXACTLY two or three independent rubric items."
     ),
     "short_answer": (
         "Ask one focused mechanism/process/comparison with explicit scope, conditions "
@@ -49,14 +49,14 @@ TYPE_GUIDANCE = {
         "steps, key molecular participants, regulation where relevant, and a justified "
         "result. Split rubric into independent point-bearing steps; avoid vague prompts "
         "such as 'discuss briefly' without identifying required content. Answer must "
-        "be achievable from the supplied textbook excerpts alone."
+        "be achievable from the supplied textbook excerpts alone. Give EXACTLY four or five independent rubric items."
     ),
     "essay": (
         "A 问答/论述 question, larger than a short answer: ask for a bounded multi-part "
         "mechanism, an integrative comparison or a process with its regulation, with the "
         "parts stated explicitly in the question. The model answer is structured by those "
         "parts and every part is answerable from the supplied textbook excerpts alone. "
-        "Give EXACTLY four to six independent rubric items, one per required part or step, "
+        "Give EXACTLY six to eight independent rubric items, one per required part or step, "
         "each with its own points; no item may only reward length or restating the question."
     ),
 }
@@ -115,7 +115,8 @@ _SCHEMA_CONTRACT = (
     "of meaningful length, and at least two independently gradable rubric items "
     "with points summing to max_points. For short_answer and essay use the same empty options, "
     "accepted_answers and blanks, and at least two independent rubric items "
-    "with points summing to max_points (an essay has four to six). Every points value must be a JSON integer, not "
+    "with points summing to max_points (a term has two or three, a short answer four or five, an essay six to eight). "
+    "Every points value must be a JSON integer, not "
     "a string or decimal. Do not write comments, markdown, or wrapper keys. "
     "If evidence does not support the question, mark uncertainty by declining "
     "rather than fabricate missing claims; a declined response is rejected. "

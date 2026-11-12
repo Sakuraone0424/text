@@ -148,7 +148,7 @@ def test_the_home_card_keeps_itself_fresh_and_shows_the_stamp(engine, live_app):
     page, errors = open_page(engine, "safari", base, path="/training", init_script=NO_STREAM, overview=SHORT_BANK)
     seen = watch(page, "/v2/model/progress/bank")
     tick_probe(page)
-    page.wait_for_selector("#bank-block:not([hidden])", timeout=15000)
+    page.wait_for_selector("#bank-block-objective:not([hidden])", timeout=15000)
     assert STAMP.search(page.inner_text("#bank-updated"))
     page.wait_for_timeout(18000)
     slowest = 6.5

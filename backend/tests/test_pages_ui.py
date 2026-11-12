@@ -100,7 +100,7 @@ def test_the_practice_page_has_the_papers_card_six_kinds_and_the_recent_list(eng
     # no system explanations; the spec is folded away under 卷面说明
     text = page.locator("#practice-view").inner_text()
     assert "唯一新版训练规格" not in text and "两个独立步骤" not in text and "请先在首页准备试卷" not in text
-    assert page.locator("#practice-view details.paper-info").count() == 1 and not page.locator("#practice-view details.paper-info").evaluate("n => n.open")
+    assert page.locator("#practice-view details.paper-info").count() == 2 and not page.locator("#practice-view details.paper-info").first.evaluate("n => n.open")
     cards = page.locator("#practice-grid .practice-card")
     expect(cards).to_have_count(6)
     expect(cards.nth(0)).to_contain_text("薄弱章节练习")
@@ -121,20 +121,20 @@ def test_the_practice_page_has_the_papers_card_six_kinds_and_the_recent_list(eng
 
 def test_one_state_on_the_home_card_and_the_practice_card(engine, live_app):
     page, _ = start(engine, live_app, ROUTES)
-    page.wait_for_function("document.getElementById('prepare').dataset.kind && document.getElementById('prepare').dataset.kind !== 'loading'")
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
     home, practice = page.evaluate("""() => { const v = (b, p) => [document.getElementById(b).textContent, document.getElementById(p).textContent, document.getElementById(b).disabled];
-        return [v('prepare', 'paper-state'), v('practice-today-btn', 'practice-paper-state')]; }""")        # read together: the state may change between two calls
+        return [v('prepare-objective', 'paper-state-objective'), v('practice-today-btn-objective', 'practice-paper-state-objective')]; }""")        # read together: the state may change between two calls
     assert home == practice                                                    # the same label, pill and state, always
     page.close()
 
 
 def test_a_short_bank_shows_how_many_are_missing_and_when_on_both_cards_and_is_not_clickable(engine, live_app):
     page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": SHORT_BANK, "/v2/papers": [None, 0]})
-    page.wait_for_function("document.getElementById('prepare').dataset.kind === 'short'")
-    for sel in ("#prepare", "#practice-today-btn"):
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind === 'short'")
+    for sel in ("#prepare-objective", "#practice-today-btn-objective"):
         assert page.locator(sel).is_disabled()
         assert page.locator(sel).inner_text().startswith("题库还差 56 道，预计")
-    assert "不会用旧题凑" in page.locator("#practice-today-note").inner_text()
+    assert "不会用旧题凑" in page.locator("#practice-today-note-objective").inner_text()
     page.close()
 
 
@@ -320,8 +320,8 @@ SHORT_CELLS = {**SHORT_BANK, "tomorrow": {**SHORT_BANK["tomorrow"], "ready": 53,
 
 def test_a_cell_that_is_short_makes_the_paper_not_ready_and_says_which(engine, live_app):
     page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": SHORT_CELLS, "/v2/model/progress/bank": SHORT_CELLS["tomorrow"], "/v2/papers": [None, 0]}, path="/training#/practice")
-    page.wait_for_function("document.getElementById('prepare').dataset.kind === 'short'")
-    for button, pill, note in (("#prepare", "#paper-state", "#prepare-note"), ("#practice-today-btn", "#practice-paper-state", "#practice-today-note")):
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind === 'short'")
+    for button, pill, note in (("#prepare-objective", "#paper-state-objective", "#prepare-note-objective"), ("#practice-today-btn-objective", "#practice-paper-state-objective", "#practice-today-note-objective")):
         assert page.locator(button).is_disabled() and page.locator(button).inner_text().startswith("题库还差 7 道")
         assert page.locator(pill).inner_text() == "题库准备中"
         assert "细胞单选缺 7" in page.locator(note).inner_text()
@@ -331,18 +331,18 @@ def test_a_cell_that_is_short_makes_the_paper_not_ready_and_says_which(engine, l
 def test_the_paper_is_never_ready_before_the_bank_is_known(engine, live_app):
     page, _ = start(engine, live_app, {**ROUTES, "/v2/stats/overview": [FULL, 6000], "/v2/model/progress/bank": [FULL["tomorrow"], 6000], "/v2/papers": [None, 0]}, path="/training#/practice")
     page.wait_for_timeout(800)
-    assert page.locator("#practice-paper-state").inner_text() != "已就绪" and page.locator("#practice-today-btn").is_disabled()
+    assert page.locator("#practice-paper-state-objective").inner_text() != "已就绪" and page.locator("#practice-today-btn-objective").is_disabled()
     page.close()
 
 
 def test_the_paper_description_has_an_arrow_and_the_card_texts_do_not_wrap_a_lone_character(engine, live_app):
     page, _ = start(engine, live_app, ROUTES, path="/training#/practice")
     page.wait_for_selector("#practice-grid .practice-card")
-    summary = page.locator(".paper-info summary")
+    summary = page.locator(".paper-info summary").first
     assert summary.evaluate("n => getComputedStyle(n, '::after').content") not in ("none", "normal")           # the arrow
     assert summary.bounding_box()["height"] >= 40                                                              # a finger-sized target
-    page.locator(".paper-info summary").click()
-    assert page.locator(".paper-info").evaluate("n => n.open") and "60 题" in page.locator(".paper-info").inner_text()
+    page.locator(".paper-info summary").first.click()
+    assert page.locator(".paper-info").first.evaluate("n => n.open") and "60 题" in page.locator(".paper-info").first.inner_text()
     lines = page.evaluate("""() => [...document.querySelectorAll('.practice-card small, .practice-card .practice-count')].map((n) => {
         const r = document.createRange(); r.selectNodeContents(n); const rects = [...r.getClientRects()].filter((x) => x.width > 0);
         const tops = [...new Set(rects.map((x) => Math.round(x.top)))]; const last = rects.filter((x) => Math.round(x.top) === tops[tops.length - 1]);

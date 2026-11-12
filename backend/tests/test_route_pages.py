@@ -154,7 +154,7 @@ def test_every_route_is_styled_when_opened_directly_and_when_navigated_to(engine
 # ---------------------------------------------------------------- 三: the progress page as a picture
 
 def seed_progress(dsn, review=None):
-    from app.training_spec_v4 import POINTS
+    from app.training_spec_v5 import POINTS
 
     import psycopg
     from psycopg.rows import dict_row

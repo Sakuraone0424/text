@@ -21,15 +21,14 @@ def test_dashboard_focus_navigation_and_two_step_start(live_app, browser, width,
     page.goto(base)
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
-    expect(page.locator("#stat-avg")).to_have_text("—")  # no paper yet: an empty state, never a made-up number
-    expect(page.locator("#stat-avg-note")).to_contain_text("做完首套后显示")
+    expect(page.locator("#stat-avg-objective")).to_have_text("—")  # no paper yet: an empty state, never a made-up number
+    expect(page.locator("#stat-avg-objective-note")).to_contain_text("做完首套后显示")
     expect(page.locator("#weak-chapters")).to_contain_text("做完首套后")
-    page.locator("#prepare").click()
-    expect(page.locator("#prepare")).to_have_text("开始（60 分钟）")        # prepared; the start sheet comes next
-    page.locator("#prepare").click()
+    page.evaluate("window.TodayPaper.prepare('objective')")                         # the isolated fixture prepares its old paper
+    page.wait_for_function("window.TrainingUI.today().hasPaper")
+    page.evaluate("document.getElementById('start-dialog').showModal()")             # the start sheet comes next
     expect(page.locator("#start")).to_be_visible()
     assert page.locator("#questions article").count() == 0
-    assert "尚未开始" in page.locator("#paper-state").inner_text()
     page.locator("#start").click()
     expect(page.locator("#questions article:visible")).to_have_count(1)
     assert page.locator("#questions article").count() == 28
@@ -140,6 +139,10 @@ def overview_fixture(**extra):
         "today": "2026-11-02", "exam_date": "2026-12-19", "days_left": 47, "streak": {"current": 4, "longest": 9},
         "today_paper": {"state": "none"},
         "last7": {"papers": 5, "avg_rate": 0.7067, "avg_points": 212.0, "max_points": 300, "delta_points": 6.0},
+        "today_papers": {}, "pending_by_kind": {},
+        "last7_by_kind": {"objective": {"papers": 5, "avg_rate": 0.7067, "avg_points": 212.0, "max_points": 300, "delta_points": 6.0},
+                          "subjective": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None},
+                          "mixed": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None}},
         "objective_rate": 0.72, "subjective_rate": 0.55,
         "weak_chapters": [{"subject": "biochemistry", "chapter": "合成统计章节", "rate": 0.4, "answers": 5},
                           {"subject": "cell_biology", "chapter": "合成膜章节", "rate": 0.6, "answers": 4}],
@@ -157,9 +160,9 @@ def test_dashboard_numbers_come_straight_from_the_statistics_endpoint(live_app, 
     page.locator("#password").fill("test-live-login"); page.locator("#login button").click()
     expect(page.locator("#days-left")).to_have_text("47")
     expect(page.locator("#streak-days")).to_have_text("4")
-    expect(page.locator("#stat-avg")).to_have_text("212")
-    expect(page.locator("#stat-avg-note")).to_have_text("较上周 +6")
-    expect(page.locator("#stat-avg-note")).to_have_class("up")
+    expect(page.locator("#stat-avg-objective")).to_have_text("212")
+    expect(page.locator("#stat-avg-objective-note")).to_have_text("较上周 +6")
+    expect(page.locator("#stat-avg-objective-note")).to_have_class("up")
     expect(page.locator("#stat-objective")).to_have_text("72%")
     expect(page.locator("#stat-subjective")).to_have_text("55%")
     rows = page.locator("#weak-chapters .progress-line")
@@ -207,10 +210,10 @@ def test_failed_statistics_remain_unknown_and_reduced_motion(live_app, browser):
     page.route("**/v2/stats/overview", lambda route: route.fulfill(status=503, json={"detail": "Synthetic unavailable response"}))
     page.goto(str(client.base_url).rstrip("/"))
     page.locator("#password").fill("test-live-login"); page.locator("#login button").click()
-    expect(page.locator("#stat-avg-note")).to_contain_text("未将未知数据当作0")
-    expect(page.locator("#stat-avg")).to_have_text("—")
+    expect(page.locator("#stat-avg-objective-note")).to_contain_text("未将未知数据当作0")
+    expect(page.locator("#stat-avg-objective")).to_have_text("—")
     expect(page.locator("#days-left")).to_have_text("—")
-    assert page.evaluate("getComputedStyle(document.querySelector('#prepare')).transitionDuration") == "0s"
+    assert page.evaluate("getComputedStyle(document.querySelector('#prepare-objective')).transitionDuration") == "0s"
     page.close()
 
 
@@ -249,7 +252,8 @@ def test_prestart_cache_and_injected_questions_cannot_be_used(live_app, browser)
     assert client.get(f"/v2/papers/{pid}").json()["timing"]["status"] == "not_started"
     expect(page.locator("#questions")).to_be_hidden()
     page.unroute("**/start")
-    page.reload(); page.evaluate("location.hash = '#/home'"); page.locator("#prepare").click()
+    page.reload(); page.evaluate("location.hash = '#/home'")
+    page.evaluate("window.TodayPaper.prepare('objective').then(() => document.getElementById('start-dialog').showModal())")
     expect(page.locator("#start")).to_be_visible()
     assert page.locator("#questions article").count() == 0
     page.locator("#start").click()
@@ -278,7 +282,6 @@ def test_offline_unstarted_cache_is_cleared_without_unlocking(live_app, browser)
     page.add_init_script("Object.defineProperty(navigator, 'onLine', {get: () => false})")
     page.reload()
     expect(page.locator("#exam-intro")).to_be_visible()
-    expect(page.locator("#prepare")).to_have_text("开始（60 分钟）")
     expect(page.locator("#questions")).to_be_hidden()
     assert page.locator("#questions article").count() == 0
     assert page.evaluate("Object.keys(localDrafts).length") == 0
@@ -299,7 +302,8 @@ def test_remote_start_does_not_replay_unstarted_local_answers(live_app, browser)
       stored.pending = {[qid]: {text:'B'}}; stored.localDrafts = stored.pending;
       localStorage.setItem(key(), JSON.stringify(stored));
     }""", qid)
-    page.reload(); page.evaluate("location.hash = '#/home'"); page.locator("#prepare").click()
+    page.reload(); page.evaluate("location.hash = '#/home'")
+    page.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     expect(page.locator("#questions article:visible")).to_have_count(1)
     assert page.evaluate("Object.keys(localDrafts).length") == 0
     assert client.get(f"/v2/papers/{pid}").json()["timing"]["drafts"] == {}

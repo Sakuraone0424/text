@@ -81,7 +81,7 @@ def test_a_finished_review_shows_whether_the_question_passed_and_why_not(db, set
 
 
 def test_a_failed_result_keeps_the_specific_reason_for_every_job_not_only_qa_jobs(db, setup_ai):
-    jid = add_job(db, setup_ai, "bad-gen", "generation", "succeeded", {"subject": "biochemistry", "question_type": "fill_blank", "max_points": 4, "evidence": []},
+    jid = add_job(db, setup_ai, "bad-gen", "generation", "succeeded", {"subject": "biochemistry", "question_type": "fill_blank", "max_points": 2, "evidence": []},
                   {"real_api": True, "response": {"question": {"subject": "biochemistry"}}})
     auto_worker.dispatch_completed(db)
     row = db.execute("SELECT state,error_code,result FROM ai_jobs WHERE id=%s", (jid,)).fetchone()

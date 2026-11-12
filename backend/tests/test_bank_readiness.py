@@ -8,11 +8,11 @@ def test_empty_private_database_reports_60q_and_120q_shortages(db, client):
     uid = ensure_user(db, "new-training-student")
     result = report(db, uid)
     assert len(result["buckets"]) == 10
-    assert result["specification"] == "xiaohan-60q-300pt-v4"
-    assert sum(b["required"] for b in result["buckets"]) == 60
-    assert sum(b["two_day_reserve_target"] for b in result["buckets"]) == 120
-    assert sum(b["shortage_at_least"] for b in result["buckets"]) == 60
-    assert sum(b["two_day_reserve_shortage_at_least"] for b in result["buckets"]) == 120
+    assert result["specification"] == "xiaohan-obj-150-v5+xiaohan-subj-150-v5"
+    assert sum(b["required"] for b in result["buckets"]) == 74
+    assert sum(b["two_day_reserve_target"] for b in result["buckets"]) == 148
+    assert sum(b["shortage_at_least"] for b in result["buckets"]) == 74
+    assert sum(b["two_day_reserve_shortage_at_least"] for b in result["buckets"]) == 148
     assert result["minimum_bucket_counts_met"] is False
     assert result["two_day_reserve_counts_met"] is False
     assert result["exact_selection_verified"] is False
@@ -30,7 +30,7 @@ def test_reserve_inventory_excludes_even_fake_ready_questions_from_unpinned_book
     from app.question_quality import Question
 
     raw = question_factory(subject="biochemistry", kind="single_choice").model_dump()
-    raw.update(max_points=4, rubric=[dict(raw["rubric"][0], points=4)])  # the current point scale
+    raw.update(max_points=3, rubric=[dict(raw["rubric"][0], points=3)])  # the current point scale
     q = Question.model_validate(raw)
     qid = quiz_v2.create_question(db, q)["id"]
     assert quiz_v2.review_question(db, qid, passing_audit)["passed"]

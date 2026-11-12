@@ -137,14 +137,14 @@ def test_twelve_recent_approvals_in_six_off_peak_hours_set_the_estimate_not_the_
 
     def approved(conn, hours=None):
         seen["hours"] = hours
-        return 12   # 12 approved in the last 6 off-peak hours = two per hour
+        return 24   # 24 approved in the last 6 off-peak hours = four per hour
 
     monkeypatch.setattr(progress, "approved_recently", approved)
     rows = progress.buckets(db, setup_ai)
     paper = progress.next_paper(db, rows, SUNDAY_EVENING)
-    assert seen["hours"] == 6.0 and paper["per_off_peak_hour"] == 2.0
-    assert paper["eta_state"] == "estimated" and paper["eta_hours"] < 48   # 60 missing at 2/hour = 30 off-peak hours
+    assert seen["hours"] == 6.0 and paper["per_off_peak_hour"] == 4.0
+    assert paper["eta_state"] == "estimated" and paper["eta_hours"] < 48   # 74 missing at 4/hour = 19 off-peak hours
     # a faster rate right after raising concurrency shows up at once
-    monkeypatch.setattr(progress, "approved_recently", lambda conn, hours=None: 24)
+    monkeypatch.setattr(progress, "approved_recently", lambda conn, hours=None: 48)
     faster = progress.next_paper(db, rows, SUNDAY_EVENING)
-    assert faster["eta_hours"] < paper["eta_hours"] and faster["per_off_peak_hour"] == 4.0
+    assert faster["eta_hours"] < paper["eta_hours"] and faster["per_off_peak_hour"] == 8.0

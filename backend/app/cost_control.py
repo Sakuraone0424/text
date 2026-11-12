@@ -141,11 +141,11 @@ def _day_numbers(at=None):
 
 def tomorrow_short(conn, uid):
     """Can tomorrow's paper NOT be put together: is some (subject, type) bucket below one paper's worth of usable stock?"""
-    from app import auto_generation, training_spec_v4
+    from app import auto_generation, training_spec_v5
 
     return any(
         auto_generation.eligible_reserve_count(conn, uid, subject, kind, cached=True) < need
-        for subject in training_spec_v4.SUBJECTS for kind, need in training_spec_v4.COUNTS.items()
+        for subject in training_spec_v5.SUBJECTS for kind, need in training_spec_v5.COUNTS.items()
     )
 
 

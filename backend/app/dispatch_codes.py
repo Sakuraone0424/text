@@ -23,7 +23,7 @@ _SAFE_QUALITY_CODES = frozenset((
     "unavailable_figure_reference", "unhelpful_all_or_none_distractor", "answer_disclosed_in_stem", "textbook_wording_in_stem",
     "missing_unique_answer_rationale", "missing_accepted_answer_set",
     "model_answer_too_terse_for_subjective_marking",
-    "insufficient_independent_scoring_criteria",
+    "insufficient_independent_scoring_criteria", "rubric_item_count_out_of_range",
 ))
 _SAFE_PACKET_ERRORS = {
     "Textbook quote, subject or version identity mismatch": "evidence_identity_or_quote_mismatch",

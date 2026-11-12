@@ -82,24 +82,44 @@
               </div>
             </div>
             <hr class="divider" />
-            <div class="today-block">
-              <h2>今日训练卷</h2>
-              <span id="paper-state" class="pill">状态待载入</span>
+            <div class="paper-cards">
+            <div class="paper-card" data-kind="objective" id="paper-card-objective">
+              <div class="today-block">
+                <h2>客观题卷</h2>
+                <span id="paper-state-objective" class="pill">状态待载入</span>
+              </div>
+              <p id="spec-objective" class="muted spec-line">60 题 · 150 分 · 60 分钟</p>
+              <div id="bank-block-objective" class="bank-block" hidden>
+                <div class="bank-line"><span>已入库 <strong id="bank-ready-objective">—</strong> / <span id="bank-needed-objective">60</span></span><span id="bank-eta-objective"></span></div>
+                <div class="thin-bar" role="img" aria-label="题库进度"><i id="bank-bar-objective"></i></div>
+              </div>
+              <p id="today-result-objective" class="today-result" hidden></p>
+              <button id="prepare-objective" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
+              <p id="prepare-note-objective" class="micro-note">先准备试卷，确认后才开始计时</p>
             </div>
-            <p id="spec-summary" class="muted spec-line">生化 30 + 细胞 30 · 300 分 · 60 分钟</p>
-            <div id="bank-block" class="bank-block" hidden>
-              <div class="bank-line"><span>已入库 <strong id="bank-ready">—</strong> / <span id="bank-needed">60</span></span><span id="bank-eta"></span></div>
-              <p id="bank-updated" class="note"></p>
-              <div class="thin-bar" role="img" aria-label="题库进度"><i id="bank-bar"></i></div>
+            <div class="paper-card" data-kind="subjective" id="paper-card-subjective">
+              <div class="today-block">
+                <h2>主观题卷</h2>
+                <span id="paper-state-subjective" class="pill">状态待载入</span>
+              </div>
+              <p id="spec-subjective" class="muted spec-line">14 题 · 150 分 · 60 分钟</p>
+              <div id="bank-block-subjective" class="bank-block" hidden>
+                <div class="bank-line"><span>已入库 <strong id="bank-ready-subjective">—</strong> / <span id="bank-needed-subjective">14</span></span><span id="bank-eta-subjective"></span></div>
+                <div class="thin-bar" role="img" aria-label="题库进度"><i id="bank-bar-subjective"></i></div>
+              </div>
+              <p id="today-result-subjective" class="today-result" hidden></p>
+              <button id="prepare-subjective" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
+              <p id="prepare-note-subjective" class="micro-note">先准备试卷，确认后才开始计时</p>
             </div>
-            <p id="today-result" class="today-result" hidden></p>
-            <button id="prepare" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
-            <p id="prepare-note" class="micro-note">先准备试卷，确认后才开始60分钟计时</p>
+            </div>
+            <p id="bank-updated" class="note"></p>
           </section>
           <section class="stat-row" aria-label="近期成绩">
-            <div class="card stat-card"><span class="stat-label">近 7 次均分</span><strong id="stat-avg" class="none">—</strong><small id="stat-avg-note">做完首套后显示</small></div>
+            <div class="card stat-card"><span class="stat-label">客观题卷 · 近 7 次均分</span><strong id="stat-avg-objective" class="none">—</strong><small id="stat-avg-objective-note">做完首套后显示</small></div>
+            <div class="card stat-card"><span class="stat-label">主观题卷 · 近 7 次均分</span><strong id="stat-avg-subjective" class="none">—</strong><small id="stat-avg-subjective-note">做完首套后显示</small></div>
             <div class="card stat-card"><span class="stat-label">客观题正确率</span><strong id="stat-objective" class="none">—</strong><small id="stat-objective-note">做完首套后显示</small></div>
             <div class="card stat-card"><span class="stat-label">主观题得分率</span><strong id="stat-subjective" class="none">—</strong><small id="stat-subjective-note">判分后显示</small></div>
+            <p id="stat-avg-mixed" class="muted small stat-legacy" hidden></p>
           </section>
           <section class="card weak-card" aria-labelledby="weak-title">
             <div class="card-heading"><h2 id="weak-title">薄弱章节</h2><span class="muted small">按正确率</span></div>
@@ -120,13 +140,26 @@
 <section data-page="practice" id="practice-view" hidden>
           <header class="page-head"><h1>练习</h1></header>
           <section class="card key-card today-card" id="practice-today" aria-label="今日训练卷">
-            <div class="today-block"><h2>今日训练卷</h2><span id="practice-paper-state" class="pill">状态待载入</span></div>
-            <p class="muted spec-line" id="practice-spec">生化 30 + 细胞 30 · 300 分 · 60 分钟</p>
-            <p id="practice-today-note" class="note"></p>
-            <button id="practice-today-btn" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
-            <details class="paper-info"><summary>卷面说明</summary>
-              <p class="muted small">60 题 · 生物化学、细胞生物学各 30 题 · 共 300 分 · 作答 60 分钟。每科 10 道单选、14 道填空、4 道名词解释、1 道简答、1 道问答。</p>
-            </details>
+            <div class="paper-cards">
+            <div class="paper-card" data-kind="objective">
+              <div class="today-block"><h2>客观题卷</h2><span id="practice-paper-state-objective" class="pill">状态待载入</span></div>
+              <p class="muted spec-line" id="practice-spec-objective">60 题 · 150 分 · 60 分钟</p>
+              <p id="practice-today-note-objective" class="note"></p>
+              <button id="practice-today-btn-objective" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
+              <details class="paper-info"><summary>卷面说明</summary>
+                <p class="muted small">60 题 · 生物化学、细胞生物学各 30 题 · 共 150 分 · 作答 60 分钟，交卷后立即出分。每科 15 道单选（每题 3 分）、15 道填空（每题 2 分）。</p>
+              </details>
+            </div>
+            <div class="paper-card" data-kind="subjective">
+              <div class="today-block"><h2>主观题卷</h2><span id="practice-paper-state-subjective" class="pill">状态待载入</span></div>
+              <p class="muted spec-line" id="practice-spec-subjective">14 题 · 150 分 · 60 分钟</p>
+              <p id="practice-today-note-subjective" class="note"></p>
+              <button id="practice-today-btn-subjective" class="primary hero-action" data-loading="1" disabled aria-disabled="true">开始</button>
+              <details class="paper-info"><summary>卷面说明</summary>
+                <p class="muted small">14 题 · 生物化学、细胞生物学各 7 题 · 共 150 分 · 作答 60 分钟，AI 判分，也可手动判分。每科 4 道名词解释（每题 5 分）、2 道简答（每题 15 分）、1 道问答（25 分）。</p>
+              </details>
+            </div>
+            </div>
           </section>
           <section aria-labelledby="practice-grid-title">
             <div class="card-heading"><h2 id="practice-grid-title">专项练习</h2><span class="muted small">不计入每日成绩和连续天数</span></div>
@@ -143,14 +176,14 @@
         <section data-page="exam" id="exam-view" hidden>
           <div id="exam-intro" class="card exam-intro">
             <span class="eyebrow">今日训练</span>
-            <h1>为这60分钟，留一点专注。</h1>
-            <p class="muted">唯一新版训练规格：60题 · 生物化学、细胞生物学各30题150分 · 共300分 · 作答60分钟</p>
-            <div class="blueprint-list">
-              <span>每科10道单选</span><span>14道填空</span><span>4道名词解释</span><span>1道简答</span><span>1道问答</span>
+            <h1 id="intro-title">为这一个小时，留一点专注。</h1>
+            <p class="muted" id="intro-spec">每天两套独立的卷子：客观题卷 60 题 · 150 分，主观题卷 14 题 · 150 分，各 60 分钟，各自计时</p>
+            <div class="blueprint-list" id="intro-blueprint">
+              <span>客观题卷：每科 15 道单选</span><span>15 道填空</span><span>主观题卷：每科 4 道名词解释</span><span>2 道简答</span><span>1 道问答</span>
             </div>
             <p id="intro-state">请先在首页准备试卷。准备与正式开始计时是两个独立步骤。</p>
             <button class="primary" id="open-start" type="button" hidden>开始（60 分钟）</button>
-            <button class="secondary" data-prepare-proxy>准备今日试卷</button>
+            <button class="secondary" data-prepare-proxy>回首页选择试卷</button>
             <p class="card-footnote">正式开始后，切换页面或离线均不会暂停计时。</p>
           </div>
           <div class="focus-toolbar toolbar" id="focus-toolbar" hidden>
@@ -516,9 +549,10 @@
       <button id="map-submit" class="primary full-width">检查并交卷</button>
     </dialog>
     <dialog id="start-dialog" class="start-dialog sheet" aria-labelledby="start-title">
-      <h2 id="start-title">开始今日训练卷</h2>
-      <p>开始后计时不会暂停。</p>
-      <div class="button-row"><button id="cancel-start" class="secondary" type="button">再等等</button><button id="start" class="primary" type="button">确认开始 · 60 分钟</button></div>
+      <h2 id="start-title">开始客观题卷</h2>
+      <p id="start-spec" class="muted">60 题 · 150 分 · 60 分钟</p>
+      <p>开始后计时不会暂停。另一套卷子的计时与它互不影响。</p>
+      <div class="button-row"><button id="cancel-start" class="secondary" type="button">再等等</button><button id="start" class="primary" type="button">确认开始 · <span id="start-minutes">60</span> 分钟</button></div>
     </dialog>
     <dialog
       id="submit-dialog"

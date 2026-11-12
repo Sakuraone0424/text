@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 
 from app import ai_jobs, auto_worker, cost_control, progress
 from app.question_quality import Question
-from app.training_spec_v4 import COUNTS, POINTS, SUBJECTS
+from app.training_spec_v5 import COUNTS, POINTS, SUBJECTS
 from spec_helpers import rubric
 from test_ai_automation import setup_ai  # noqa: F401  (fixture)
 from test_api_v2 import LEARNER
@@ -16,7 +16,7 @@ from test_api_v2 import LEARNER
 SECRET_TEXT = "绝不应出现在进度页里的题干文字"
 
 
-def question(subject="biochemistry", kind="term", points=6, stem=SECRET_TEXT):
+def question(subject="biochemistry", kind="term", points=5, stem=SECRET_TEXT):
     return Question.model_validate(dict(
         subject=subject, question_type=kind, stem=stem, options={}, answer="参考答案" * 8, accepted_answers=[], blanks=[],
         difficulty="core", knowledge_tags=[], max_points=points, rubric=rubric(kind, points),
@@ -24,7 +24,7 @@ def question(subject="biochemistry", kind="term", points=6, stem=SECRET_TEXT):
     ))
 
 
-def add_question(db, status, reason=None, subject="biochemistry", kind="term", points=6):
+def add_question(db, status, reason=None, subject="biochemistry", kind="term", points=5):
     qid = db.execute("INSERT INTO reviewed_questions(content) VALUES (%s) RETURNING id",
                      (Jsonb(question(subject, kind, points).model_dump()),)).fetchone()["id"]
     db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256,reason) VALUES (%s,%s,'x',%s)",
@@ -46,9 +46,9 @@ def test_an_empty_system_reports_ten_buckets_with_zeroes_and_an_honest_worker_st
     report = progress.report(db, setup_ai)
     assert len(report["buckets"]) == 10 and {b["subject"] for b in report["buckets"]} == set(SUBJECTS)
     assert all(b["target"] == 2 * COUNTS[b["question_type"]] and b["stocked"] == 0 for b in report["buckets"])
-    assert report["totals"]["required"] == 60 and report["totals"]["target"] == 120
+    assert report["totals"]["required"] == 74 and report["totals"]["target"] == 148
     assert report["worker"]["outcome"] == "never_ran" and report["worker"]["stale"] is True
-    assert report["next_paper"]["missing_questions"] == 60 and report["next_paper"]["eta_hours"] is None
+    assert report["next_paper"]["missing_questions"] == 74 and report["next_paper"]["eta_hours"] is None
     assert report["recent_jobs"] == []
 
 
@@ -77,7 +77,7 @@ def test_stocked_comes_from_the_verified_eligible_count(db, setup_ai, monkeypatc
     monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind, cached=False: 3 if kind == "term" else 0)
     report = progress.report(db, setup_ai)
     assert bucket(report, "biochemistry", "term")["stocked"] == 3 and report["totals"]["stocked"] == 6
-    assert report["next_paper"]["missing_questions"] == 60 - 2 * 3 + 0  # both term buckets hold 3 of 4
+    assert report["next_paper"]["missing_questions"] == 74 - 2 * 3 + 0  # both term buckets hold 3 of 4
 
 
 def test_recent_jobs_show_kind_state_reason_and_time_but_never_content(db, setup_ai):
@@ -145,13 +145,13 @@ def test_ready_counts_each_cell_only_up_to_one_papers_need(db, setup_ai, monkeyp
     """A cell holding more than a paper needs must not make up for a cell that is empty."""
     from app import learning_stats
 
-    need = {"single_choice": 10, "fill_blank": 14, "term": 4, "short_answer": 1, "essay": 1}
+    need = dict(COUNTS)
     stock = {(s, k): (30 if k == "single_choice" else 0) for s in ("biochemistry", "cell_biology") for k in need}
     monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind, cached=False: stock[(subject, kind)])
     t = learning_stats.tomorrow_ready(db, setup_ai)
-    assert t["needed"] == 60 and t["ready"] == 20 and t["missing"] == 40 and t["complete"] is False  # not 60
+    assert t["needed"] == 74 and t["ready"] == 30 and t["missing"] == 44 and t["complete"] is False  # not 60
     stock.update({(s, k): need[k] + 5 for s in ("biochemistry", "cell_biology") for k in need})
-    assert learning_stats.tomorrow_ready(db, setup_ai)["ready"] == 60 and learning_stats.tomorrow_ready(db, setup_ai)["complete"]
+    assert learning_stats.tomorrow_ready(db, setup_ai)["ready"] == 74 and learning_stats.tomorrow_ready(db, setup_ai)["complete"]
 
 
 def test_a_heartbeat_is_written_each_run_and_read_back(db, setup_ai, monkeypatch):
@@ -249,8 +249,8 @@ def test_work_from_an_earlier_scale_is_folded_into_one_history_line(db, setup_ai
     old_job(db, setup_ai, "o3", state="pending")  # a stale queued job: neither a stage nor history
     db.execute("INSERT INTO ai_jobs(job_key,user_id,kind,state,settings_snapshot,payload,error_code) VALUES ('nopoints',%s,'generation','blocked','{}',%s,'OSError')",
                (setup_ai, Jsonb({"subject": "cell_biology", "question_type": "term"})))  # GPT-era trial job without a point value
-    add_question(db, "blocked", "unresolved_quality_findings", kind="term", points=4)  # the old term scale was 4
-    add_question(db, "blocked", "rubric_not_fully_evidenced", kind="term", points=6)  # current: stays in its cell
+    add_question(db, "blocked", "unresolved_quality_findings", kind="term", points=4)  # an old term scale (4)
+    add_question(db, "blocked", "rubric_not_fully_evidenced", kind="term", points=5)  # current: stays in its cell
     add_job(db, setup_ai, "now", "pending")
     report = progress.report(db, setup_ai)
     term = bucket(report, "biochemistry", "term")

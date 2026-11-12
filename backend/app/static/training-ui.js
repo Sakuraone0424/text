@@ -197,7 +197,7 @@
     byId("current-number").textContent = String(position + 1);
     byId("current-subject").textContent =
       labels[question.subject] || question.subject;
-    byId("current-points").textContent = `${typeNames[question.question_type] || ""} · ${question.max_points}分`;
+    byId("current-points").textContent = `${typeNames[question.question_type] || ""} · ${question.max_points}分` + (question.scoring_note ? ` · ${question.scoring_note}` : "");
     byId("previous-question").disabled = position === 0;
     byId("next-question").textContent =
       position === questions.length - 1 ? "检查答题卡" : "下一题";
@@ -274,6 +274,20 @@
       `已答${count}题 · 未答${Math.max(0, counted - count)}题 · 已标记${marked}题` +
       (reported.size ? ` · 已反馈${reported.size}题（不计分）` : "");
   }
+  const PAPER_TEXT = {
+    objective: {
+      name: "客观题卷", spec: (m) => `60 题 · 150 分 · ${m} 分钟`, note: "单选每题 3 分、填空每题 2 分，交卷后立即出分",
+      blueprint: ["每科 15 道单选", "15 道填空", "生物化学、细胞生物学各 75 分"],
+    },
+    subjective: {
+      name: "主观题卷", spec: (m) => `14 题 · 150 分 · ${m} 分钟`, note: "名词解释 5 分、简答 15 分、问答 25 分，AI 判分，也可手动判分",
+      blueprint: ["每科 4 道名词解释", "2 道简答", "1 道问答", "生物化学、细胞生物学各 75 分"],
+    },
+    mixed: {
+      name: "旧版混合卷", spec: () => "旧版混合卷，只读", note: "不再生成新卷，已有的卷子仍可回看",
+      blueprint: ["旧版规格"],
+    },
+  };
   function state(next) {
     const previousPaper = latest.paper?.paper_id;
     latest = next;
@@ -283,9 +297,21 @@
     if (totalIndicator) totalIndicator.textContent = " / " + count;
     if (timing) window.Insights?.startReady?.();       // today's paper exists: its own state is known
     window.Pages?.paintToday();                        // the home card and the practice card show one state, from one place
-    byId("prepare-note").textContent = active()
-      ? "考试计时继续，已存答案不会丢失"
-      : "先准备试卷，确认后才开始60分钟计时";
+    const meta = PAPER_TEXT[latest.paper?.kind];
+    const minutes = Math.round((timing?.duration_seconds || latest.paper?.duration_seconds || 3600) / 60);
+    // the paper on the exam page says what it is (kind, size, points, time) in the intro, the start button and the confirm dialog
+    if (meta) {
+      byId("intro-title").textContent = `${meta.name}：为这 ${minutes} 分钟，留一点专注。`;
+      byId("intro-spec").textContent = `${meta.spec(minutes)}；${meta.note}`;
+      const list = byId("intro-blueprint");
+      list.replaceChildren(...meta.blueprint.map((text) => Object.assign(document.createElement("span"), { textContent: text })));
+      byId("open-start").textContent = `开始（${minutes} 分钟）`;
+      byId("start-title").textContent = `开始${meta.name}`;
+      byId("start-spec").textContent = meta.spec(minutes);
+      byId("start-minutes").textContent = String(minutes);
+    }
+    const note = document.querySelector("#paper-card-" + (latest.paper?.kind || "") + " .micro-note");
+    if (note && active()) note.textContent = "考试计时继续，已存答案不会丢失";
     byId("exam-intro").hidden = !!timing && timing.status !== "not_started";
     byId("intro-state").textContent =
       timing?.status === "not_started"
@@ -548,8 +574,7 @@
   document.querySelectorAll("[data-action]").forEach((button) => {
     button.onclick = () => byId(button.dataset.action).click();
   });
-  document.querySelector("[data-prepare-proxy]").onclick = () =>
-    byId("prepare").click();
+  document.querySelector("[data-prepare-proxy]").onclick = () => go("home");
   byId("open-start").onclick = () => byId("start-dialog").showModal();
   byId("cancel-start").onclick = () => byId("start-dialog").close();
   ["memory", "weekly", "history", "insights", "archive", "source-status"].forEach((id) =>
@@ -676,6 +701,7 @@
       hasPaper: !!latest.paper,
       clock: byId("clock")?.textContent || "",
       paperId: latest.paper?.paper_id || null,
+      kind: latest.paper?.kind || null,
     }),
   };
   apply();

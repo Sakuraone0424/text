@@ -10,6 +10,7 @@ from pydantic import Field, StrictInt
 from app.auth import require_auth, same_secret
 from app.db import get_db
 from app.question_quality import (
+    Points,
     Audit,
     Blueprint,
     Question,
@@ -34,7 +35,7 @@ def training_specification():
     ):
         from app.training_spec import formal_specification
     else:
-        from app.training_spec_v4 import formal_specification
+        from app.training_spec_v5 import formal_specification
     from app.training_sessions import photo_answers_enabled
 
     return {**formal_specification(), "photo_answers_enabled": photo_answers_enabled()}
@@ -124,8 +125,8 @@ def withdraw(question_id: int):
 @router.post("/papers")
 def paper(blueprint: Blueprint, username: str = Depends(require_auth)):
     if (os.environ.get("QUIZ_DEPLOYMENT_PROFILE") == "ustc-exam-ocr-qa"
-            and blueprint.specification != "xiaohan-60q-300pt-v4"):
-        raise HTTPException(409, "QA training requires 60-question specification")
+            and blueprint.specification not in service.spec_v5.PAPERS):
+        raise HTTPException(409, "QA training requires one of the two daily paper specifications")
     return operation(lambda c, u: service.create_paper(c, u, blueprint), username)
 
 
@@ -239,7 +240,7 @@ class Grade(StrictModel):
     concept_errors: list[str] | None = Field(default=None, max_length=30)
     imprecisions: list[str] | None = Field(default=None, max_length=30)
     suggestions: list[str] | None = Field(default=None, max_length=30)
-    criterion_points: list[StrictInt] = Field(min_length=1, max_length=50)
+    criterion_points: list[Points] = Field(min_length=1, max_length=50)
     feedback: str = Field(min_length=1, max_length=5000)
     reviewer: str = Field(min_length=1, max_length=200)
 
@@ -934,7 +935,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
             "training": [
                 {
                     **r,
-                    "mode": "reviewed_60" if r["specification"] in ("xiaohan-60q-150pt-v2", "xiaohan-60q-300pt-v4") else "reviewed_28",
+                    "mode": "reviewed_60" if r["specification"] in service.SPEC_MODULES else "reviewed_28",
                     "score": None if r["pending"] else r["graded_points"],
                 }
                 for r in recent

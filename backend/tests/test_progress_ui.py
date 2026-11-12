@@ -28,7 +28,7 @@ def test_the_page_asks_for_login_then_shows_ten_buckets_without_horizontal_scrol
     page.locator("[data-subject=cell_biology]").click()
     expect(page.locator("#bank .row:visible")).to_have_count(5)
     expect(page.locator("#bank .group:visible .name").first).to_have_text("单选")
-    expect(page.locator("#paper-main")).to_contain_text("还差 60 题")
+    expect(page.locator("#paper-main")).to_contain_text("还差 74 题")
     expect(page.locator("#worker")).to_have_text("没有记录")
     expect(page.locator("#worker-note")).to_contain_text("还没有留下运行记录")
     expect(page.locator("#progress-view .subbar h1")).to_have_text("出题进度")
@@ -62,7 +62,7 @@ def test_history_is_folded_reasons_are_chinese_and_codes_hide_in_details(live_ap
                 (f"gpt-{n}", uid, Jsonb({"subject": "biochemistry", "question_type": "term", "max_points": 4}), code))
         conn.execute(
             "INSERT INTO ai_jobs(job_key,user_id,kind,state,settings_snapshot,payload,error_code,result) VALUES ('now-bad',%s,'generation','blocked','{}',%s,'invalid_or_uncertain_result',%s)",
-            (uid, Jsonb({"subject": "biochemistry", "question_type": "term", "max_points": 6}),
+            (uid, Jsonb({"subject": "biochemistry", "question_type": "term", "max_points": 5}),
              Jsonb({"dispatch_failure": {"code": "output_schema_violation", "errors": [{"field": "rubric", "reason": "rubric_points_mismatch"}]}})))
     page.goto(base + "/training#/progress")
     expect(page.locator("#legacy")).to_be_visible()

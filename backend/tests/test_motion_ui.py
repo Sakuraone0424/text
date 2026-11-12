@@ -15,11 +15,16 @@ SHOTS = Path(os.environ.get("SHOT_DIR", "/tmp/claude-0/shots"))
 FORBIDDEN = {"width", "height", "top", "left", "right", "bottom", "margin", "marginTop", "marginLeft", "padding", "fontSize", "inset"}
 
 FULL = {**SHORT_BANK, "has_data": True, "streak": {"current": 1, "longest": 1},
-        "last7": {"papers": 1, "avg_rate": 0.62, "avg_points": 187.0, "max_points": 300, "delta_points": None},
+        "last7": {"papers": 1, "avg_rate": 0.62, "avg_points": 187.0, "max_points": 150, "delta_points": None},
+        "last7_by_kind": {"objective": {"papers": 1, "avg_rate": 0.62, "avg_points": 187.0, "max_points": 150, "delta_points": None},
+                          "subjective": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None},
+                          "mixed": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None}},
         "objective_rate": 0.71, "subjective_rate": 0.4,
         "weak_chapters": [{"subject": "biochemistry", "chapter": "糖代谢", "rate": 0.3, "answers": 6}],
         "tomorrow": {"ready": 60, "needed": 60, "missing": 0, "complete": True, "eta_at": None, "eta_hours": None, "eta_state": "done", "per_hour": 0}}
 GRADING = {**FULL, "last7": {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None},
+           "last7_by_kind": {k: {"papers": 0, "avg_rate": None, "avg_points": None, "max_points": None, "delta_points": None} for k in ("objective", "subjective", "mixed")},
+           "pending_by_kind": {"objective": 1},
            "objective_rate": 0.66, "subjective_rate": None, "pending_papers": 1}
 
 
@@ -142,7 +147,7 @@ def test_with_reduced_motion_everything_is_instant(engine, live_app):
     page.evaluate("document.getElementById('question-dialog').showModal(); document.getElementById('question-dialog').close()")
     assert page.evaluate("window.__anims.length") == 0                           # nothing was animated at all
     # a control's transitions are effectively instant, the skeleton sweep is gone
-    assert page.evaluate("parseFloat(getComputedStyle(document.querySelector('#prepare')).transitionDuration) * 1000") <= 0.02
+    assert page.evaluate("parseFloat(getComputedStyle(document.querySelector('#prepare-objective')).transitionDuration) * 1000") <= 0.02
     # a number does not roll: it is final at once
     final = page.evaluate("""() => { const n = document.createElement('span'); document.body.append(n); Motion.num(n, 187); return n.textContent; }""")
     assert final == "187"
@@ -171,10 +176,10 @@ def test_numbers_roll_from_zero_the_first_time_and_from_the_old_value_afterwards
 
 def test_the_home_numbers_roll_in_once_and_a_refresh_does_not_start_from_zero(engine, live_app):
     page, _ = start(engine, live_app)
-    expect(page.locator("#stat-avg")).to_have_text("187")
-    assert page.locator("#stat-avg").get_attribute("data-roll-value") == "187"
+    expect(page.locator("#stat-avg-objective")).to_have_text("187")
+    assert page.locator("#stat-avg-objective").get_attribute("data-roll-value") == "187"
     page.evaluate("Insights.loadHome()")
-    values = page.evaluate("""() => new Promise((resolve) => { const out = []; const n = document.getElementById('stat-avg');
+    values = page.evaluate("""() => new Promise((resolve) => { const out = []; const n = document.getElementById('stat-avg-objective');
         const t = setInterval(() => out.push(n.textContent), 16); setTimeout(() => { clearInterval(t); resolve(out); }, 400); })""")
     assert all(v == "187" for v in values)                                      # the same value: no roll at all
     page.close()
@@ -234,47 +239,48 @@ def test_the_skeleton_has_a_light_sweep_that_loops(engine, live_app):
 def test_the_start_button_is_not_clickable_while_the_state_loads(engine, live_app):
     # today's paper and the overview both answer late: until then the state is unknown
     page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 4000], "/v2/papers": [None, 4000]})
-    button = page.locator("#prepare")
+    button = page.locator("#prepare-objective")
     assert button.is_disabled() and button.get_attribute("data-loading") == "1"      # a grey placeholder, not a primary button
-    expect(page.locator("#paper-state")).not_to_have_text("已就绪")
+    expect(page.locator("#paper-state-objective")).not_to_have_text("已就绪")
     expect(button).to_be_enabled(timeout=12000)                                       # real state arrives: ready
     assert button.get_attribute("data-loading") is None
-    expect(page.locator("#paper-state")).to_have_text("已就绪")
+    expect(page.locator("#paper-state-objective")).to_have_text("已就绪")
     page.close()
 
 
 def test_the_start_button_stays_disabled_when_the_bank_is_short(engine, live_app):
     page, _ = start(engine, live_app, routes={"/v2/stats/overview": SHORT_BANK})
-    expect(page.locator("#paper-state")).to_have_text("题库准备中")
-    assert page.locator("#prepare").is_disabled() and page.locator("#prepare").get_attribute("data-loading") is None
+    expect(page.locator("#paper-state-objective")).to_have_text("题库准备中")
+    assert page.locator("#prepare-objective").is_disabled() and page.locator("#prepare-objective").get_attribute("data-loading") is None
     page.close()
 
 
 def test_stat_cards_keep_their_numbers_while_refreshing(engine, live_app):
     page, _ = start(engine, live_app)
-    expect(page.locator("#stat-avg")).to_have_text("187")
+    expect(page.locator("#stat-avg-objective")).to_have_text("187")
     page.evaluate("window.__routes['/v2/stats/overview'] = [window.__routes['/v2/stats/overview'], 4000]")      # the next answer is slow
     page.evaluate("Insights.loadHome()")
     page.wait_for_timeout(300)
-    assert page.locator("#stat-avg").inner_text() == "187" and page.locator("#stat-objective").inner_text() == "71%"
-    for sel in ("#stat-avg-note", "#stat-objective-note", "#stat-subjective-note"):
+    assert page.locator("#stat-avg-objective").inner_text() == "187" and page.locator("#stat-objective").inner_text() == "71%"
+    for sel in ("#stat-avg-objective-note", "#stat-objective-note", "#stat-subjective-note"):
         assert "做完首套后显示" not in page.locator(sel).inner_text()
     page.close()
 
 
 def test_a_paper_still_being_graded_is_not_shown_as_no_data(engine, live_app):
     page, _ = start(engine, live_app, routes={"/v2/stats/overview": GRADING})
-    expect(page.locator("#stat-avg")).to_have_text("判分中")
-    expect(page.locator("#stat-avg-note")).to_have_text("判分完成后显示")
+    expect(page.locator("#stat-avg-objective")).to_have_text("判分中")
+    expect(page.locator("#stat-avg-objective-note")).to_have_text("判分完成后显示")
     expect(page.locator("#stat-objective")).to_have_text("66%")                      # the objective answers are already marked
-    assert "做完首套后显示" not in page.locator("#home-view").inner_text()
+    for sel in ("#stat-avg-objective-note", "#stat-objective-note"):
+        assert "做完首套后显示" not in page.locator(sel).inner_text()
     page.close()
 
 
 def test_the_first_visit_without_a_kept_copy_shows_placeholders_not_empty_sentences(engine, live_app):
     page, _ = start(engine, live_app, routes={"/v2/stats/overview": [FULL, 4000]})
     page.wait_for_selector('#home-view[data-loading="1"]', timeout=3000)
-    assert page.evaluate("getComputedStyle(document.getElementById('stat-avg')).color") in ("rgba(0, 0, 0, 0)", "transparent")
+    assert page.evaluate("getComputedStyle(document.getElementById('stat-avg-objective')).color") in ("rgba(0, 0, 0, 0)", "transparent")
     expect(page.locator("#home-view")).not_to_have_attribute("data-loading", "1", timeout=12000)
     page.close()
 
@@ -295,7 +301,7 @@ def chromium_only(engine):
 
 def test_pull_to_refresh_feels_like_ios_and_keeps_the_data(engine, live_app, chromium_only):
     page, errors = start(engine, live_app, routes={"/v2/stats/overview": FULL})
-    expect(page.locator("#stat-avg")).to_have_text("187")
+    expect(page.locator("#stat-avg-objective")).to_have_text("187")
     page.evaluate("window.__routes['/v2/stats/overview'] = [window.__routes['/v2/stats/overview'], 4000]")       # a slow refresh
     touch(page, "touchStart", 200)
     moved = []
@@ -317,7 +323,7 @@ def test_pull_to_refresh_feels_like_ios_and_keeps_the_data(engine, live_app, chr
         return { dotBottom: d.bottom, labelTop: l.top, dotCentre: d.left + d.width / 2, screen: innerWidth / 2 }; }""")
     assert boxes["labelTop"] >= boxes["dotBottom"] - 0.5 and abs(boxes["dotCentre"] - boxes["screen"]) < 2, boxes
     assert not page.evaluate("document.getElementById('motion-topline')?.classList.contains('on') || false")
-    assert page.locator("#stat-avg").inner_text() == "187"                         # the old data stays on screen
+    assert page.locator("#stat-avg-objective").inner_text() == "187"                         # the old data stays on screen
     assert 30 < page.evaluate("new DOMMatrix(getComputedStyle(document.getElementById('home-view')).transform).m42") < 70   # resting spot
     assert "更新中" not in page.locator("#home-view").inner_text() and page.locator(".pull-hint").count() == 0
     page.wait_for_function("document.querySelectorAll('.ptr.spin').length === 0", timeout=12000)

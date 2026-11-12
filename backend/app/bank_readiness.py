@@ -5,7 +5,7 @@ questions can be counted. These totals are an UPPER BOUND: final selection
 additionally filters previously seen stems, duplicate/cross-answer cues, FSRS
 policy and within-paper coverage. Never promise a whole paper from these counts.
 """
-from app.training_spec_v4 import SUBJECTS, COUNTS, POINTS
+from app.training_spec_v5 import SUBJECTS, COUNTS, POINTS
 from app.source_policy import pinned_science_evidence
 
 
@@ -74,7 +74,7 @@ def report(conn, user_id):
     from app.exam_style_readiness import report as past_exam_style_report
     past_exam_style = past_exam_style_report(conn)
     return {
-        "specification": "xiaohan-60q-300pt-v4",
+        "specification": "xiaohan-obj-150-v5+xiaohan-subj-150-v5",
         "genuine_past_exam_style": {
             "ready_for_same_type_style": past_exam_style["ready_for_same_type_style"],
             "missing_same_type_style": past_exam_style["missing_same_type_style"],

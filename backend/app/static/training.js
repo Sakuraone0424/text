@@ -164,11 +164,12 @@ $("login").onsubmit = async (e) => {
     status(e.status === 401 ? "密码不正确，请重新输入。" : e.message);
   }
 };
-async function prepare(stay = false) {
+async function prepare(stay = false, kind = "objective") {
   if (startup) await startup;
   await identity();
   const saved = cachedPaper(username);
-  if (saved) {
+  // the cached paper is only reused for the same kind of paper: the objective and the subjective paper are separate papers
+  if (saved && (saved.paper.kind || "mixed") === kind) {
     try {
       paper = await api(`/v2/papers/${saved.paper.paper_id}`);
       serverConfirmed = true;
@@ -180,12 +181,16 @@ async function prepare(stay = false) {
     }
     return;
   }
-  const specification = await api("/v2/training-specification");
+  const offered = await api("/v2/training-specification");
+  // the isolated legacy test fixture answers with one old paper's specification instead of the two daily papers
+  const specification = offered.papers ? offered.papers.find((p) => p.kind === kind) : offered;
+  if (!specification) throw new Error("服务端没有这套卷子的规格。");
   paper = await api("/v2/papers", {
     method: "POST",
     body: JSON.stringify({
       specification: specification.specification,
       quotas: specification.quotas,
+      ...(specification.points_by_type && offered.papers ? { points: specification.points_by_type, duration_seconds: specification.duration_seconds } : {}),
     }),
   });
   serverConfirmed = true;
@@ -306,8 +311,24 @@ async function restore(show = true) {
   }
   persist();
 }
+// Make another paper (the other kind of today's papers, or an earlier one) the one on the exam page. What was typed into the
+// paper that is open is saved first; its clock keeps running on the server, independent of this one.
+async function openPaper(paperId, show = true) {
+  if (startup) await startup;
+  await identity();
+  if (paper?.paper_id === paperId) {
+    if (show) window.TrainingUI?.showView("exam");
+    return;
+  }
+  if (paper && paper.timing?.status === "in_progress") await flush();
+  paper = await api(`/v2/papers/${paperId}`);
+  serverConfirmed = true;
+  sessionStorage.removeItem("quiz-v2-auth-blocked");
+  await restore(show);
+}
 window.TodayPaper = {
-  prepare: () => prepare(true).catch((e) => status(e.message)),   // prepares today's paper and stays on the page
+  prepare: (kind) => prepare(true, kind).catch((e) => status(e.message)),   // prepares today's paper of that kind and stays on the page
+  open: (paperId, show) => openPaper(paperId, show).catch((e) => status(e.message)),
   start: () => $("start").click(),
   review: (items) => reviewSession(items),
 };
@@ -326,7 +347,7 @@ $("start").onclick = async () => {
     serverConfirmed = true;
     $("start-dialog")?.close();
     await restore();
-    status("计时已开始。答题自动保存；上传图片也计入60分钟。");
+    status(`计时已开始。答题自动保存；上传图片也计入${Math.round((paper.duration_seconds || 3600) / 60)}分钟。`);
   } catch (e) {
     status(e.message);
   } finally {
@@ -1131,9 +1152,11 @@ function cachedPaper(user, paperId = null) {
     if (
       !Number.isSafeInteger(p.paper_id) ||
       p.paper_id <= 0 ||
-      ![28, 60].includes(p.count) ||
+      ![14, 28, 60].includes(p.count) ||
       ![150, 300].includes(p.max_points) ||
-      p.duration_seconds !== 3600 ||
+      !Number.isSafeInteger(p.duration_seconds) ||
+      p.duration_seconds < 60 ||
+      p.duration_seconds > 14400 ||
       !["not_started", "in_progress", "submitted"].includes(t?.status) ||
       !Number.isSafeInteger(saved.version) ||
       saved.version < 0 ||
@@ -1827,39 +1850,71 @@ $("history").onclick = async () => {
     // a mini trend on top (one handed-in paper is enough; a paper still being graded counts with its objective part)
     await window.Insights?.historyChart($("learning"));
     const names = { biochemistry: "生化", cell_biology: "细胞" };
+    // filter by kind of paper (客观 / 主观 / 旧版混合卷); the cards always say which kind they are
+    const filter = element("div", undefined, $("learning"));
+    filter.className = "chips history-filter";
+    filter.setAttribute("role", "group");
+    filter.setAttribute("aria-label", "按卷型筛选");
     const list = element("div", undefined, $("learning"));
     list.className = "history-list";
-    if (!cards.papers.length) element("p", "还没有交过的试卷。交卷后会出现在这里。", list).className = "note";
-    for (const item of cards.papers) {
-      // the whole card is the way into the paper's review; no separate button
-      const card = element("a", undefined, list);
-      card.className = "card history-card tappable";
-      card.href = "#/review/p" + item.paper_id;
-      const top = element("div", undefined, card);
-      top.className = "hc-top";
-      element("span", item.date.slice(5).replace("-", " 月 ") + " 日", top).className = "hc-date";
-      if (item.spec === "xiaohan-150-60-v1") element("span", "28 题 · 旧版", top).className = "pill";
-      const score = element("p", undefined, card);
-      score.className = "hc-score";
-      if (item.graded) {
-        element("strong", String(item.points), score);
-        element("span", ` / ${item.max_points} 分`, score);
-      } else {
-        element("strong", String(item.objective_points), score);
-        element("span", ` / ${item.objective_max} 分 · 客观题`, score);
-        element("span", "主观题判分中", score).className = "pill hc-pending";
+    let chosen = "";
+    const drawFilter = () => {
+      filter.replaceChildren();
+      const options = [["", "全部", cards.papers.length], ...(cards.kinds || []).filter((k) => k.count).map((k) => [k.kind, k.label, k.count])];
+      for (const [value, label, count] of options) {
+        const chip = element("button", `${label} ${count}`, filter);
+        chip.type = "button";
+        chip.className = "chip" + (chosen === value ? " active" : "");
+        chip.dataset.kind = value;
+        chip.setAttribute("aria-pressed", String(chosen === value));
+        chip.onclick = () => {
+          chosen = value;
+          drawFilter();
+          drawList();
+        };
       }
-      const meta = element("p", undefined, card);
-      meta.className = "hc-meta";
-      if (item.graded) {
-        const parts = Object.entries(item.subjects).map(([sub, v]) => `${names[sub] || sub} ${v.points}/${v.max}`);
-        if (parts.length) element("span", parts.join(" · "), meta);
+    };
+    const drawList = () => {
+      list.replaceChildren();
+      const shown = cards.papers.filter((item) => !chosen || item.kind === chosen);
+      if (!shown.length) element("p", cards.papers.length ? "这一类卷子还没有交过的记录。" : "还没有交过的试卷。交卷后会出现在这里。", list).className = "note";
+      for (const item of shown) {
+        // the whole card is the way into the paper's review; no separate button
+        const card = element("a", undefined, list);
+        card.className = "card history-card tappable";
+        card.href = "#/review/p" + item.paper_id;
+        card.dataset.kind = item.kind;
+        const top = element("div", undefined, card);
+        top.className = "hc-top";
+        element("span", item.date.slice(5).replace("-", " 月 ") + " 日", top).className = "hc-date";
+        element("span", item.kind_label + (item.spec === "xiaohan-150-60-v1" ? " · 28 题" : ""), top).className = "pill hc-kind";
+        const score = element("p", undefined, card);
+        score.className = "hc-score";
+        if (item.graded) {
+          element("strong", String(item.points), score);
+          element("span", ` / ${item.max_points} 分`, score);
+        } else if (item.objective_max) {
+          element("strong", String(item.objective_points), score);
+          element("span", ` / ${item.objective_max} 分 · 客观题`, score);
+          element("span", "主观题判分中", score).className = "pill hc-pending";
+        } else {
+          element("strong", "—", score);
+          element("span", "判分中", score).className = "pill hc-pending";
+        }
+        const meta = element("p", undefined, card);
+        meta.className = "hc-meta";
+        if (item.graded) {
+          const parts = Object.entries(item.subjects).map(([sub, v]) => `${names[sub] || sub} ${v.points}/${v.max}`);
+          if (parts.length) element("span", parts.join(" · "), meta);
+        }
+        if (item.seconds) element("span", `用时 ${Math.round(item.seconds / 60)} 分钟`, meta);
+        element("span", `错题 ${item.mistakes}`, meta);
+        if (item.consolidate) element("span", `待巩固 ${item.consolidate}`, meta);
+        element("span", "›", card).className = "chev";
       }
-      if (item.seconds) element("span", `用时 ${Math.round(item.seconds / 60)} 分钟`, meta);
-      element("span", `错题 ${item.mistakes}`, meta);
-      if (item.consolidate) element("span", `待巩固 ${item.consolidate}`, meta);
-      element("span", "›", card).className = "chev";
-    }
+    };
+    drawFilter();
+    drawList();
     for (const item of data.legacy) {
       const article = element(
         "article",

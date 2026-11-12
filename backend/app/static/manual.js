@@ -61,7 +61,7 @@
       const seg = h("div", undefined, line, "segmented manual-seg");
       seg.setAttribute("role", "group");
       const buttons = [];
-      const kinds = c.points > 1 ? [["none", "不得分", 0], ["part", "部分", Math.floor(c.points / 2)], ["full", "得分", c.points]] : [["none", "不得分", 0], ["full", "得分", c.points]];
+      const kinds = c.points > 1 ? [["none", "不得分", 0], ["part", "部分", Math.floor(c.points) / 2], ["full", "得分", c.points]] : [["none", "不得分", 0], ["full", "得分", c.points]];
       kinds.forEach(([kind, text, to]) => {
         const b = h("button", text, seg);
         b.type = "button";
