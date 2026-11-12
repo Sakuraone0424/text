@@ -557,7 +557,7 @@ def test_client_dictionary_order_cannot_change_the_seeded_draw(
 def test_one_formal_interface_and_no_legacy_static_resources(client):
     root = client.get("/")
     assert root.status_code == 200 and "肖涵 · 中科大考研智能答题" in root.text
-    assert "唯一新版训练规格：60题" in root.text and "/static/app.js" not in root.text
+    assert "客观题卷" in root.text and "主观题卷" in root.text and "/static/app.js" not in root.text
     assert client.get("/static/app.js").status_code == 404
     assert client.get("/static/index.html").status_code == 404
     assert (
@@ -592,10 +592,11 @@ def test_public_contract_exposes_only_v2_training_and_schema_readiness(client, m
     assert "/v2/papers" in schema["paths"] and "/history" in schema["paths"]
     health = client.get("/db/health").json()
     assert health["formal_training"] == {
-        "specification": "xiaohan-60q-300pt-v4",
-        "questions": 60,
-        "points": 300,
-        "duration_seconds": 3600,
+        "specification": "xiaohan-obj-150-v5+xiaohan-subj-150-v5",
+        "papers": [
+            {"specification": "xiaohan-obj-150-v5", "questions": 60, "points": 150, "duration_seconds": 3600},
+            {"specification": "xiaohan-subj-150-v5", "questions": 14, "points": 150, "duration_seconds": 3600},
+        ],
     }
     from migrate import SQL_DIR
     assert health["migration_count"] == len(list(SQL_DIR.glob("*.sql")))

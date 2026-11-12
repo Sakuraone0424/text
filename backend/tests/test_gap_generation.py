@@ -232,9 +232,9 @@ def test_bucket_gap_deducts_work_already_on_its_way(db, corpus, setup_ai):
     pei.import_items(db)
     gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
     # an imported past-exam single choice is work on its way now too (past-exam singles come first, AI singles fill the rest)
-    assert gaps[("biochemistry", "single_choice")] == 20 - 1
+    assert gaps[("biochemistry", "single_choice")] == 30 - 1
     assert gaps[("biochemistry", "term")] == 8  # an imported past-exam term is throttled (20% cap): it no longer holds back a new one
-    assert gaps[("biochemistry", "short_answer")] == 2 - 1
+    assert gaps[("biochemistry", "short_answer")] == 4 - 1
     job = gen.plan_gap(db, setup_ai)
     after = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
     key = (job["payload"]["subject"], job["payload"]["question_type"])
@@ -261,7 +261,7 @@ def test_bank_target_unset_or_invalid_keeps_the_two_day_reserve(db, corpus, setu
         else:
             monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", value)
         gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
-        assert gaps[("biochemistry", "single_choice")] == 20
+        assert gaps[("biochemistry", "single_choice")] == 30
 
 
 def test_a_stocked_bucket_is_not_fed_more_past_exam_work(db, corpus, setup_ai, monkeypatch):
@@ -297,8 +297,8 @@ def choice_response(job, *, drop=(), invent=None, answer="A"):
     question = dict(
         subject="biochemistry", question_type="single_choice",
         stem="下列哪种酶负责封闭相邻冈崎片段之间的缺口？", options=options, answer=answer,
-        accepted_answers=[], blanks=[], difficulty="core", max_points=4, knowledge_tags=[],
-        rubric=[dict(description="选出DNA连接酶得4分", points=4, knowledge_tags=[])],
+        accepted_answers=[], blanks=[], difficulty="core", max_points=3, knowledge_tags=[],
+        rubric=[dict(description="选出DNA连接酶得3分", points=3, knowledge_tags=[])],
         evidence=[pei.evidence_record(unit, BOOK, p["anchor_exact_excerpt"])],
     )
     return dict(
@@ -452,13 +452,13 @@ def test_incomplete_option_checks_are_a_review_format_problem_not_a_failed_quest
 # ---- essay (问答) in the 300-point specification ----------------------------
 
 
-def test_an_essay_request_carries_18_points_and_the_four_to_six_point_rule(db, corpus, setup_ai, monkeypatch):
+def test_an_essay_request_carries_25_points_and_the_six_to_eight_point_rule(db, corpus, setup_ai, monkeypatch):
     monkeypatch.setattr(gen, "bucket_gaps", lambda conn, uid: [("biochemistry", "essay", 1)])
     job = gen.plan_gap(db, setup_ai)
     assert job is not None
     p = job["payload"]
-    assert (p["question_type"], p["max_points"]) == ("essay", 18)
-    assert "EXACTLY 18 points" in p["instructions"] and "four to six" in p["instructions"]
+    assert (p["question_type"], p["max_points"]) == ("essay", 25)
+    assert "EXACTLY 25 points" in p["instructions"] and "six to eight" in p["instructions"]
     assert p["style"] and p["style"][0]["source_kind"] == "exam_transcription"  # nearest genuine style: a short answer
 
 

@@ -50,7 +50,7 @@ def test_the_two_day_reserve_is_never_offered_and_only_the_surplus_counts(db, ui
 
 
 def test_a_surplus_in_one_cell_does_not_cover_a_shortage_in_another(db, uid):
-    make(db, "biochemistry", "single_choice", 25)           # 5 spare
+    make(db, "biochemistry", "single_choice", 35)           # 5 spare
     make(db, "cell_biology", "single_choice", 3)            # short: all reserved
     o = practice_center.overview(db, uid)
     assert o["quick"]["available"] == 5 and o["quick"]["short_by"] == 5 and o["quick"]["ready"]       # may start with 5; says it is 5 short of 10
@@ -60,10 +60,10 @@ def test_a_surplus_in_one_cell_does_not_cover_a_shortage_in_another(db, uid):
 
 
 def test_a_practice_set_leaves_the_daily_papers_stock_unchanged_when_only_used_and_surplus_questions_are_taken(db, uid):
-    required = {"single_choice": 10, "fill_blank": 14, "term": 4, "short_answer": 1, "essay": 1}
-    make(db, "biochemistry", "single_choice", 24)           # 4 spare
-    make(db, "biochemistry", "fill_blank", 28)              # no spare
-    make(db, "cell_biology", "single_choice", 20)           # no spare
+    required = dict(auto_generation.COUNTS)
+    make(db, "biochemistry", "single_choice", 34)           # 4 spare
+    make(db, "biochemistry", "fill_blank", 30)              # no spare
+    make(db, "cell_biology", "single_choice", 30)           # no spare
     before = daily_stock(db, uid)
     taken = set()
     for mode, kw in (("quick", {}), ("type", dict(question_type="single_choice")), ("chapter", dict(subject="biochemistry", chapter="第六章 核酸"))):
@@ -83,14 +83,14 @@ def test_a_practice_set_leaves_the_daily_papers_stock_unchanged_when_only_used_a
 
 
 def test_questions_the_learner_already_had_come_first_and_cost_the_stock_nothing(db, uid):
-    ids = make(db, "biochemistry", "single_choice", 20)     # exactly the reserve: no surplus
-    done = paper(db, uid, today(db), [dict(item("biochemistry", "single_choice", 4, 4, "6 核酸"), question_id=ids[0]),
-                                      dict(item("biochemistry", "single_choice", 4, 0, "6 核酸"), question_id=ids[1])], when=at(today(db)))
+    ids = make(db, "biochemistry", "single_choice", 30)     # exactly the reserve: no surplus
+    done = paper(db, uid, today(db), [dict(item("biochemistry", "single_choice", 3, 3, "6 核酸"), question_id=ids[0]),
+                                      dict(item("biochemistry", "single_choice", 3, 0, "6 核酸"), question_id=ids[1])], when=at(today(db)))
     assert done["question_ids"] == ids[:2]
     stock_before = daily_stock(db, uid)[("biochemistry", "single_choice")]
     o = practice_center.overview(db, uid)
     cell = {t["value"]: t for t in o["type"]["types"]}["single_choice"]
-    assert cell["used"] == 2 and cell["new"] == 0 and cell["available"] == 2         # the two he had are practisable; the 18 left are the reserve
+    assert cell["used"] == 2 and cell["new"] == 0 and cell["available"] == 2         # the two he had are practisable; the 28 left are the reserve
     s = practice_center.start(db, uid, "type", question_type="single_choice")
     assert {q["id"] for q in s["questions"]} == set(ids[:2])
     for q in s["questions"]:
@@ -99,7 +99,7 @@ def test_questions_the_learner_already_had_come_first_and_cost_the_stock_nothing
 
 
 def test_a_paper_not_handed_in_does_not_leak_its_questions_into_practice(db, uid):
-    ids = make(db, "biochemistry", "single_choice", 22)     # 1 spare (the prepared one is neither used nor stock)
+    ids = make(db, "biochemistry", "single_choice", 32)     # 1 spare (the prepared one is neither used nor stock)
     content = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (ids[0],)).fetchone()["content"]
     from psycopg.types.json import Jsonb
 
@@ -129,8 +129,8 @@ def test_every_type_can_be_chosen_and_a_subjective_one_waits_for_the_ai(db, uid)
 
 
 def test_weak_practice_says_why_and_starts_with_fewer_than_ten(db, uid):
-    make(db, "biochemistry", "single_choice", 26)           # 6 spare, all in 第六章 核酸
-    paper(db, uid, today(db), [item("biochemistry", "single_choice", 4, 0, "6 核酸") for _ in range(4)], when=at(today(db)))
+    make(db, "biochemistry", "single_choice", 36)           # 6 spare, all in 第六章 核酸
+    paper(db, uid, today(db), [item("biochemistry", "single_choice", 3, 0, "6 核酸") for _ in range(4)], when=at(today(db)))
     o = practice_center.overview(db, uid)
     assert o["weak"]["ready"] and o["weak"]["available"] == 6 and o["weak"]["short_by"] == 4 and o["weak"]["size"] == 6
     s = practice_center.start(db, uid, "weak")
@@ -138,7 +138,7 @@ def test_weak_practice_says_why_and_starts_with_fewer_than_ten(db, uid):
 
 
 def test_weak_practice_with_nothing_to_practise_gives_a_specific_reason(db, uid):
-    paper(db, uid, today(db), [item("biochemistry", "single_choice", 4, 0, "6 核酸") for _ in range(4)], when=at(today(db)))
+    paper(db, uid, today(db), [item("biochemistry", "single_choice", 3, 0, "6 核酸") for _ in range(4)], when=at(today(db)))
     o = practice_center.overview(db, uid)
     assert not o["weak"]["ready"] and "还差 10 道" in o["weak"]["reason"] and "题库准备中" not in o["weak"]["reason"]
     with pytest.raises(ValueError, match="no_practice_questions"):
@@ -146,7 +146,7 @@ def test_weak_practice_with_nothing_to_practise_gives_a_specific_reason(db, uid)
 
 
 def test_missed_practice_questions_can_be_redone_and_have_a_review(db, uid):
-    make(db, "biochemistry", "single_choice", 26)
+    make(db, "biochemistry", "single_choice", 36)
     s = practice_center.start(db, uid, "quick", size=6)
     wrong = s["questions"][0]
     practice.answer(db, uid, s["set_id"], wrong["id"], {"text": "B"}, 5)
@@ -189,18 +189,18 @@ def test_a_subjective_practice_answer_is_graded_like_a_paper_answer_and_a_low_sc
 def test_the_paper_is_ready_only_when_every_cell_has_a_papers_worth_of_new_questions(db, uid):
     from app import learning_stats
 
-    required = {"single_choice": 10, "fill_blank": 14, "term": 4, "short_answer": 1, "essay": 1}
+    required = dict(auto_generation.COUNTS)
     for subject in ("biochemistry", "cell_biology"):
         for kind, n in required.items():
             make(db, subject, kind, n if (subject, kind) != ("cell_biology", "single_choice") else 3, chapter="6 核酸" if subject == "biochemistry" else "2 膜", prefix="就绪")
     state = learning_stats.tomorrow_ready(db, uid)
-    assert state["complete"] is False and state["missing"] == 7
-    assert state["short_cells"] == [dict(subject="cell_biology", question_type="single_choice", have=3, need=10, missing=7)]
-    make(db, "cell_biology", "single_choice", 7, chapter="2 膜", prefix="补")
+    assert state["complete"] is False and state["missing"] == 12
+    assert state["short_cells"] == [dict(subject="cell_biology", question_type="single_choice", have=3, need=15, missing=12)]
+    make(db, "cell_biology", "single_choice", 12, chapter="2 膜", prefix="补")
     assert learning_stats.tomorrow_ready(db, uid)["complete"] is True
     # a used question does not count: the paper after it is short again
     ids = [r["id"] for r in db.execute("SELECT id FROM reviewed_questions WHERE content->>'subject'='cell_biology' AND content->>'question_type'='single_choice' ORDER BY id").fetchall()]
-    paper(db, uid, today(db), [dict(item("cell_biology", "single_choice", 4, 4, "2 膜"), question_id=ids[0])], when=at(today(db)))
+    paper(db, uid, today(db), [dict(item("cell_biology", "single_choice", 3, 3, "2 膜"), question_id=ids[0])], when=at(today(db)))
     again = learning_stats.tomorrow_ready(db, uid)
     assert again["complete"] is False and again["short_cells"][0]["missing"] == 1
 

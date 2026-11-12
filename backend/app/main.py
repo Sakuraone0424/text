@@ -172,7 +172,7 @@ CORE_TABLES = (
 def business_gaps():
     """What is missing for the app to do its job (empty list = ready): core tables, and for the CURRENT specification at
     least one paper's worth of published, verified questions in every subject x question type."""
-    from app import training_spec_v4 as spec
+    from app import training_spec_v5 as spec
 
     gaps = []
     with get_db() as conn:
@@ -212,23 +212,19 @@ def _database_status(business):
             required = {p.name for p in (BASE_DIR.parent / "sql").glob("*.sql")}
             if not required.issubset(applied):
                 raise HTTPException(503, "V2 schema migrations are incomplete")
-        from app.automation import selected_daily_blueprint
-        from app import training_spec_v4 as current, training_spec_v2 as retired_spec
+        from app.automation import daily_blueprints
+        from app import training_spec_v5 as current, training_spec_v4 as retired_spec, training_spec_v2 as older_spec
 
         missing = business_gaps() if business else []
         if missing:
             # /health (the platform's check) stays green; this one says what the business still lacks
             raise HTTPException(503, detail={"code": "not_ready_for_training", "missing": missing})
 
-        outdated = os.environ.get("QUIZ_DAILY_SPECIFICATION") == retired_spec.SPECIFICATION
+        outdated = os.environ.get("QUIZ_DAILY_SPECIFICATION") in (retired_spec.SPECIFICATION, older_spec.SPECIFICATION)
         try:
-            spec = selected_daily_blueprint(os.environ).specification
+            spec = "+".join(b.specification for b in daily_blueprints(os.environ))
         except ValueError:
-            if not outdated:
-                raise HTTPException(503, "Unknown QUIZ_DAILY_SPECIFICATION")
-            # The previous ID is still set: keep the deployment healthy while the variable is
-            # switched, but say so; no new paper is prepared under it.
-            spec = current.SPECIFICATION
+            raise HTTPException(503, "Unknown QUIZ_DAILY_SPECIFICATION")
         return {
             "status": "healthy",
             "database": "connected",
@@ -237,9 +233,10 @@ def _database_status(business):
             **({"specification_env_outdated": True} if outdated else {}),
             "formal_training": {
                 "specification": spec,
-                "questions": current.TOTAL_QUESTIONS,
-                "points": current.TOTAL_POINTS,
-                "duration_seconds": current.DURATION_SECONDS,
+                "papers": [
+                    {"specification": m.SPECIFICATION, "questions": m.TOTAL_QUESTIONS, "points": m.TOTAL_POINTS, "duration_seconds": m.DURATION_SECONDS}
+                    for m in current.PAPERS.values()
+                ],
             },
         }
     except HTTPException:

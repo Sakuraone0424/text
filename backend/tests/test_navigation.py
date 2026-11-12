@@ -30,7 +30,7 @@ def test_every_navigation_stays_in_the_one_document_and_lands_on_the_right_page(
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "standalone", base)
-    expect(page.locator("#stat-avg")).not_to_have_text("—")
+    expect(page.locator("#stat-objective")).not_to_have_text("—")
     page.evaluate(MARK)
     loads = []
     page.on("framenavigated", lambda frame: loads.append(frame.url) if frame == page.main_frame else None)
@@ -100,7 +100,7 @@ def test_a_filter_and_the_scroll_position_survive_leaving_and_coming_back(engine
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base)
-    expect(page.locator("#stat-avg")).not_to_have_text("—")
+    expect(page.locator("#stat-objective")).not_to_have_text("—")
     page.evaluate(MARK)
     page.locator('nav.primary-nav [data-view="profile"]').click()
     page.wait_for_timeout(400)
@@ -124,7 +124,7 @@ def test_a_visited_page_is_shown_from_the_cache_in_under_100_ms(engine, live_app
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "safari", base)
-    expect(page.locator("#stat-avg")).not_to_have_text("—")
+    expect(page.locator("#stat-objective")).not_to_have_text("—")
     for view in ("mistakes", "profile", "home"):        # visit once so the data layer holds a copy
         page.locator(f'nav.primary-nav [data-view="{view}"]').click()
         page.wait_for_timeout(600)

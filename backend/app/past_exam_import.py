@@ -25,7 +25,7 @@ from app.exam_authoring import _MISSING_ASSET, issues as exam_issues
 from app.question_quality import AXES, Question, StrictModel, stem_key
 from app.source_bibliography import from_database as source_bibliography
 from app.source_policy import FILES, current_source_sql, pinned_source_bytes
-from app.training_spec_v4 import POINTS, QUESTION_TYPES
+from app.training_spec_v5 import POINTS, QUESTION_TYPES
 from app.transcript_analysis import STYLE_SOURCE_BLOCKERS, candidates as analyse_exam, is_section_title
 
 ORIGIN_PAST_EXAM = "past_exam"

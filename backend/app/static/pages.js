@@ -47,59 +47,85 @@
   };
 
   /* ------------------------------------------------------------------------------------------------------------------
-     Today's paper: ONE state, painted on both cards (home and practice), so they can never disagree.
+     Today's two papers (客观题卷 and 主观题卷): each has ONE state, painted on both cards (home and practice), so they can never
+     disagree. The two papers are independent: prepared, started, timed and handed in on their own.
      ------------------------------------------------------------------------------------------------------------------ */
+  const PAPERS = ["objective", "subjective"];
+  const PAPER_NAME = { objective: "客观题卷", subjective: "主观题卷" };
+  const PAPER_SPEC = { objective: (m) => `60 题 · 150 分 · ${m} 分钟`, subjective: (m) => `14 题 · 150 分 · ${m} 分钟` };
+  const minutesOf = { objective: 60, subjective: 60 };      // the subjective paper's time limit is configurable: the server's value replaces this
+  const seen = {};                                         // kind -> what the exam page last showed for today's paper of that kind
   let loaded = false;
-  function todayState() {
-    const t = window.TrainingUI?.today?.() || {};
-    const lock = window.Insights?.lockState?.();
-    const mine = window.Insights?.todayPaper?.();
-    if (t.status === "in_progress") return { kind: "continue", label: `继续作答（剩余 ${t.clock && /\d/.test(t.clock) ? t.clock : "--:--"}）`, pill: "正在作答" };
-    if (t.status === "submitted") {
-      const done = mine && mine.points !== undefined && mine.points !== null;
-      return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : mine && mine.objective_max ? `查看成绩（客观题 ${mine.objective_points} / ${mine.objective_max}）` : "查看成绩（判分中）", pill: "已提交", green: true };
+  function setMinutes(papers) {
+    for (const p of papers || []) {
+      const kind = p.kind;
+      if (PAPERS.includes(kind) && p.duration_seconds) minutesOf[kind] = Math.round(p.duration_seconds / 60);
     }
-    if (t.status === "not_started") return { kind: "start", label: "开始（60 分钟）", pill: "尚未开始", green: true };
+    for (const kind of PAPERS) for (const id of ["spec-", "practice-spec-"]) if ($(id + kind)) $(id + kind).textContent = PAPER_SPEC[kind](minutesOf[kind]);
+  }
+  function resetSeen() { for (const kind of PAPERS) delete seen[kind]; }
+  function noteActive() {
+    const t = window.TrainingUI?.today?.() || {};
+    if (t.hasPaper && PAPERS.includes(t.kind)) seen[t.kind] = { status: t.status, paperId: t.paperId };
+  }
+  function cardState(kind) {
+    noteActive();
+    const t = window.TrainingUI?.today?.() || {};
+    const mine = window.Insights?.todayPapers?.()?.[kind];
+    const known = seen[kind] || (mine ? { status: { prepared: "not_started", in_progress: "in_progress", submitted: "submitted" }[mine.state], paperId: mine.paper_id } : null);
+    const active = t.hasPaper && t.kind === kind;
+    const minutes = minutesOf[kind];
+    if (known?.status === "in_progress") {
+      const clock = active && t.clock && /\d/.test(t.clock) ? t.clock : "--:--";
+      return { kind: "continue", label: active ? `继续作答（剩余 ${clock}）` : "继续作答", pill: "正在作答", paperId: known.paperId };
+    }
+    if (known?.status === "submitted") {
+      const done = mine && mine.points !== undefined && mine.points !== null;
+      return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : mine && mine.objective_max ? `查看成绩（客观题 ${mine.objective_points} / ${mine.objective_max}）` : "查看成绩（判分中）", pill: "已提交", green: true, paperId: known.paperId };
+    }
+    if (known?.status === "not_started") return { kind: "start", label: `开始（${minutes} 分钟）`, pill: "尚未开始", green: true, paperId: known.paperId };
     // never "已就绪" before the state is actually known: the bank (no paper yet) or the paper itself (one exists; opening it loads it)
-    if (!loaded || (!lock && !mine)) return { kind: "loading", label: "开始", pill: "状态待载入" };
-    if (!lock) return { kind: "prepare", label: "准备今日试卷", pill: "已就绪" };
+    const lock = window.Insights?.bankFor?.(kind);
+    if (!loaded || !lock) return { kind: "loading", label: "开始", pill: "状态待载入" };
     if (!lock.complete) {
       const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clockText(lock.eta_at)} 可开始` : "，暂不能开始";
       const cells = (lock.short_cells || []).map((c) => `${SHORT[c.subject]}${TYPE[c.question_type]}缺 ${c.missing}`).join("、");
       const missing = (lock.short_cells || []).reduce((n, c) => n + c.missing, 0) || lock.missing;
       return { kind: "short", label: `题库还差 ${missing} 道${when}`, pill: "题库准备中", reason: `每科每个题型都要凑够一张卷子的新题，不会用旧题凑。${cells ? "还差：" + cells + "。" : ""}` };
     }
-    return { kind: "prepare", label: "准备今日试卷", pill: "已就绪" };
+    return { kind: "prepare", label: `准备${PAPER_NAME[kind]}`, pill: "已就绪" };
   }
   function clockText(iso) {
     const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
     const today = new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric" }).format(new Date());
     return (today === `${parts.month}/${parts.day}` ? "" : `${parts.month} 月 ${parts.day} 日 `) + `${parts.hour}:${parts.minute}`;
   }
-  let lastKind = null;
+  let lastKinds = {};
   function paintToday() {
-    const s = todayState();
-    lastKind = s.kind;
-    const pairs = [[$("prepare"), $("paper-state"), $("prepare-note")], [$("practice-today-btn"), $("practice-paper-state"), $("practice-today-note")]];
-    for (const [button, pill, note] of pairs) {
-      if (!button) continue;
-      const off = s.kind === "loading" || s.kind === "short";
-      button.textContent = s.label;
-      button.disabled = off;
-      if (off) button.setAttribute("aria-disabled", "true");
-      else button.removeAttribute("aria-disabled");
-      if (s.kind === "loading") button.setAttribute("data-loading", "1");
-      else button.removeAttribute("data-loading");
-      button.dataset.kind = s.kind;
-      if (pill) {
-        pill.textContent = s.pill;
-        pill.classList.toggle("green-pill", Boolean(s.green));
-      }
-      if (note) {
-        if (!note.dataset.plain) note.dataset.plain = note.textContent;      // the home card's usual line (shown when nothing needs saying)
-        note.textContent = s.reason || (note.id === "prepare-note" ? note.dataset.plain : "");
-        if (note.id === "prepare-note") note.hidden = !(s.reason || s.kind === "prepare");        // the home card's line: the usual hint, or why it cannot start
-        else if (s.reason) note.hidden = false;
+    for (const kind of PAPERS) {
+      const s = cardState(kind);
+      lastKinds[kind] = s.kind;
+      const pairs = [[$("prepare-" + kind), $("paper-state-" + kind), $("prepare-note-" + kind)], [$("practice-today-btn-" + kind), $("practice-paper-state-" + kind), $("practice-today-note-" + kind)]];
+      for (const [button, pill, note] of pairs) {
+        if (!button) continue;
+        const off = s.kind === "loading" || s.kind === "short";
+        button.textContent = s.label;
+        button.disabled = off;
+        if (off) button.setAttribute("aria-disabled", "true");
+        else button.removeAttribute("aria-disabled");
+        if (s.kind === "loading") button.setAttribute("data-loading", "1");
+        else button.removeAttribute("data-loading");
+        button.dataset.kind = s.kind;
+        if (pill) {
+          pill.textContent = s.pill;
+          pill.classList.toggle("green-pill", Boolean(s.green));
+        }
+        if (note) {
+          if (!note.dataset.plain) note.dataset.plain = note.textContent;      // the home card's usual line (shown when nothing needs saying)
+          note.textContent = s.reason || (note.id.startsWith("prepare-note") ? note.dataset.plain : "");
+          if (note.id.startsWith("prepare-note")) note.hidden = !(s.reason || s.kind === "prepare");        // the home card's line: the usual hint, or why it cannot start
+          else if (s.reason) note.hidden = false;
+        }
       }
     }
   }
@@ -107,22 +133,37 @@
     loaded = true;
     paintToday();
   }
-  async function todayClick() {
-    const s = todayState();
+  // make the paper of this kind the one on the exam page (the other one keeps running on its own clock; its answers are saved first)
+  async function ensureActive(kind, paperId, show) {
+    const t = window.TrainingUI?.today?.() || {};
+    if (t.hasPaper && t.kind === kind) return;
+    if (!paperId) return;
+    await window.TodayPaper?.open(paperId, show);
+  }
+  async function todayClick(kind) {
+    const s = cardState(kind);
     if (s.kind === "prepare") {
-      await window.TodayPaper?.prepare();
+      await window.TodayPaper?.prepare(kind);
       // the paper turned out to be sat already (another device, an earlier visit): carry on with it
-      const now = todayState().kind;
+      const now = cardState(kind).kind;
       if (now === "continue" || now === "result") window.TrainingUI?.showView("exam");
       return undefined;
     }
-    if (s.kind === "start") return $("start-dialog").showModal();
-    if (s.kind === "continue" || s.kind === "result") return window.TrainingUI?.showView("exam");
+    if (s.kind === "start") {
+      await ensureActive(kind, s.paperId, false);
+      return $("start-dialog").showModal();
+    }
+    if (s.kind === "continue" || s.kind === "result") {
+      await ensureActive(kind, s.paperId, true);
+      return window.TrainingUI?.showView("exam");
+    }
     return undefined;
   }
-  setInterval(() => { if (lastKind === "continue") paintToday(); }, 1000);          // the remaining time on the button
-  $("prepare").onclick = todayClick;
-  $("practice-today-btn").onclick = todayClick;
+  setInterval(() => { if (Object.values(lastKinds).includes("continue")) paintToday(); }, 1000);          // the remaining time on the button
+  for (const kind of PAPERS) {
+    $("prepare-" + kind).onclick = () => todayClick(kind);
+    $("practice-today-btn-" + kind).onclick = () => todayClick(kind);
+  }
   $("cancel-start")?.addEventListener("click", () => $("start-dialog").close());
 
   /* ------------------------------------------------------------------------------------------------------------------
@@ -614,5 +655,5 @@
     else if (name === "review" && /^[ps]\d+$/.test(param || "")) loadReview(param);
     else if (name === "drill") window.Drill?.show(param);
   }
-  window.Pages = { show, paintToday, todayLoaded, loadPractice, loadMistakes, loadReview, todayState };
+  window.Pages = { show, paintToday, todayLoaded, resetSeen, setMinutes, loadPractice, loadMistakes, loadReview, cardState };
 })();

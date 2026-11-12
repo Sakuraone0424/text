@@ -223,7 +223,7 @@ def test_a_quote_from_outside_the_request_is_not_admitted_but_gets_one_repair(db
     assert p["errors"][0]["code"] == "evidence_quote_unmatched" and p["repair_of_job"] == job["id"]
     assert p["evidence"][0]["text"] == job["payload"]["evidence"][0]["text"]  # the paragraphs it must quote from
     assert len(json.dumps(p, ensure_ascii=False).encode()) <= 24000
-    assert (p["subject"], p["question_type"], p["max_points"]) == (job["payload"]["subject"], job["payload"]["question_type"], 4)
+    assert (p["subject"], p["question_type"], p["max_points"]) == (job["payload"]["subject"], job["payload"]["question_type"], 3)
 
 
 def accept_repair_with(db, repair, mutate=None):
@@ -258,7 +258,7 @@ def test_a_repair_that_still_fails_is_thrown_away_and_says_so(db, corpus, setup_
 
 
 @pytest.mark.parametrize("mutate,code", [
-    (lambda r, job: r["question"]["rubric"][0].update(points=3), "rubric_points_mismatch"),
+    (lambda r, job: r["question"]["rubric"][0].update(points=2), "rubric_points_mismatch"),
     (lambda r, job: r["question"]["options"].update(B=r["question"]["options"]["C"]), "duplicate_choice_options"),
     (lambda r, job: r["question"].update(answer="E"), "incomplete_choice_or_key"),
 ])
@@ -279,10 +279,10 @@ def test_problems_a_rewrite_cannot_fix_are_still_thrown_away_at_once(db, corpus,
 def test_a_draft_that_is_only_formatted_badly_needs_no_repair_and_no_second_call(db, corpus, setup_ai):
     def sloppy(response, job):
         q = response["question"]
-        q["max_points"] = "4"
+        q["max_points"] = "3"
         q["options"] = {"a.": "A. DNA连接酶", "B": "拓扑异构酶", "C)": "解旋酶", "D": "引发酶"}
         q["answer"] = "选A"
-        q["rubric"][0]["points"] = "4"
+        q["rubric"][0]["points"] = "3"
         q["difficulty"] = "Easy"
         q["accepted_answers"] = ["多余"]
 
@@ -291,7 +291,7 @@ def test_a_draft_that_is_only_formatted_badly_needs_no_repair_and_no_second_call
     fixes = set(job["result"]["normalization"]["fixes"])
     assert {"numbers_to_int", "choice_keys_normalized", "choice_prefix_removed", "answer_letter_normalized", "difficulty_mapped", "removed_accepted_answers"} <= fixes
     q = packets(db)[0]["question_snapshot"]
-    assert q["answer"] == "A" and q["options"]["A"] == "DNA连接酶" and q["max_points"] == 4
+    assert q["answer"] == "A" and q["options"]["A"] == "DNA连接酶" and q["max_points"] == 3
 
 
 # ---- 4. a malformed REVIEW answer is asked for again, once --------------------------------------------------

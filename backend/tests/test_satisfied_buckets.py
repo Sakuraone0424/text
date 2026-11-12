@@ -30,10 +30,10 @@ def state(db, key):
 
 def test_the_threshold_is_the_two_day_reserve(db, setup_ai, stock):
     stock[("biochemistry", "term")] = 8       # target 4 x 2
-    stock[("biochemistry", "short_answer")] = 1
+    stock[("biochemistry", "short_answer")] = 3
     keys = gen.satisfied_keys(db, setup_ai)
     assert "biochemistry|term" in keys and "biochemistry|short_answer" not in keys
-    stock[("biochemistry", "short_answer")] = 2
+    stock[("biochemistry", "short_answer")] = 4
     assert "biochemistry|short_answer" in gen.satisfied_keys(db, setup_ai)
 
 

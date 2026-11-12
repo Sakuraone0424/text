@@ -89,7 +89,7 @@ def test_the_historical_essay_and_the_other_points_are_still_accepted():
         extra = dict(accepted_answers=["结构化参考答案" * 10], stem="填空 ____") if kind == "fill_blank" else {}
         Question.model_validate(question(kind, points, 1, **extra))
     with pytest.raises(ValueError):
-        Question.model_validate(question("term", 5, 1))
+        Question.model_validate(question("term", 7, 1))
 
 
 def test_blueprints_v4_and_v2_both_validate_and_a_wrong_one_does_not():
@@ -105,8 +105,8 @@ def test_blueprints_v4_and_v2_both_validate_and_a_wrong_one_does_not():
 
 
 def test_the_writing_instructions_cover_the_essay_with_its_own_points():
-    text = exam_authoring.instructions("essay", 18)
-    assert "EXACTLY 18 points" in text and "four to six" in text
+    text = exam_authoring.instructions("essay", 25)
+    assert "EXACTLY 25 points" in text and "six to eight" in text
     assert "DOES NOT permit essays" not in text
     assert "summing to 9" not in text and "summing to 2" not in text  # no point value of an older scale
 
@@ -115,7 +115,7 @@ def test_old_scored_questions_are_retired_and_their_work_goes_back_to_the_queue(
     from psycopg.types.json import Jsonb
 
     old = Question.model_validate(question("term", 4, 2, stem="旧分值的名词"))
-    now = Question.model_validate(question("term", 6, 2, stem="新分值的名词"))
+    now = Question.model_validate(question("term", 5, 2, stem="新分值的名词"))
     ids = {}
     for name, q in (("old", old), ("now", now)):
         ids[name] = db.execute("INSERT INTO reviewed_questions(content) VALUES (%s) RETURNING id",
@@ -146,8 +146,9 @@ def test_health_stays_green_while_the_previous_specification_id_is_still_set(cli
     monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", v2.SPECIFICATION)
     body = client.get("/db/health").json()
     assert body["specification_env_outdated"] is True
-    assert body["formal_training"]["specification"] == v4.SPECIFICATION and body["formal_training"]["points"] == 300
+    assert body["formal_training"]["specification"] == "xiaohan-obj-150-v5+xiaohan-subj-150-v5"
+    assert [p["points"] for p in body["formal_training"]["papers"]] == [150, 150]
     monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", "nonsense")
     assert client.get("/db/health").status_code == 503
     monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", v4.SPECIFICATION)
-    assert "specification_env_outdated" not in client.get("/db/health").json()
+    assert client.get("/db/health").json()["specification_env_outdated"] is True      # the retired mixed paper's ID: both new papers are still prepared

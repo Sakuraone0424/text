@@ -135,44 +135,45 @@
     const hours = bank.eta_hours < 1 ? "不到 1 小时" : `约 ${Math.round(bank.eta_hours)} 小时`;
     return `${paused}预计${hours}，${clock(bank.eta_at)} 前可开始`;
   }
-  /* The "is tomorrow's paper stocked" card; painted from the home overview and then kept fresh by live.js. */
-  let homeToday = null;
+  /* The "is tomorrow's paper stocked" lines, one per paper; painted from the home overview and then kept fresh by live.js. */
+  const PAPER_KINDS = ["objective", "subjective"];
+  let homePapers = {};
   let bankStamp = null;
-  function paintBank(bank, todayState) {
-    const showBank = todayState === "none";
-    $("bank-block").hidden = !showBank;
-    $("bank-ready").textContent = String(bank.ready);
-    $("bank-needed").textContent = String(bank.needed);
-    $("bank-bar").style.width = Math.min(100, bank.needed ? (bank.ready / bank.needed) * 100 : 0) + "%";
-    $("bank-eta").textContent = etaText(bank);
-    lock = todayState === "none" ? bank : null;
+  let bankAll = null;
+  function paintBank(bank, papers) {
+    homePapers = papers || {};
+    bankAll = bank;
+    for (const kind of PAPER_KINDS) {
+      const one = (bank.kinds && bank.kinds[kind]) || bank;
+      $("bank-block-" + kind).hidden = !!homePapers[kind];            // no card is shown once that paper exists
+      $("bank-ready-" + kind).textContent = String(one.ready);
+      $("bank-needed-" + kind).textContent = String(one.needed);
+      $("bank-bar-" + kind).style.width = Math.min(100, one.needed ? (one.ready / one.needed) * 100 : 0) + "%";
+      $("bank-eta-" + kind).textContent = etaText(one);
+      if (homePapers[kind]?.state === "submitted") $("prepare-note-" + kind).hidden = true;      // nothing to prepare once that paper is handed in
+    }
     applyLock();
-    if (todayState === "submitted") $("prepare-note").hidden = true;      // nothing to prepare once today's paper is handed in
   }
   function paintBankStamp() {
     if (bankStamp && $("bank-updated")) $("bank-updated").textContent = "更新于 " + window.Live.stamp(bankStamp);
   }
   async function refreshBank() {
-    if (homeToday !== "none") return; // no card is shown once today's paper exists
+    if (PAPER_KINDS.every((k) => homePapers[k])) return; // every paper of today exists: nothing to stock for
     const bank = await Data.fetchJSON("/v2/model/progress/bank");
     bankStamp = new Date();
-    paintBank(bank, homeToday);
+    paintBank(bank, homePapers);
     paintBankStamp();
   }
-  /* While the bank is short and no paper is prepared the start button is grey and says why. */
-  let lock = null;
-  /* The start button is a grey placeholder until the real state is known (never a clickable primary button next to
+  /* While the bank is short and no paper of that kind is prepared its button is grey and says why. */
+  const bankFor = (kind) => (homePapers[kind] || !bankAll ? null : (bankAll.kinds && bankAll.kinds[kind]) || bankAll);
+  /* The start buttons are grey placeholders until the real state is known (never a clickable primary button next to
      "状态待载入"); after that both today-paper cards (home and practice) show the one true state: Pages.paintToday(). */
   function startReady() {
     window.Pages?.todayLoaded();
   }
-  let lastToday = null;
+  let lastToday = {};
   function applyLock() {
-    const button = $("prepare");
-    button.dataset.locked = !lock || window.__hasPaper?.() ? "0" : "1";
-    if (!lock || window.__hasPaper?.()) startReady();
-    else window.Pages?.todayLoaded();
-    window.Pages?.paintToday();
+    window.Pages?.todayLoaded();
   }
   async function loadHomeNow() {
     a2hsHint();
@@ -190,10 +191,10 @@
     $("home-view").removeAttribute("data-loading");
     if (overview.status !== "fulfilled") {
       startReady();                      // the state is unknown, not "loading": clicking tries the real thing and says what happened
-      $("stat-avg-note").textContent = "统计暂时读取失败，未将未知数据当作0。";
+      $("stat-avg-objective-note").textContent = "统计暂时读取失败，未将未知数据当作0。";
       let retry = $("home-retry");
       if (!retry) {
-        retry = el("button", "重试", $("stat-avg-note").parentElement, "secondary");
+        retry = el("button", "重试", $("stat-avg-objective-note").parentElement, "secondary");
         retry.id = "home-retry";
         retry.type = "button";
         retry.onclick = () => {
@@ -209,17 +210,20 @@
     $("exam-label").textContent = o.days_left > 0 ? "距 12 月 19 日初试" : "12 月 19 日初试已到";
     window.Motion.num($("streak-days"), o.streak.current);
     $("streak-days").classList.toggle("zero", o.streak.current === 0);
-    const today = o.today_paper;
-    lastToday = today;
-    const result = $("today-result");
-    result.hidden = !(today.state === "submitted");
-    if (today.state === "submitted")
-      result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分`
-        : today.objective_max ? `今日客观题 ${today.objective_points} / ${today.objective_max} 分 · 主观题判分中` : "今日已交卷，等待判分完成";
-    // bank readiness: tag, progress line and the start button
+    const papers = o.today_papers || {};
+    lastToday = papers;
+    window.Pages?.resetSeen();
+    for (const kind of PAPER_KINDS) {
+      const today = papers[kind] || { state: "none" };
+      const result = $("today-result-" + kind);
+      result.hidden = !(today.state === "submitted");
+      if (today.state === "submitted")
+        result.textContent = today.points !== undefined ? `今日 ${today.points} / ${today.max} 分`
+          : today.objective_max ? `今日客观题 ${today.objective_points} / ${today.objective_max} 分 · 主观题判分中` : "今日已交卷，等待判分完成";
+    }
+    // bank readiness: tags, progress lines and the start buttons
     const bank = o.tomorrow;
-    homeToday = today.state;
-    paintBank(bank, today.state);
+    paintBank(bank, papers);
     bankStamp = new Date();
     paintBankStamp();
     // A stat with no value yet: while a handed-in paper is still being graded it says so (it is not "no data"); only
@@ -238,23 +242,30 @@
         $(noteId).textContent = "";
       }
     };
-    const last7 = o.last7;
-    if ((last7.avg_points === null || last7.avg_points === undefined) && o.objective_only) {
-      // nothing fully graded yet: the objective part of the papers still being graded, not "判分中" for ever
-      const node = $("stat-avg");
-      node.classList.remove("none");
-      node.textContent = `客观 ${Math.round(o.objective_only.points)}/${Math.round(o.objective_only.max)}`;
-      $("stat-avg-note").textContent = "主观题判分中，判完后显示总分";
-    } else none("stat-avg", last7.avg_points, "stat-avg-note", "做完首套后显示", Math.round(last7.avg_points));
-    const note = $("stat-avg-note");
-    note.className = "";
-    if (last7.avg_points !== null) {
-      if (last7.delta_points === null) note.textContent = `满分 ${last7.max_points}`;
-      else {
-        note.textContent = `较上周 ${sign(last7.delta_points)}`;
-        note.className = last7.delta_points >= 0 ? "up" : "down";
+    // the recent average is kept apart per kind of paper: an objective paper and a subjective paper are never averaged together
+    for (const kind of PAPER_KINDS) {
+      const last7 = (o.last7_by_kind || {})[kind] || { avg_points: null };
+      const waiting = (o.pending_by_kind || {})[kind] > 0;
+      const node = $("stat-avg-" + kind), noteNode = $("stat-avg-" + kind + "-note");
+      const missing = last7.avg_points === null || last7.avg_points === undefined;
+      node.classList.toggle("none", missing);
+      noteNode.className = "";
+      if (missing) {
+        node.textContent = waiting ? "判分中" : "—";
+        noteNode.textContent = waiting ? "判分完成后显示" : "做完首套后显示";
+        delete node.dataset.rollValue;
+      } else {
+        window.Motion.num(node, Math.round(last7.avg_points));
+        if (last7.delta_points === null || last7.delta_points === undefined) noteNode.textContent = `满分 ${last7.max_points}`;
+        else {
+          noteNode.textContent = `较上周 ${sign(last7.delta_points)}`;
+          noteNode.className = last7.delta_points >= 0 ? "up" : "down";
+        }
       }
     }
+    const mixed = (o.last7_by_kind || {}).mixed;
+    $("stat-avg-mixed").hidden = !(mixed && mixed.papers > 0);
+    if (mixed && mixed.papers > 0) $("stat-avg-mixed").textContent = `旧版混合卷（单独统计，不与上面混算）：近 ${mixed.papers} 次均分 ${Math.round(mixed.avg_points)} / ${mixed.max_points}`;
     none("stat-objective", o.objective_rate, "stat-objective-note", "做完首套后显示", Math.round((o.objective_rate ?? 0) * 100), "%");
     if (o.objective_rate !== null) $("stat-objective-note").textContent = pending ? "单选 + 填空（含判分中的卷子）" : "单选 + 填空";
     none("stat-subjective", o.subjective_rate, "stat-subjective-note", "判分后显示", Math.round((o.subjective_rate ?? 0) * 100), "%");
@@ -373,11 +384,31 @@
     const h = seconds / 3600;
     return h >= 1 ? (Math.round(h * 10) / 10) + "h" : Math.round(seconds / 60) + "m";
   };
-  function trend(root, rows) {
-    if (!rows.length) {
+  /* The trend is drawn per kind of paper (客观题卷 / 主观题卷 / 旧版混合卷): papers of different kinds are never put on one line. */
+  const KIND_LABEL = { objective: "客观题卷", subjective: "主观题卷", mixed: "旧版混合卷" };
+  let trendKind = "";
+  function trend(root, allRows) {
+    const kindsHere = Object.keys(KIND_LABEL).filter((k) => allRows.some((r) => (r.kind || "mixed") === k));
+    if (!kindsHere.length) {
       C.line(root, { title: "成绩趋势", hideTitle: true, empty: "做完首套后显示成绩趋势" });
       return;
     }
+    if (!kindsHere.includes(trendKind)) trendKind = kindsHere.includes("objective") ? "objective" : kindsHere[0];
+    root.replaceChildren();
+    const chips = el("div", undefined, root, "chips trend-kinds");
+    chips.setAttribute("role", "group");
+    chips.setAttribute("aria-label", "按卷型看成绩趋势");
+    for (const k of kindsHere) {
+      const b = el("button", KIND_LABEL[k], chips);
+      b.type = "button";
+      b.dataset.kind = k;
+      b.setAttribute("aria-pressed", String(trendKind === k));
+      b.onclick = () => { trendKind = k; trend(root, allRows); };
+    }
+    const chart = el("div", undefined, root);
+    drawTrend(chart, allRows.filter((r) => (r.kind || "mixed") === trendKind));
+  }
+  function drawTrend(root, rows) {
     const latest = rows[rows.length - 1];
     const partial = rows.filter((r) => r.partial).length;       // handed in, subjective answers still being graded: objective part only
     const use = trendMode === "points" ? rows.filter((r) => r.spec === latest.spec && !r.partial) : rows;
@@ -662,5 +693,5 @@
   window.Live.pullToRefresh($("mistakes-view"), () => Promise.all([window.Pages.loadMistakes(), loadDue()]));
   window.Live.pullToRefresh($("profile-view"), () => loadProfile());
 
-  window.Insights = { startReady, lockState: () => lock, todayPaper: () => lastToday, applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
+  window.Insights = { startReady, bankFor, todayPapers: () => lastToday, applyLock, loadHome, loadProfile, onView, resultExtras, historyChart, startPractice, chapterPractice };
 })();

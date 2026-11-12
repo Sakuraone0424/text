@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 
 from pydantic import Field, StrictInt
 
-from app.training_spec_v4 import SUBJECTS, COUNTS, POINTS
+from app.training_spec_v5 import SUBJECTS, COUNTS, POINTS, RUBRIC_ITEMS
 from app.source_policy import (
     current_source_sql, FILES, pinned_source_bytes, pinned_science_evidence
 )
@@ -307,7 +307,7 @@ UNUSED_SQL = (
 )
 
 
-def eligible_reserve_rows(conn, uid, subject, kind):
+def eligible_reserve_rows(conn, uid, subject, kind, points=None):
     """The questions that count as this learner's daily-paper stock for one subject x type (same rules as the count below):
     new to the learner, published, current scoring, pinned science evidence and a current AI verification."""
     from app.auto_quality import ready_many
@@ -318,14 +318,14 @@ def eligible_reserve_rows(conn, uid, subject, kind):
         "WHERE s.status='ready' AND q.status='published' "
         "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
         "AND q.content->>'max_points'=%s AND " + UNUSED_SQL + " ORDER BY q.id",
-        (subject, kind, str(POINTS[kind]), uid, uid),
+        (subject, kind, str((points or POINTS)[kind]), uid, uid),
     ).fetchall()
     pinned = [row for row in eligible if pinned_science_evidence(row["content"])]
     verdict = ready_many(conn, [row["id"] for row in pinned])
     return [row for row in pinned if verdict.get(row["id"])]
 
 
-def eligible_reserve_count(conn, uid, subject, kind, cached=False):
+def eligible_reserve_count(conn, uid, subject, kind, cached=False, points=None):
     # A merely "ready" state does not prove current science/answer
     # review, publication or v2 scoring compatibility.
     eligible = conn.execute(
@@ -334,7 +334,7 @@ def eligible_reserve_count(conn, uid, subject, kind, cached=False):
         "WHERE s.status='ready' AND q.status='published' "
         "AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
         "AND q.content->>'max_points'=%s AND " + UNUSED_SQL,
-        (subject, kind, str(POINTS[kind]), uid, uid),
+        (subject, kind, str((points or POINTS)[kind]), uid, uid),
     ).fetchall()
     return eligible_verified_reserve(conn, eligible, cached=cached)
 
@@ -945,7 +945,7 @@ REPAIRABLE_REASONS = {
     "incomplete_choice_or_key": "单选必须有 A–D 四个选项，且答案必须是其中一个",
     "blank_marker_count": "填空题的题干里必须恰好有一个空（____）",
     "blank_count_or_points_mismatch": "空的个数与分值对不上",
-    "rubric_item_count_out_of_range": "问答题的评分要点必须是 4–6 条",
+    "rubric_item_count_out_of_range": "评分要点数量不对：名词解释 2–3 条、简答 4–5 条、问答 6–8 条，分值合计等于满分",
     "rubric_missing": "缺少评分要点",
     "evidence_quote_unmatched": "evidence 里的引用在提供的教材段落里找不到：请只从 evidence 段落里逐字重新引用，不要换成段落之外的内容",
     "insufficient_independent_scoring_criteria": "评分要点不足：名词解释、简答、问答至少要有两条相互独立的评分要点",
@@ -1019,7 +1019,7 @@ def _classify(exc):
             errors.append(dict(field=item.get("field"), code=reason or item.get("type")))
     elif detail["code"] == "generated_question_quality_gate_failed":
         reasons = detail.get("reasons", [])
-        repairable = bool(reasons) and set(reasons) <= {"insufficient_independent_scoring_criteria"}
+        repairable = bool(reasons) and set(reasons) <= {"insufficient_independent_scoring_criteria", "rubric_item_count_out_of_range"}
         errors = [dict(field="rubric", code=r) for r in reasons]
     else:
         repairable = False
@@ -1053,6 +1053,10 @@ def prepare(p, response, json_extracted=False):
     if q.question_type == "single_choice":
         q, distractors = attach_distractor_proof(q, response, p)
     structural_issues = exam_issues(q)
+    # a NEW question carries the number of scoring points its type is written with (older, rescaled ones are not held to it)
+    low, high = RUBRIC_ITEMS.get(q.question_type, (1, 50))
+    if not low <= len(q.rubric) <= high and "insufficient_independent_scoring_criteria" not in structural_issues:
+        structural_issues.append("rubric_item_count_out_of_range")
     if structural_issues:
         message = "generated_question_quality_gate_failed:" + ",".join(structural_issues)
         errors, repairable = _classify(ValueError(message))

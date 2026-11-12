@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from app import ai_jobs, cny_billing, cny_prices, cost_control, cost_reconcile
 from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count
-from app.training_spec_v4 import COUNTS, SUBJECTS
+from app.training_spec_v5 import COUNTS, SUBJECTS
 
 STALE_AFTER_MINUTES = 15  # the worker is a cron job every 5 minutes
 BLOCKED_JOB_DAYS = 14
@@ -24,7 +24,7 @@ def _by_bucket(rows):
 
 def _current_points(type_expr, points_expr):
     """SQL: the question's point value is the current specification's value for its type."""
-    from app.training_spec_v4 import POINTS
+    from app.training_spec_v5 import POINTS
 
     cases = " ".join(f"WHEN '{kind}' THEN {points}" for kind, points in POINTS.items())
     return f"(({points_expr})::int IS NOT DISTINCT FROM (CASE {type_expr} {cases} END))"
@@ -445,6 +445,12 @@ def _waste(conn):
                 auto_fixed=stats["auto_fixed"], evidence_layers=stats["evidence_layers"])
 
 
+def _rescale_report(conn):
+    from app import legacy_reuse, scoring_rescale
+
+    return legacy_reuse._state(conn, scoring_rescale.STATE_KEY)
+
+
 def report(conn, uid):
     now = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
     rows = buckets(conn, uid)
@@ -457,6 +463,8 @@ def report(conn, uid):
         review_today=review_pass_rate_today(conn),
         funnel=funnel_today(conn),
         legacy=legacy_summary(conn),
+        # the one-off move of every question to the new points: how many were converted, and the stock per type before / after
+        scoring_rescale=_rescale_report(conn),
         recent_jobs=recent_jobs(conn),
         waste=_waste(conn),
         ledger=dict(breakdown=cny_billing.ledger_breakdown(conn, uid), reconciliation=_reconciliation(conn)),

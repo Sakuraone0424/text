@@ -151,6 +151,9 @@ def plan(conn, uid, target=None, report=None):
 
     auto_quality.requeue_past_exam_duplicates(conn)   # before anything can retire them
     auto_quality.retire_stale(conn)
+    from app import scoring_rescale
+
+    scoring_rescale.run(conn)                    # v4 -> v5 points, in place; no question is retired for it
     auto_quality.retire_old_scoring(conn)
     auto_quality.retire_unusable_sources(conn)   # literature-list sources, missing figures, answers written in the stem
     from app import memory

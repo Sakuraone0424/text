@@ -237,9 +237,10 @@ def login(page, base):
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
     page.locator("#login").wait_for(state="hidden")
-    page.locator("#prepare").click()                                    # prepares today's paper (and stays on the page) ...
-    page.wait_for_function("document.getElementById('prepare').textContent.includes('开始（60')")
-    page.locator("#prepare").click()                                    # ... then the same button asks to confirm the start
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    page.evaluate("window.TodayPaper.prepare('objective')")                       # prepares today's paper (the isolated fixture's old paper) and stays on the page ...
+    page.wait_for_function("window.TrainingUI.today().hasPaper")
+    page.evaluate("document.getElementById('start-dialog').showModal()")          # ... then the start sheet asks to confirm
     page.locator("#start").wait_for(state="visible")
 
 
@@ -314,7 +315,8 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     page.wait_for_function("document.querySelector('#status').textContent.includes('图片已保存')")
     page.reload()
     page.evaluate("location.hash = '#/home'")      # a reload keeps the address (#/exam); go back to the home page first
-    page.locator("#prepare").click()
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    page.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     page.locator("#questions article:not([hidden])").wait_for()
     assert (
         page.locator(f"article[data-id='{term['id']}'] textarea").input_value()
@@ -329,7 +331,8 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     second.locator("#password").fill("test-live-login")
     second.locator("#login button").click()
     second.locator("#login").wait_for(state="hidden")
-    second.locator("#prepare").click()
+    second.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    second.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     second.locator("#questions article:not([hidden])").wait_for()
     assert (
         second.locator(f"article[data-id='{term['id']}'] textarea").input_value()

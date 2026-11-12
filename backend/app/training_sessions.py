@@ -7,7 +7,7 @@ from datetime import timedelta
 from psycopg.types.json import Jsonb
 
 from app.training_spec import DURATION_SECONDS, validate_items
-from app import training_spec_v2, training_spec_v4
+from app import training_spec_v2, training_spec_v4, training_spec_v5
 from app.question_quality import normalize_answer
 
 
@@ -15,10 +15,17 @@ def validate_paper_items(conn, paper_id, items):
     row = conn.execute("SELECT blueprint FROM papers_v2 WHERE id=%s", (paper_id,)).fetchone()
     if not row:
         raise LookupError("Paper not found")
-    for module in (training_spec_v4, training_spec_v2):
+    for module in (training_spec_v4, training_spec_v2, *training_spec_v5.PAPERS.values()):
         if row["blueprint"].get("specification") == module.SPECIFICATION:
             return module.validate_items(items)
     return validate_items(items)
+
+
+def paper_duration(conn, paper_id):
+    """The time limit this paper was made with (its blueprint); papers made before the field existed had one hour."""
+    row = conn.execute("SELECT blueprint FROM papers_v2 WHERE id=%s", (paper_id,)).fetchone()
+    value = (row or {}).get("blueprint", {}).get("duration_seconds") if row else None
+    return value if type(value) is int and 60 <= value <= 14400 else DURATION_SECONDS
 
 
 def photo_answers_enabled():
@@ -53,7 +60,7 @@ def start(conn, user_id, paper_id):
         now = server_now(conn)
         conn.execute(
             "INSERT INTO training_sessions(paper_id,started_at,deadline) VALUES (%s,%s,%s)",
-            (paper_id, now, now + timedelta(seconds=DURATION_SECONDS)),
+            (paper_id, now, now + timedelta(seconds=paper_duration(conn, paper_id))),
         )
     return state(conn, user_id, paper_id)
 
@@ -61,13 +68,14 @@ def start(conn, user_id, paper_id):
 def state(conn, user_id, paper_id):
     session = locked_session(conn, user_id, paper_id)
     now = server_now(conn)
+    duration = paper_duration(conn, paper_id)
     if session is None:
         return {
             "status": "not_started",
             "server_now": now,
-            "duration_seconds": DURATION_SECONDS,
+            "duration_seconds": duration,
             "version": 0,
-            "remaining_seconds": DURATION_SECONDS,
+            "remaining_seconds": duration,
             "drafts": {},
         }
     if session["submitted_at"] is None and now >= session["deadline"]:
@@ -85,7 +93,7 @@ def state(conn, user_id, paper_id):
         "started_at": session["started_at"],
         "deadline": session["deadline"],
         "remaining_seconds": max(0, int((session["deadline"] - now).total_seconds())),
-        "duration_seconds": DURATION_SECONDS,
+        "duration_seconds": duration,
         "version": session["version"],
         "drafts": drafts,
     }

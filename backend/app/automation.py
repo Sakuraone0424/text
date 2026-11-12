@@ -1,4 +1,4 @@
-"""Opt-in 20:00 Asia/Shanghai preparation. Quality failures never mean success."""
+"""Opt-in 20:00 Asia/Shanghai preparation of the two daily papers. Quality failures never mean success."""
 
 import os
 from psycopg.errors import QueryCanceled
@@ -6,32 +6,43 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 from app.training_sessions import server_now
 from app.question_quality import Blueprint
-from app import training_spec_v4 as current_spec
+from app import training_spec_v2, training_spec_v4, training_spec_v5 as papers_spec
 from app.quiz_v2 import create_paper, BankShortage, PreparationPaused
+
+# specification IDs that earlier deployments set in QUIZ_DAILY_SPECIFICATION; nothing new is made from them any more
+RETIRED = (training_spec_v4.SPECIFICATION, training_spec_v2.SPECIFICATION)
+
+
+def daily_blueprints(env):
+    """The papers prepared each evening: the objective paper and the subjective paper, independent of each other.
+
+    An unset variable (or an ID of a retired mixed paper) means both. A v5 ID prepares only that one. Any other value fails
+    closed rather than preparing an old exam. Stored papers keep their own blueprint and are never re-planned here."""
+    spec = env.get("QUIZ_DAILY_SPECIFICATION", "")
+    if not spec or spec in RETIRED:
+        chosen = list(papers_spec.PAPERS.values())
+    elif spec in papers_spec.PAPERS:
+        chosen = [papers_spec.PAPERS[spec]]
+    else:
+        raise ValueError("unknown_daily_training_specification")
+    return [Blueprint.model_validate(module.default_blueprint()) for module in chosen]
 
 
 def selected_daily_blueprint(env):
-    """New daily papers always use the 60q/300pt v4 specification.
-
-    An unset variable means v4. Any other value (including the retired 28q
-    and v2 IDs) fails closed rather than preparing an old exam. Stored 28q and
-    v2 papers keep their own blueprint and are never re-planned here.
-    """
-    spec = env.get("QUIZ_DAILY_SPECIFICATION", "") or current_spec.SPECIFICATION
-    if spec == current_spec.SPECIFICATION:
-        return Blueprint.model_validate(current_spec.default_blueprint())
-    raise ValueError("unknown_daily_training_specification")
+    """The first of the daily papers (the objective one); see daily_blueprints for all of them."""
+    return daily_blueprints(env)[0]
 
 
 def verified_daily_paper_response(paper, blueprint):
-    """A preexisting historical 28q paper must never appear as a 60q success."""
-    if blueprint.specification != current_spec.SPECIFICATION:
+    """A preexisting historical paper must never appear as a success for the new papers."""
+    module = papers_spec.PAPERS.get(blueprint.specification)
+    if module is None:
         return paper
     if (paper.get("mode") != "reviewed_60"
-        or paper.get("blueprint", {}).get("specification") != current_spec.SPECIFICATION
-        or paper.get("count") != current_spec.TOTAL_QUESTIONS
-        or paper.get("max_points") != current_spec.TOTAL_POINTS):
-        raise ValueError("daily_60q_paper_not_proven")
+        or paper.get("blueprint", {}).get("specification") != module.SPECIFICATION
+        or paper.get("count") != module.TOTAL_QUESTIONS
+        or paper.get("max_points") != module.TOTAL_POINTS):
+        raise ValueError("daily_paper_not_proven")
     return paper
 
 
@@ -41,10 +52,18 @@ def prepare_daily(conn):
     now = server_now(conn).astimezone(ZoneInfo("Asia/Shanghai"))
     if now.hour < 20:
         return 0
-    blueprint = selected_daily_blueprint(os.environ)
     done = 0
+    for blueprint in daily_blueprints(os.environ):
+        done += _prepare_paper(conn, blueprint, now)
+    return done
+
+
+def _prepare_paper(conn, blueprint, now):
+    """One kind of paper for every user; a shortage of the other kind never holds this one back."""
+    done = 0
+    kind = papers_spec.kind_of(blueprint.specification)
     for user in conn.execute("SELECT id FROM users ORDER BY id LIMIT 100").fetchall():
-        key = f"daily:{user['id']}:{now.date()}"
+        key = f"daily:{kind}:{user['id']}:{now.date()}"
         conn.execute(
             "INSERT INTO automation_jobs(job_key,user_id,target_date,state) VALUES (%s,%s,%s,'pending') ON CONFLICT DO NOTHING",
             (key, user["id"], now.date()),

@@ -16,7 +16,7 @@ def test_each_main_page_remembers_where_it_was_left(engine, live_app):
     seed(client, dsn)
     base = str(client.base_url).rstrip("/")
     page, errors = open_page(engine, "standalone", base)
-    expect(page.locator("#stat-avg")).not_to_have_text("—")
+    expect(page.locator("#stat-objective")).not_to_have_text("—")
     page.locator('nav.primary-nav [data-view="profile"]').click()
     page.wait_for_timeout(500)
     page.evaluate("document.querySelector('.workspace').scrollTop = 900")

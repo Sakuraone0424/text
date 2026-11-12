@@ -41,7 +41,7 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(
     from app import auto_quality, source_policy, quiz_v2 as q
     from app.question_quality import Question
     from spec_helpers import rubric
-    from app.training_spec_v4 import COUNTS, POINTS, default_blueprint, validate_items
+    from app.training_spec_v5 import COUNTS, POINTS, OBJECTIVE, SUBJECTIVE_PAPER
 
     # Synthetic 60q bank; review predicates are stubbed for this mechanics test.
     bank_ids = []
@@ -73,22 +73,19 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(
     if fixed < now:
         fixed += __import__("datetime").timedelta(days=1)
     monkeypatch.setattr(automation, "server_now", lambda c: fixed)
-    assert automation.prepare_daily(db) == 1
+    assert automation.prepare_daily(db) == 2          # the objective and the subjective paper
     assert automation.prepare_daily(db) == 0
-    assert (
-        db.execute("SELECT state FROM automation_jobs").fetchone()["state"]
-        == "prepared"
-    )
+    assert {r["state"] for r in db.execute("SELECT state FROM automation_jobs").fetchall()} == {"prepared"}
     assert (
         db.execute("SELECT COUNT(*) AS n FROM training_sessions").fetchone()["n"] == 0
     )
-    paper = db.execute("SELECT blueprint FROM papers_v2").fetchone()["blueprint"]
-    expected = default_blueprint()
-    assert paper["specification"] == expected["specification"]
-    assert paper["quotas"] == expected["quotas"]
-    items = [r["snapshot"] for r in db.execute("SELECT snapshot FROM paper_items_v2").fetchall()]
-    validate_items(items)
-    assert len(items) == 60 and sum(i["max_points"] for i in items) == 300
+    for module in (OBJECTIVE, SUBJECTIVE_PAPER):
+        paper = db.execute("SELECT id,blueprint FROM papers_v2 WHERE blueprint->>'specification'=%s", (module.SPECIFICATION,)).fetchone()
+        expected = module.default_blueprint()
+        assert paper["blueprint"]["quotas"] == expected["quotas"]
+        items = [r["snapshot"] for r in db.execute("SELECT snapshot FROM paper_items_v2 WHERE paper_id=%s", (paper["id"],)).fetchall()]
+        module.validate_items(items)
+        assert len(items) == module.TOTAL_QUESTIONS and sum(i["max_points"] for i in items) == 150
 
 
 def test_ranking_balances_chapters_and_uses_recorded_signals():

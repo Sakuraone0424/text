@@ -73,14 +73,14 @@ def test_the_data_pages_use_real_numbers_and_fit_a_phone(live_app, browser):
     days = int(page.locator("#days-left").inner_text())
     assert days == max(0, (date(2026, 12, 19) - datetime.now(timezone(timedelta(hours=8))).date()).days)
     assert int(page.locator("#streak-days").inner_text()) >= 10
-    expect(page.locator("#stat-avg")).not_to_have_text("—")
+    expect(page.locator("#stat-objective")).not_to_have_text("—")
     expect(page.locator("#stat-objective")).to_contain_text("%")
     expect(page.locator("#weak-chapters .progress-line")).to_have_count(5)
     expect(page.locator("#weak-practice")).to_be_visible()
-    expect(page.locator("#spec-summary")).to_contain_text("300 分")
+    expect(page.locator("#spec-objective")).to_contain_text("150 分")
     expect(page.locator("nav.primary-nav button")).to_have_text(["首页", "练习", "错题", "我的"])
     assert page.locator(".sidebar").bounding_box()["height"] >= 56  # 56 + the bottom safe area
-    assert page.locator("#prepare").bounding_box()["height"] >= 48
+    assert page.locator("#prepare-objective").bounding_box()["height"] >= 48
     no_overflow(page)
     shot(page, "part4-home.png")
     # ---- my learning data

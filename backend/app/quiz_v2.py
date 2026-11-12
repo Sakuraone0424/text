@@ -16,10 +16,10 @@ from app.question_quality import (
 )
 from app.common import today_cn
 from app.training_spec import COUNTS, SUBJECTS, validate_items
-from app import training_spec_v2 as spec_v2, training_spec_v4 as spec_v4
+from app import training_spec_v2 as spec_v2, training_spec_v4 as spec_v4, training_spec_v5 as spec_v5
 
-# Every versioned 60-question specification; v2 stays readable, v4 is the current one.
-SPEC_MODULES = {spec_v2.SPECIFICATION: spec_v2, spec_v4.SPECIFICATION: spec_v4}
+# Every versioned specification; v2 and v4 (the 60-question mixed papers) stay readable, the two v5 papers are the current ones.
+SPEC_MODULES = {spec_v2.SPECIFICATION: spec_v2, spec_v4.SPECIFICATION: spec_v4, **spec_v5.PAPERS}
 
 
 class PreparationPaused(ValueError):
@@ -183,8 +183,10 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
     spec_module = SPEC_MODULES.get(spec["specification"])
     is_v2 = spec_module is not None  # any versioned 60-question specification
     spec_counts = spec_module.COUNTS if is_v2 else COUNTS
+    kind = spec_v5.kind_of(spec["specification"]) if is_v2 else "mixed"
+    # one paper of each kind per day: the objective and the subjective paper are independent of each other
     existing = conn.execute(
-        "SELECT * FROM papers_v2 WHERE user_id=%s AND paper_date=%s", (user_id, day)
+        "SELECT * FROM papers_v2 WHERE user_id=%s AND paper_date=%s AND kind=%s", (user_id, day, kind)
     ).fetchone()
     if existing:
         if existing["blueprint"] != spec:
@@ -454,9 +456,13 @@ def load_paper(conn, user_id, paper_id):
         if run
         else {}
     )
+    from app import scoring_rescale
+
+    rescaled = scoring_rescale.rescaled_ids(conn, [i["question_id"] for i in items])
     # No solutions, excerpts or rubrics in the unsubmitted paper response.
     questions = [
         {
+            "scoring_note": scoring_rescale.NOTE if i["question_id"] in rescaled else None,
             "id": i["question_id"],
             "position": i["position"],
             "blank_count": len(i["snapshot"].get("blanks", [])),
@@ -474,6 +480,8 @@ def load_paper(conn, user_id, paper_id):
         "paper_id": paper_id,
         "date": row["paper_date"].isoformat(),
         "mode": "reviewed_60" if row["blueprint"].get("specification") in SPEC_MODULES else "reviewed_28",
+        "kind": row["kind"],
+        "kind_label": spec_v5.KIND_LABEL.get(row["kind"], "旧版混合卷"),
         "blueprint": row["blueprint"],
         "count": len(items),
         "max_points": sum(i["snapshot"]["max_points"] for i in items),
@@ -481,7 +489,7 @@ def load_paper(conn, user_id, paper_id):
         "relaxed_rules": list((run or {}).get("relaxed") or []),
         "reported_question_ids": sorted(reported_question_ids(conn, paper_id)),
         "photo_answers_enabled": photo_answers_enabled(),
-        "duration_seconds": 3600,
+        "duration_seconds": timing["duration_seconds"],
         "timing": timing,
         "questions": questions if timing["status"] != "not_started" else [],
     }
@@ -547,6 +555,12 @@ def submit(conn, user_id, paper_id, answers, expected_version=0):
     return submit_training(conn, user_id, paper_id, answers, expected_version)
 
 
+def valid_points(value):
+    """A score for one scoring point: a whole number or a half, never negative (rescaled questions have half points)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
+            and value * 2 == int(value * 2))
+
+
 def grade(
     conn, paper_id, question_id, criterion_points, feedback, reviewer, details=None
 ):
@@ -591,7 +605,7 @@ def grade(
     ) or row["points"] is not None:
         raise ValueError("Only pending subjective answers can be graded")
     if len(criterion_points) != len(q["rubric"]) or any(
-        type(p) is not int or p < 0 or p > c["points"]
+        not valid_points(p) or p > c["points"]
         for p, c in zip(criterion_points, q["rubric"])
     ):
         raise ValueError(

@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from app import auto_quality, auto_worker, past_exam_import as pei, sources
 from app.common import ensure_user
-from app.training_spec_v4 import POINTS
+from app.training_spec_v5 import POINTS
 from test_ai_automation import setup_ai  # noqa: F401  (fixture)
 from test_ocr_only import material
 
@@ -194,11 +194,11 @@ def model_result(job, *, supported=True, bad_quote=False, bad_points=False):
     elif kind == "fill_blank":
         split, answer, accepted = [points], "冈崎片段", ["冈崎片段"]
     elif kind == "term":
-        split, answer, accepted = [3, 3], "冈崎片段是滞后链上不连续合成的短DNA片段，由RNA引物引发并最终被连接。", []
+        split, answer, accepted = [3, 2], "冈崎片段是滞后链上不连续合成的短DNA片段，由RNA引物引发并最终被连接。", []
     elif kind == "essay":
-        split, answer, accepted = [4, 4, 4, 3, 3], "滞后链以冈崎片段方式合成：引物引发、聚合酶延伸、引物切除、连接酶封闭缺口并连接成链，并受多种酶协同调控。", []
+        split, answer, accepted = [5, 5, 5, 5, 5], "滞后链以冈崎片段方式合成：引物引发、聚合酶延伸、引物切除、连接酶封闭缺口并连接成链，并受多种酶协同调控。", []
     else:
-        split, answer, accepted = [4, 4, 4], "滞后链以冈崎片段方式合成：引物引发、聚合酶延伸、引物切除、连接酶封闭缺口并连接成链。", []
+        split, answer, accepted = [5, 5, 5], "滞后链以冈崎片段方式合成：引物引发、聚合酶延伸、引物切除、连接酶封闭缺口并连接成链。", []
     if bad_points:
         split = [split[0] + 1] + split[1:]
     rubric = [
@@ -284,8 +284,8 @@ def test_end_to_end_with_fake_model_term_and_short_answer(db, corpus, setup_ai):
     run_to_ready(db, setup_ai)
     got = items(db)
     for kind, number, points, stem in [
-        ("term", "1", 6, "冈崎片段"),
-        ("short_answer", "2", 12, "简述DNA复制中滞后链的合成过程。"),
+        ("term", "1", 5, "冈崎片段"),
+        ("short_answer", "2", 15, "简述DNA复制中滞后链的合成过程。"),
     ]:
         item = got[(kind, number)]
         assert item["status"] == "packet_created", item["blocked_reason"]
@@ -327,10 +327,10 @@ def test_choice_and_blank_items_also_import_with_exact_points(db, corpus, setup_
         finish_job(db, job, model_result(job))
     auto_worker.dispatch_completed(db)
     got = items(db)
-    for key, answer in [(("single_choice", "5"), "A"), (("fill_blank", "3"), "冈崎片段")]:
+    for key, answer, points in [(("single_choice", "5"), "A", 3), (("fill_blank", "3"), "冈崎片段", 2)]:
         q = db.execute("SELECT content FROM reviewed_questions WHERE id=%s",
                        (got[key]["question_id"],)).fetchone()["content"]
-        assert q["max_points"] == 4 and q["answer"] == answer
+        assert q["max_points"] == points and q["answer"] == answer
         assert q["stem"] == got[key]["stem"]
 
 

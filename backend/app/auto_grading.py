@@ -3,15 +3,15 @@
 import json
 from psycopg.types.json import Jsonb
 from pydantic import Field, StrictBool, StrictInt
-from app.question_quality import StrictModel
+from app.question_quality import StrictModel, Points
 from app.ai_jobs import enqueue, content_sha
 
 
 class Grade(StrictModel):
-    criterion_points: list[StrictInt] = Field(min_length=1, max_length=50)
-    blank_points: list[StrictInt] = Field(default_factory=list, max_length=3)
+    criterion_points: list[Points] = Field(min_length=1, max_length=50)
+    blank_points: list[Points] = Field(default_factory=list, max_length=3)
     reasons: list[str] = Field(min_length=1, max_length=50)
-    total: StrictInt
+    total: Points
     uncertain: StrictBool
     explanation: str = Field(min_length=20, max_length=10000)
     knowledge_tags: list[str] = Field(max_length=30)
@@ -25,7 +25,7 @@ GRADING_INSTRUCTIONS = (
     "Grade ONE student answer against the scoring criteria, using only the supplied textbook excerpts. "
     "Award every criterion independently and give each its own reason (at least 10 characters). "
     "Accept scientifically equivalent expressions; never grade by length or style. A criterion's points "
-    "must be an integer between 0 and its maximum, criterion_points must follow the rubric order, and total "
+    "must be a whole or half number (0.5 steps) between 0 and its maximum, criterion_points must follow the rubric order, and total "
     "must equal their sum. For a fill-in-the-blank answer also return blank_points. Cite the excerpt that "
     "supports each award or deduction. If the meaning of the answer is unclear, or the excerpts and the "
     "reference answer conflict, set uncertain=true instead of guessing a score. knowledge_tags may only be "

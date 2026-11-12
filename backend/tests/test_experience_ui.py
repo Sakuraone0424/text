@@ -56,10 +56,6 @@ def test_while_essays_are_being_graded_there_is_no_big_zero_and_no_conclusion(li
     expect(page.locator("#result")).to_contain_text("得分率最低")
     expect(page.locator("#grading-activity")).not_to_contain_text("尚未启用")
     expect(page.locator("#grading-activity")).to_contain_text("全部")
-    # home: a handed-in paper does not ask to be prepared
-    page.evaluate("location.hash = '#/home'")
-    page.wait_for_timeout(1200)
-    expect(page.locator("#prepare-note")).to_be_hidden()
     assert not errors, errors
 
 

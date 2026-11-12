@@ -208,7 +208,7 @@ def test_db_health_says_what_the_bank_lacks_and_health_stays_green(client):
 
 
 def test_db_health_is_green_once_every_bucket_has_a_papers_worth(client, db, bank, monkeypatch):
-    from app import training_spec_v4 as spec
+    from app import training_spec_v5 as spec
     monkeypatch.setattr(spec, "COUNTS", {"single_choice": 3, "fill_blank": 3, "term": 4, "short_answer": 3, "essay": 1})
     for qid in bank:
         db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
