@@ -93,7 +93,7 @@
     const f = frame(root, spec);
     const W = 340,
       H = 190,
-      L = 34,
+      L = 40,
       R = 10,
       T = 12,
       B = 30;
@@ -197,7 +197,7 @@
     const f = frame(root, spec);
     const W = 340,
       H = 180,
-      L = 34,
+      L = 40,
       R = 10,
       T = 14,
       B = 28;
