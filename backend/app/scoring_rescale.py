@@ -135,10 +135,14 @@ def run(conn):
     Returns what happened; the first pass that converts something also records the stock before and after (STATE_KEY)."""
     from app import legacy_reuse
 
+    # only questions still at an old maximum are loaded: the pass runs every few minutes and must stay cheap once everything is converted
+    old = [(kind, str(points)) for kind, points in OLD.items()]
     rows = conn.execute(
         "SELECT q.id,q.content FROM reviewed_questions q WHERE q.status IN ('draft','published') "
+        "AND (q.content->>'question_type',q.content->>'max_points') IN (SELECT * FROM unnest(%s::text[],%s::text[])) "
         "AND NOT EXISTS(SELECT 1 FROM question_scoring_originals o WHERE o.question_id=q.id) "
-        "AND NOT EXISTS(SELECT 1 FROM auto_question_states s WHERE s.question_id=q.id AND s.reason=%s) ORDER BY q.id", (UNSCALABLE,)
+        "AND NOT EXISTS(SELECT 1 FROM auto_question_states s WHERE s.question_id=q.id AND s.reason=%s) ORDER BY q.id",
+        ([k for k, _ in old], [p for _, p in old], UNSCALABLE),
     ).fetchall()
     todo, failed = [], {}
     for r in rows:
