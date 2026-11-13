@@ -9,7 +9,7 @@ from collections import defaultdict
 
 from app import chapters, grading_activity, grading_recovery, memory, quiz_v2
 from app.learning_stats import SHANGHAI, TYPES
-from app.mistake_book import plain_answer, sources_of
+from app.mistake_book import blank_rows, plain_answer, sources_of
 
 SPEC_NAMES = {
     "xiaohan-obj-fill-150-v6": "客观题卷 · 60 道填空 · 150 分", "xiaohan-obj-150-v5": "旧版客观题卷（单选＋填空）· 60 题 · 150 分", "xiaohan-subj-150-v5": "主观题卷 · 14 题 · 150 分",
@@ -123,6 +123,7 @@ def detail(conn, uid, paper_id, question_id):
         scores=dict(criteria=feedback.get("criteria") or [], criterion_reasons=feedback.get("criterion_reasons") or []) if feedback.get("criteria") else None,
         rubric=[dict(description=c["description"], points=c["points"]) for c in snap.get("rubric") or []],
         blank_points=feedback.get("blank_points"), comment=feedback.get("comment"),
+        blanks=blank_rows(snap, row["answer"], feedback),
         concept_errors=feedback.get("concept_errors") or [], imprecisions=feedback.get("imprecisions") or [], suggestions=feedback.get("suggestions") or [],
         evidence=sources_of(snap), graded_by=row["graded_by"],
         pending_text=next((q.get("pending_text") for q in grading_activity.progress(conn, uid, paper_id)["questions"] if q["question_id"] == question_id), None) if row["points"] is None and not reported else None,

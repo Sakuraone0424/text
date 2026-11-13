@@ -2,6 +2,7 @@
 "use strict";
 (() => {
   const byId = (id) => document.getElementById(id);
+  const n2 = (v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v);   // points are exact inside, shown with at most two decimals
   const labels = { biochemistry: "生物化学", cell_biology: "细胞生物学" };
   let latest = { paper: null, drafts: {}, pendingCount: 0, conflicted: false },
     position = 0,
@@ -201,7 +202,7 @@
     byId("current-number").textContent = String(position + 1);
     byId("current-subject").textContent =
       labels[question.subject] || question.subject;
-    byId("current-points").textContent = `${typeNames[question.question_type] || ""} · ${question.max_points}分` + (question.scoring_note ? ` · ${question.scoring_note}` : "");
+    byId("current-points").textContent = `${typeNames[question.question_type] || ""} · ${n2(question.max_points)}分` + (question.scoring_note ? ` · ${question.scoring_note}` : "");
     byId("previous-question").disabled = position === 0;
     byId("next-question").textContent =
       position === questions.length - 1 ? "检查答题卡" : "下一题";
@@ -422,7 +423,7 @@
       const info = make("div", undefined, progress);
       make("span", "判分中", info, "pill blue-pill");
       make("div", `${pending}题待判分`, info, "grade-title");
-      make("p", `已判分 ${graded}/${data.answers.length} 题，已得 ${data.graded_points} 分；完整总分尚未确定。`, info, "grade-caption");
+      make("p", `已判分 ${graded}/${data.answers.length} 题，已得 ${n2(data.graded_points)} 分；完整总分尚未确定。`, info, "grade-caption");
     }
     void window.Insights?.resultExtras(data, { key, types });
     // the per-question details, in one card with an "only the lost ones" switch
@@ -459,7 +460,7 @@
           make("span", `第${index + 1}题 · ${labels[answer.subject]} · ${typeNames[answer.question_type] || ""}`, title);
           make(
             "span",
-            answer.excluded ? "已反馈 · 不计分" : answer.points === null ? "待判分" : `${answer.points}/${answer.max_points}分`,
+            answer.excluded ? "已反馈 · 不计分" : answer.points === null ? "待判分" : `${n2(answer.points)}/${n2(answer.max_points)}分`,
             title,
           );
           const body = make("div", undefined, details);
@@ -508,7 +509,7 @@
       make(
         "span",
         data.max
-          ? `${data.points}/${data.max}分 · ${Math.round((data.points / data.max) * 100)}%`
+          ? `${n2(data.points)}/${n2(data.max)}分 · ${Math.round((data.points / data.max) * 100)}%`
           : "暂无已判分数据",
         heading,
       );

@@ -5,6 +5,7 @@
    /v2/practice/{id}/review; nothing is invented. Reads go through Data.swr: what was seen before is shown at once. */
 (() => {
   const $ = (id) => document.getElementById(id);
+  const n2 = (v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v);   // points are exact inside, shown with at most two decimals
   const SHORT = { biochemistry: "生化", cell_biology: "细胞" };
   const SUBJECT_COLOR = { biochemistry: "var(--chart-bio)", cell_biology: "var(--chart-cell)" };
   const TYPE = { single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答", essay: "问答" };
@@ -248,7 +249,7 @@
       const left = el("span", undefined, a, "recent-main");
       el("b", r.label, left);
       el("small", `${md(r.date)}${r.seconds ? " · 用时 " + mmss(r.seconds) : ""}`, left);
-      el("span", r.points === null ? "判分中" : `${r.points} / ${r.max_points}`, a, "recent-score" + (r.points === null ? " pending" : ""));
+      el("span", r.points === null ? "判分中" : `${n2(r.points)} / ${n2(r.max_points)}`, a, "recent-score" + (r.points === null ? " pending" : ""));
       el("span", "›", a, "chev");
     });
   }
@@ -276,7 +277,7 @@
     if (item.wrong_times >= 2) el("span", `错 ${item.wrong_times} 次`, top, "mc-times");
     el("p", item.stem || "（题干不可用）", card, "mc-stem");
     const cmp = el("p", undefined, card, "mc-cmp");
-    if (item.subjective) el("span", `得分 ${item.points ?? "—"} / ${item.max_points} 分`, cmp);
+    if (item.subjective) el("span", `得分 ${n2(item.points) ?? "—"} / ${n2(item.max_points)} 分`, cmp);
     else {
       if (item.your_answer) el("span", `你的答案：${item.your_answer} ✗`, cmp, "mc-wrong");
       if (item.correct) el("span", `正确答案：${item.correct}`, cmp, "mc-right");
@@ -369,7 +370,7 @@
     const head = el("div", undefined, root, "qd-head");
     el("span", TYPE[d.question_type], head, "mc-type");
     el("span", `${SHORT[d.subject]} · ${d.chapter}`, head, "mc-chapter");
-    if (d.points !== null && d.points !== undefined) el("span", `${d.points} / ${d.max_points} 分`, head, "qd-score");
+    if (d.points !== null && d.points !== undefined) el("span", `${n2(d.points)} / ${n2(d.max_points)} 分`, head, "qd-score");
     el("p", d.stem, root, "qd-stem");
     if (d.question_type === "single_choice" && d.options && Object.keys(d.options).length) {
       const list = el("ul", undefined, root, "qd-options");
@@ -382,8 +383,19 @@
         else if (right) el("em", "正确答案", li);
       });
     } else {
-      answerBlock(root, "你的答案", d.your_answer, d.status === "right" ? "ok" : "bad");
-      answerBlock(root, "参考答案", d.reference || (d.accepted_answers || []).join(" / "), "ok");
+      if (d.blanks && d.blanks.length) {
+        // a fill-in with several blanks: each blank on its own line, with what it earned of what it was worth
+        const box = el("div", undefined, root, "criteria blank-rows");
+        el("h4", "逐空对照", box);
+        d.blanks.forEach((b) => {
+          const row = el("div", undefined, box, "criterion-row" + (b.points !== null && b.points < b.max_points ? " lost" : ""));
+          el("span", `${"①②③"[b.index - 1]} 你的答案：${b.yours || "（未答）"}　正确答案：${b.correct}`, row);
+          el("b", `${b.points === null || b.points === undefined ? "—" : (Math.round(b.points * 100) / 100)} / ${Math.round(b.max_points * 100) / 100}`, row);
+        });
+      } else {
+        answerBlock(root, "你的答案", d.your_answer, d.status === "right" ? "ok" : "bad");
+        answerBlock(root, "参考答案", d.reference || (d.accepted_answers || []).join(" / "), "ok");
+      }
     }
     if (d.question_type === "single_choice") answerBlock(root, "参考答案", d.reference, "ok");
     const items = (d.criteria && d.criteria.length) ? d.criteria : null;
@@ -393,13 +405,13 @@
       items.forEach((c, i) => {
         const row = el("div", undefined, box, "criterion-row" + (c.points < c.max_points ? " lost" : ""));
         el("span", `${i + 1}. ${c.description}`, row);
-        el("b", `${c.points} / ${c.max_points}`, row);
+        el("b", `${n2(c.points)} / ${n2(c.max_points)}`, row);
         if (d.criterion_reasons && d.criterion_reasons[i]) el("small", "理由：" + d.criterion_reasons[i], box, "reason");
       });
     } else if (!["single_choice", "fill_blank"].includes(d.question_type) && (d.rubric || d.scores?.criteria || []).length) {
       const box = el("div", undefined, root, "criteria");
       el("h4", "评分要点", box);
-      (d.rubric || []).forEach((c, i) => el("p", `${i + 1}. ${c.description}（${c.points} 分）`, box));
+      (d.rubric || []).forEach((c, i) => el("p", `${i + 1}. ${c.description}（${n2(c.points)} 分）`, box));
     }
     if (d.scores?.criteria?.length) {
       const box = el("div", undefined, root, "criteria");
@@ -407,7 +419,7 @@
       d.scores.criteria.forEach((c, i) => {
         const row = el("div", undefined, box, "criterion-row" + (c.points < c.max_points ? " lost" : ""));
         el("span", `${i + 1}. ${c.description}`, row);
-        el("b", `${c.points} / ${c.max_points}`, row);
+        el("b", `${n2(c.points)} / ${n2(c.max_points)}`, row);
         if (d.scores.criterion_reasons?.[i]) el("small", "理由：" + d.scores.criterion_reasons[i], box, "reason");
       });
     }
@@ -421,7 +433,7 @@
     if (history && history.length) {
       const box = el("div", undefined, root, "history");
       el("h4", "错误历史", box);
-      history.forEach((h) => el("p", `${md(h.date)} · ${h.points} / ${h.max_points} 分${h.kind === "practice" ? "（练习）" : ""}`, box));
+      history.forEach((h) => el("p", `${md(h.date)} · ${n2(h.points)} / ${n2(h.max_points)} 分${h.kind === "practice" ? "（练习）" : ""}`, box));
     }
   }
   let detailId = null;
@@ -467,18 +479,18 @@
     if (s.pending && s.kind === "paper") {
       // the subjective answers are still being graded: the objective part, never a total (and never 0)
       el("strong", String(s.objective_points), total);
-      el("span", ` / ${s.objective_max} 分 · 客观题`, total);
+      el("span", ` / ${n2(s.objective_max)} 分 · 客观题`, total);
       el("span", "主观题判分中", total, "pill");
     } else {
       el("strong", s.pending ? "判分中" : String(s.score ?? s.graded_points), total);
-      el("span", ` / ${s.max_points} 分`, total);
+      el("span", ` / ${n2(s.max_points)} 分`, total);
     }
     if (s.read_only && s.kind === "paper") el("span", "旧卷 · 只读", total, "pill");
     const subjects = el("div", undefined, card, "rh-subjects");
     Object.entries(s.subject_scores || {}).forEach(([subject, v]) => {
       const box = el("div", undefined, subjects);
       el("span", SHORT[subject], box, "rh-subj");
-      el("b", `${v.points} / ${v.max_points}`, box);
+      el("b", `${n2(v.points)} / ${n2(v.max_points)}`, box);
     });
     if (s.seconds) {
       const box = el("div", undefined, subjects);
@@ -561,7 +573,7 @@
       head.setAttribute("aria-expanded", "false");
       el("b", `第 ${item.position} 题`, head, "rq-no");
       el("span", `${SHORT[item.subject]} · ${TYPE[item.question_type]}`, head, "rq-type");
-      el("span", item.status === "reported" ? STATUS.reported : item.points === null ? "判分中" : `${item.points} / ${item.max_points}`, head, "rq-score");
+      el("span", item.status === "reported" ? STATUS.reported : item.points === null ? "判分中" : `${n2(item.points)} / ${n2(item.max_points)}`, head, "rq-score");
       el("span", item.stem, box, "rq-stem");
       if (item.status === "pending" && item.pending_text) el("span", item.pending_text, box, "rq-pending");
       head.onclick = () => openQuestion(box, item);

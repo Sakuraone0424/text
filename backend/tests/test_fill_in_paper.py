@@ -135,3 +135,16 @@ def test_a_real_two_or_three_blank_fill_in_is_imported_whole_and_more_than_three
 def test_the_answer_schema_carries_one_accepted_list_per_blank():
     parsed = PastExamAnswer.model_validate(dict(supported=True, blanks=[["丙酮酸"], ["ATP", "三磷酸腺苷"]], answer="丙酮酸；ATP", rubric=[]))
     assert parsed.blanks == [["丙酮酸"], ["ATP", "三磷酸腺苷"]]
+
+
+# ---- the review shows every blank ---------------------------------------------------------------------------------------------------
+
+def test_the_review_lists_each_blank_with_what_it_earned():
+    from app.mistake_book import blank_rows
+
+    q = fill([["丙酮酸"], ["ATP", "三磷酸腺苷"], ["NADH"]])
+    rows = blank_rows(q, '{"blanks": ["丙酮酸", "ADP", ""]}', {"blank_points": [2.5 / 3, 0, 0]})
+    assert [(r["index"], r["yours"], r["correct"]) for r in rows] == [(1, "丙酮酸", "丙酮酸"), (2, "ADP", "ATP"), (3, "", "NADH")]
+    assert rows[0]["points"] == pytest.approx(2.5 / 3) and rows[1]["points"] == 0 and rows[0]["max_points"] == pytest.approx(2.5 / 3)
+    assert rows[1]["accepted"] == ["ATP", "三磷酸腺苷"]
+    assert blank_rows(fill([["a"]]), '{"text": "a"}', {}) is None           # a one-blank question has no blank table
