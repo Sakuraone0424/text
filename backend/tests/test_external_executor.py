@@ -21,7 +21,7 @@ def api(db, client, monkeypatch):
 
     monkeypatch.setattr(external_api, "get_db", test_db)
     monkeypatch.setenv("EXTERNAL_EXECUTOR_TOKEN", TOKEN)
-    monkeypatch.delenv("EXECUTOR_GENERATION", raising=False)
+    monkeypatch.setenv("EXECUTOR_GENERATION", "claude_first")       # the default is DeepSeek until the owner has seen a Routine run; these tests are about Claude first
     monkeypatch.delenv("EXECUTOR_REVIEW", raising=False)
     monkeypatch.delenv("EXECUTOR_GRADING", raising=False)
     monkeypatch.setattr(gen, "pinned_science_evidence", lambda content: True)
@@ -117,7 +117,7 @@ def test_the_route_decides_who_may_take_a_task(db, corpus, setup_ai, api):
 
 def test_defaults_and_the_environment_fallback(db, monkeypatch):
     monkeypatch.delenv("EXECUTOR_GENERATION", raising=False)
-    assert ext.policy(db) == dict(generation="claude_first", review="deepseek", grading="deepseek", fallback_hours=4)
+    assert ext.policy(db) == dict(generation="deepseek", review="deepseek", grading="deepseek", fallback_hours=4)    # everything starts with DeepSeek
     monkeypatch.setenv("EXECUTOR_REVIEW", "claude")
     monkeypatch.setenv("EXECUTOR_FALLBACK_HOURS", "6")
     pol = ext.policy(db)

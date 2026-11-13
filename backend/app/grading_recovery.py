@@ -154,12 +154,40 @@ def requeue(conn, user_id, paper_id=None, question_id=None, final_too=False):
     return dict(done)
 
 
+def shrink_oversized_requests(conn, user_id):
+    """A task that was queued with more textbook entries than one request may carry fails the execution guard on every attempt
+    (evidence_exceeds_hard_cap) and is retried for ever. Its request is cut down to what is allowed (see auto_execution.fit_evidence:
+    merged one entry per paragraph, at most four paragraphs) and it starts again with a fresh retry budget. Any kind of task with a
+    list of textbook entries is covered, not only grading. Returns how many were put right."""
+    from psycopg.types.json import Jsonb
+
+    from app.auto_execution import fit_evidence
+
+    fixed = 0
+    for job in conn.execute(
+        "SELECT id,payload FROM ai_jobs WHERE user_id=%s AND state IN ('retrying','blocked','pending') AND lease_token IS NULL "
+        "AND error_code LIKE %s", (user_id, "%evidence_exceeds_hard_cap%")
+    ).fetchall():
+        evidence = job["payload"].get("evidence")
+        if not isinstance(evidence, list) or not all(isinstance(e, dict) for e in evidence):
+            continue
+        payload = {**job["payload"], "evidence": fit_evidence(evidence)}
+        conn.execute(
+            "UPDATE ai_jobs SET payload=%s,state='retrying',next_retry=clock_timestamp(),attempts=0,transient_attempts=0,platform_streak=0,"
+            "error_code=NULL,dispatched_at=NULL WHERE id=%s", (Jsonb(payload), job["id"]))
+        fixed += 1
+    return fixed
+
+
 def recover(conn, user_id, report_to=None):
     """The worker's housekeeping each run: grading tasks blocked for a reason that has passed go back to the queue; once, every
     stuck answer is asked again (including the ones that ended undecided). Grading is not held back by the peak rules."""
     from app import legacy_reuse
 
     counts = requeue(conn, user_id)
+    shrunk = shrink_oversized_requests(conn, user_id)
+    if shrunk:
+        counts["evidence_shrunk"] = shrunk
     # subjective practice answers wait for the same grading: a blocked task goes back like a paper's
     practice = conn.execute(
         "UPDATE ai_jobs SET state='retrying',next_retry=clock_timestamp(),transient_attempts=attempts,platform_streak=0,error_code=NULL,dispatched_at=NULL "

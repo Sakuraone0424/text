@@ -25,7 +25,8 @@ DEEPSEEK = "deepseek"
 MODES = ("deepseek", "claude", "claude_first")
 TASKS = ("generation", "review", "grading")
 STATE_KEY = "executor_routing"
-DEFAULTS = {"generation": "claude_first", "review": "deepseek", "grading": "deepseek", "fallback_hours": 4}
+# DeepSeek does everything until the owner has seen a Routine run through and switches "出题" to Claude first himself
+DEFAULTS = {"generation": "deepseek", "review": "deepseek", "grading": "deepseek", "fallback_hours": 4}
 ENV_FOR = {"generation": "EXECUTOR_GENERATION", "review": "EXECUTOR_REVIEW", "grading": "EXECUTOR_GRADING"}
 
 # which queued jobs belong to which kind of task a Routine can lease
@@ -118,6 +119,29 @@ def save_policy(conn, values):
         current["fallback_hours"] = values["fallback_hours"]
     legacy_reuse._set_state(conn, STATE_KEY, current)
     return current
+
+
+def waiting_for_claude(conn):
+    """Tasks that only a Routine may take for now (routed to Claude, or pinned to it), not leased at the moment: how many there are, how long the
+    oldest has waited and, under 'Claude first', in how many hours DeepSeek takes them over. None when nothing waits."""
+    pol = policy(conn)
+    parts, params = [], []
+    for task in TASKS:
+        mode = pol[task]
+        if mode == "deepseek":
+            parts.append(f"({FAMILY_SQL[task]} AND executor='claude-subscription')")
+        else:
+            parts.append(f"({FAMILY_SQL[task]} AND (executor='claude-subscription' OR executor IS NULL))")
+    row = conn.execute(
+        "SELECT count(*) AS n,EXTRACT(EPOCH FROM clock_timestamp()-min(created_at))/3600 AS oldest_hours FROM ai_jobs "
+        "WHERE state IN ('pending','retrying') AND lease_token IS NULL AND (" + " OR ".join(parts) + ") "
+        "AND NOT EXISTS(SELECT 1 FROM external_leases l WHERE l.job_id=ai_jobs.id AND l.state='active' AND l.expires_at>clock_timestamp())"
+    ).fetchone()
+    if not row["n"]:
+        return None
+    fallback = pol["fallback_hours"] if "claude_first" in (pol["generation"], pol["review"], pol["grading"]) else None
+    left = None if fallback is None else max(0.0, round(fallback - float(row["oldest_hours"] or 0), 1))
+    return dict(count=row["n"], oldest_hours=round(float(row["oldest_hours"] or 0), 1), hand_over_hours=left, fallback_hours=fallback)
 
 
 def deepseek_hold(conn):

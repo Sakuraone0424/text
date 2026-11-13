@@ -970,14 +970,20 @@ def retire_old_scoring(conn):
     """
     from app.training_spec_v5 import POINTS
 
+    # compared in SQL, as numbers (2.5 and 2.50 are the same value): only the questions that really differ come back
+    def points_sql(kind_column):
+        return f"CASE {kind_column} " + " ".join(f"WHEN '{k}' THEN {v}" for k, v in POINTS.items()) + " END"
+
+    question_points = points_sql("q.content->>'question_type'")
+    job_points = points_sql("payload->>'question_type'")
+
     old = [
         r["question_id"]
         for r in conn.execute(
-            "SELECT s.question_id,q.content->>'question_type' AS kind,q.content->>'max_points' AS points "
-            "FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
-            "WHERE s.status IN ('candidate','checking','repairing','ready','blocked') AND COALESCE(s.reason,'')<>'rescale_impossible'"
+            "SELECT s.question_id FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
+            "WHERE s.status IN ('candidate','checking','repairing','ready','blocked') AND COALESCE(s.reason,'')<>'rescale_impossible' "
+            "AND (q.content->>'max_points')::numeric IS DISTINCT FROM (" + question_points + ")::numeric"
         ).fetchall()
-        if str(POINTS.get(r["kind"])) != r["points"]
     ]
     if old:
         conn.execute(
@@ -1003,10 +1009,9 @@ def retire_old_scoring(conn):
     stale = [
         r["id"]
         for r in conn.execute(
-            "SELECT id,payload->>'question_type' AS kind,payload->>'max_points' AS points FROM ai_jobs "
-            "WHERE kind='generation' AND state IN ('pending','retrying')"
+            "SELECT id FROM ai_jobs WHERE kind='generation' AND state IN ('pending','retrying') "
+            "AND (payload->>'max_points')::numeric IS DISTINCT FROM (" + job_points + ")::numeric"
         ).fetchall()
-        if str(POINTS.get(r["kind"])) != r["points"]
     ]
     if stale:
         conn.execute(
@@ -1021,36 +1026,40 @@ def retire_old_scoring(conn):
 
 
 STALE_RECHECK_MINUTES = 30
-_STALE_CHECKED = {}     # question id -> (monotonic time of its last successful check, content hash)
+STALE_PER_RUN = 150      # at most this many questions are verified in one planning pass: the rest wait for the next run
 
 
 def retire_stale(conn, now=None):
-    """Withdraw a ready / checking question whose candidate or source was superseded. Re-verifying every question on every planning tick
-    (every few minutes) cost tens of seconds, so a question that passed is not looked at again for 30 minutes (a few minutes more or
-    less per question, so they do not all fall due on the same tick); the first pass after a restart checks them all."""
-    import time
-
-    now = time.monotonic() if now is None else now
-    for row in conn.execute(
-        "SELECT question_id,content_sha256 FROM auto_question_states WHERE status IN ('ready','checking')"
-    ).fetchall():
+    """Withdraw a ready / checking question whose candidate or source was superseded. Verifying every question on every planning pass cost
+    seconds, and the worker is a new process each run, so what was verified is kept with the question's state (stale_checked_at/sha): a
+    question that passed is not looked at again for 30 minutes (a few minutes more or less per question, so they do not all fall due
+    together), changed content is looked at at once, and one pass looks at no more than STALE_PER_RUN questions. `now` (a monotonic clock
+    value) is accepted for old callers and ignored."""
+    due = conn.execute(
+        "SELECT question_id,content_sha256 FROM auto_question_states WHERE status IN ('ready','checking') AND ("
+        "stale_checked_at IS NULL OR stale_checked_sha IS DISTINCT FROM content_sha256 "
+        "OR stale_checked_at < clock_timestamp() - make_interval(mins => (%s + (question_id %% 10))::int)) "
+        "ORDER BY stale_checked_at NULLS FIRST,question_id LIMIT %s", (STALE_RECHECK_MINUTES, STALE_PER_RUN)).fetchall()
+    ok = []
+    for row in due:
         qid = row["question_id"]
-        seen = _STALE_CHECKED.get(qid)
-        if seen and seen[1] == row["content_sha256"] and now - seen[0] < (STALE_RECHECK_MINUTES + qid % 10) * 60:
-            continue
         try:
-            evidence(conn, row["question_id"])
-            _STALE_CHECKED[qid] = (now, row["content_sha256"])
+            evidence(conn, qid)
+            ok.append((qid, row["content_sha256"]))
         except (ValueError, LookupError):
-            _STALE_CHECKED.pop(qid, None)
             conn.execute(
                 "UPDATE auto_question_states SET status='retired',reason='source_or_candidate_superseded',updated_at=clock_timestamp() WHERE question_id=%s",
-                (row["question_id"],),
+                (qid,),
             )
             conn.execute(
                 "UPDATE reviewed_questions SET status='withdrawn' WHERE id=%s AND status='published'",
-                (row["question_id"],),
+                (qid,),
             )
+    if ok:
+        conn.execute(
+            "UPDATE auto_question_states s SET stale_checked_at=clock_timestamp(),stale_checked_sha=v.sha "
+            "FROM unnest(%s::bigint[],%s::text[]) AS v(id,sha) WHERE s.question_id=v.id",
+            ([q for q, _ in ok], [h for _, h in ok]))
 
 
 def requeue_past_exam_duplicates(conn):

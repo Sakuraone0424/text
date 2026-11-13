@@ -260,13 +260,3 @@ def writing_is_deepseeks_in_the_older_tests(monkeypatch):
     """The production default routes question writing to a Claude scheduled task first. The existing tests exercise the DeepSeek worker's
     path, so they run with writing routed to DeepSeek; test_external_executor.py clears this to test the real default."""
     monkeypatch.setenv("EXECUTOR_GENERATION", "deepseek")
-
-
-@pytest.fixture(autouse=True)
-def forget_which_questions_retire_stale_has_checked():
-    """retire_stale remembers (in memory) which questions it checked lately; every test starts with a fresh database."""
-    from app import auto_quality
-
-    auto_quality._STALE_CHECKED.clear()
-    yield
-    auto_quality._STALE_CHECKED.clear()

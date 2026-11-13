@@ -453,6 +453,16 @@ function executors(report) {
   const root = $("executors");
   root.replaceChildren();
   const route = data.routing || {};
+  const waiting = data.waiting, notice = $("claude-waiting");
+  if (notice) {
+    // tasks that only a Routine may take: said plainly at the top of the page, with the time DeepSeek takes them over
+    notice.hidden = !waiting;
+    if (waiting) {
+      notice.textContent = `${waiting.count} 个任务在等 Claude 定时任务领取` +
+        (waiting.hand_over_hours === null || waiting.hand_over_hours === undefined ? "（不会自动转给 DeepSeek）" : `，${waiting.hand_over_hours} 小时后转给 DeepSeek`) +
+        (waiting.oldest_hours >= 1 ? `。最早的已等 ${waiting.oldest_hours} 小时` : "");
+    }
+  }
   $("executors-note").textContent = route.generation ? `出题：${ROUTE[route.generation] || route.generation}` + (route.generation === "claude_first" ? `（${route.fallback_hours} 小时没人领就交给 DeepSeek）` : "") + `；审核：${ROUTE[route.review] || route.review}；判分：${ROUTE[route.grading] || route.grading}` : "";
   for (const key of ["claude-subscription", "deepseek"]) {
     const d = (data.today || {})[key] || { done: 0, passed: 0, pass_rate: null, avg_seconds: null };

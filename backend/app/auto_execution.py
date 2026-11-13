@@ -34,6 +34,31 @@ KINDS = frozenset(
 TOKEN_LIMITS = (128, 32768)
 
 
+def fit_evidence(items, id_key="unit_id", text_key="text", max_units=MAX_EVIDENCE_UNITS, max_chars=MAX_EVIDENCE_CHARS):
+    """The textbook entries of a request cut down to what one request may carry (at most `max_units` entries and `max_chars` characters):
+    up to the limit nothing changes; above it the entries are merged one per paragraph (the passages of one paragraph joined), at most
+    `max_units` paragraphs are kept, and the texts are shortened evenly if they are still too long. Never raises: a request that
+    can be made smaller is made smaller instead of being refused every time."""
+    items = [dict(i) for i in items]
+    if len(items) <= max_units and sum(len(str(i.get(text_key, ""))) for i in items) <= max_chars:
+        return items
+    merged = {}
+    for item in items:
+        key = item.get(id_key)
+        if key in merged:
+            if item.get(text_key) and item[text_key] not in merged[key][text_key]:
+                merged[key][text_key] = (merged[key][text_key] + "\n\n" + item[text_key]).strip()
+        else:
+            merged[key] = {**item, text_key: str(item.get(text_key, ""))}
+    out = list(merged.values())[:max_units]
+    total = sum(len(i[text_key]) for i in out)
+    if total > max_chars:
+        share = max_chars // len(out)
+        for i in out:
+            i[text_key] = i[text_key][:share]
+    return out
+
+
 def bounded_material(payload):
     """Refuse a request that carries more than one question's worth of textbook."""
     if len(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()) > MAX_PAYLOAD_BYTES:
