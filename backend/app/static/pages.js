@@ -73,27 +73,11 @@
     const t = window.TrainingUI?.today?.() || {};
     const mine = window.Insights?.todayPapers?.()?.[kind];
     const known = seen[kind] || (mine ? { status: { prepared: "not_started", in_progress: "in_progress", submitted: "submitted" }[mine.state], paperId: mine.paper_id } : null);
-    const active = t.hasPaper && t.kind === kind;
-    const minutes = minutesOf[kind];
-    if (known?.status === "in_progress") {
-      const clock = active && t.clock && /\d/.test(t.clock) ? t.clock : "--:--";
-      return { kind: "continue", label: active ? `继续作答（剩余 ${clock}）` : "继续作答", pill: "正在作答", paperId: known.paperId };
-    }
-    if (known?.status === "submitted") {
-      const done = mine && mine.points !== undefined && mine.points !== null;
-      return { kind: "result", label: done ? `查看成绩（${mine.points} / ${mine.max}）` : mine && mine.objective_max ? `查看成绩（客观题 ${mine.objective_points} / ${mine.objective_max}）` : "查看成绩（判分中）", pill: "已提交", green: true, paperId: known.paperId };
-    }
-    if (known?.status === "not_started") return { kind: "start", label: `开始（${minutes} 分钟）`, pill: "尚未开始", green: true, paperId: known.paperId };
-    // never "已就绪" before the state is actually known: the bank (no paper yet) or the paper itself (one exists; opening it loads it)
-    const lock = window.Insights?.bankFor?.(kind);
-    if (!loaded || !lock) return { kind: "loading", label: "开始", pill: "状态待载入" };
-    if (!lock.complete) {
-      const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clockText(lock.eta_at)} 可开始` : "，暂不能开始";
-      const cells = (lock.short_cells || []).map((c) => `${SHORT[c.subject]}${TYPE[c.question_type]}缺 ${c.missing}`).join("、");
-      const missing = (lock.short_cells || []).reduce((n, c) => n + c.missing, 0) || lock.missing;
-      return { kind: "short", label: `题库还差 ${missing} 道${when}`, pill: "题库准备中", reason: `每科每个题型都要凑够一张卷子的新题，不会用旧题凑。${cells ? "还差：" + cells + "。" : ""}` };
-    }
-    return { kind: "prepare", label: `准备${PAPER_NAME[kind]}`, pill: "已就绪" };
+    // (the decision itself is logic.js: no page in it, unit-tested)
+    return window.Logic.cardState({
+      name: PAPER_NAME[kind], minutes: minutesOf[kind], known, active: Boolean(t.hasPaper && t.kind === kind), today: t, mine,
+      lock: window.Insights?.bankFor?.(kind), loaded,
+    }, clockText);
   }
   function clockText(iso) {
     const parts = Object.fromEntries(new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
@@ -280,10 +264,7 @@
      ------------------------------------------------------------------------------------------------------------------ */
   const view = { mode: "due", subject: "", type: "", chapter: "", open: false };
   let book = null;
-  const dueText = (day, today) => {
-    const diff = Math.round((new Date(day + "T00:00:00") - new Date(today + "T00:00:00")) / 86400000);
-    return diff <= 0 ? "今天" : diff === 1 ? "明天" : diff < 7 ? `${diff} 天后` : md(day);
-  };
+  const dueText = (day, today) => window.Logic.dueText(day, today, md);
   function mistakeCard(item, today) {
     const card = el("a", undefined, null, "mistake-card");
     card.href = "#/mistake/m" + item.question_id;

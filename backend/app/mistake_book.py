@@ -176,6 +176,10 @@ def detail(conn, uid, question_id):
         chapter=mapper.name(content["subject"], raw_chapter) if raw_chapter else chapters.OTHER,
         stem=content["stem"], options=content.get("options") or {}, max_points=content["max_points"],
         your_answer=plain_answer(last["answer"]) if last else "", points=last["points"] if last else None,
+        # which option was picked and which is right (the page marks them); only for a single choice
+        your_choice=(plain_answer(last["answer"]).strip().upper() if last and content["question_type"] == "single_choice"
+                     and plain_answer(last["answer"]).strip().upper() in (content.get("options") or {}) else None),
+        correct_choice=content.get("answer") if content["question_type"] == "single_choice" else None,
         reference=content.get("answer"), accepted_answers=content.get("accepted_answers") or [],
         rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
         scores=scores, evidence=sources_of(content), history=[dict(date=h["date"], points=h["points"], max_points=h["max_points"], kind=h["kind"]) for h in history],

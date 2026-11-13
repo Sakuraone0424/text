@@ -119,6 +119,8 @@ def detail(conn, uid, paper_id, question_id):
         your_answer=mine, reference=(f"{reference}. {options.get(reference, '')}" if snap["question_type"] == "single_choice" and reference in options else reference),
         accepted_answers=snap.get("accepted_answers") or [], points=row["points"], max_points=snap["max_points"], status=status_of(snap, row["answer"], row["points"], reported),
         reported=reported, criteria=feedback.get("criteria") or [], criterion_reasons=feedback.get("criterion_reasons") or [],
+        # (the page draws the scored criteria from `scores`, the same field the mistake page has)
+        scores=dict(criteria=feedback.get("criteria") or [], criterion_reasons=feedback.get("criterion_reasons") or []) if feedback.get("criteria") else None,
         rubric=[dict(description=c["description"], points=c["points"]) for c in snap.get("rubric") or []],
         blank_points=feedback.get("blank_points"), comment=feedback.get("comment"),
         concept_errors=feedback.get("concept_errors") or [], imprecisions=feedback.get("imprecisions") or [], suggestions=feedback.get("suggestions") or [],
@@ -176,7 +178,9 @@ def practice_detail(conn, uid, set_id, question_id):
         reference=(f"{reference}. {options.get(reference, '')}" if content["question_type"] == "single_choice" and reference in options else reference),
         accepted_answers=content.get("accepted_answers") or [], points=a["points"] if a else None, max_points=content["max_points"],
         status="blank" if not a else "pending" if a["points"] is None else "right" if a["points"] >= a["max_points"] else "partial" if a["points"] > 0 else "wrong", reported=False,
-        criteria=((a["feedback"] or {}).get("criteria") or []) if a else [], criterion_reasons=((a["feedback"] or {}).get("criterion_reasons") or []) if a else [], rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
+        criteria=((a["feedback"] or {}).get("criteria") or []) if a else [], criterion_reasons=((a["feedback"] or {}).get("criterion_reasons") or []) if a else [],
+        scores=(dict(criteria=(a["feedback"] or {}).get("criteria") or [], criterion_reasons=(a["feedback"] or {}).get("criterion_reasons") or [])
+                if a and (a["feedback"] or {}).get("criteria") else None), rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
         blank_points=a["answer"].get("blank_points") if a and isinstance(a["answer"], dict) else None, comment=((a["feedback"] or {}).get("comment") if a else None), concept_errors=[], imprecisions=[], suggestions=[],
         evidence=sources_of(content),
     )
