@@ -339,7 +339,7 @@ def eligible_reserve_count(conn, uid, subject, kind, cached=False, points=None):
     return eligible_verified_reserve(conn, eligible, cached=cached)
 
 
-def assemble_payload(conn, subject, kind, primary, anchor_quote, style_concept, blank_count=1):
+def assemble_payload(conn, subject, kind, primary, anchor_quote, style_concept):
     """Everything ONE question-writing request carries; None if it cannot be built safely."""
     if len(primary["text"]) > past_exam_import.MAX_EVIDENCE_CHARS:
         return None
@@ -381,7 +381,6 @@ def assemble_payload(conn, subject, kind, primary, anchor_quote, style_concept, 
         style_year=style["year"],
         style_overlap=style["lexical_topic_overlap"],
         source_bibliography=book,
-        **({"blank_count": blank_count} if kind == "fill_blank" else {}),
         schema=(ChoiceDraft if kind == "single_choice" else Question).model_json_schema(),
         instructions=exam_instructions(kind, POINTS[kind])
         + " For at least one citation, copy anchor_exact_excerpt EXACTLY "
@@ -487,7 +486,7 @@ def bucket_detail(conn, uid):
         conn,
         "SELECT subject AS s,question_type AS t,count(*) AS n FROM past_exam_items "
         "WHERE (status='queued' AND question_type='term') "  # imported term items are throttled: they no longer hold back new ones
-        "OR (status IN ('imported','queued') AND question_type IN ('short_answer','essay','fill_blank')) GROUP BY 1,2",   # real past-exam fill-ins (incl. the single blanks split out of multi-blank questions) first: the AI writes only what they cannot cover
+        "OR (status IN ('imported','queued') AND question_type IN ('short_answer','essay','single_choice')) GROUP BY 1,2",   # real past-exam singles first: the AI writes only what they cannot cover
     )
     out = []
     for subject, kind, required in balanced_generation_buckets(generation_attempts(conn, uid)):
@@ -777,7 +776,6 @@ def build_gap_request(conn, uid, subject, kind, avoid_units=()):
         payload = assemble_payload(
             conn, subject, kind, primary, anchor,
             {"unit_id": unit_id, "relation": {"name": primary["chapter"]}},
-            blank_count=rng.choices(FILL_BLANK_COUNTS, weights=FILL_BLANK_WEIGHTS)[0] if kind == "fill_blank" else 1,
         )
         if payload is not None:
             return key, payload
@@ -792,18 +790,14 @@ def claimable_count(conn):
     ).fetchone()["n"]
 
 
-# how many blanks a newly written fill-in is asked to have: mostly one, sometimes two or three (a paper never holds more than a third)
-FILL_BLANK_COUNTS = (1, 2, 3)
-FILL_BLANK_WEIGHTS = (70, 20, 10)
-BIGGEST_BUCKET = "fill_blank"        # the objective paper is all fill-ins (60 a day): by far the biggest gap, filled first
-BIGGEST_BUCKET_MIN_SHARE = 0.45
+SINGLE_CHOICE_MIN_SHARE = 0.30
 ALLOCATION_WINDOW = 20   # the share is measured over the last 20 question-writing requests
 
 
 def allocate_order(conn, gaps):
     """Order the short buckets so the requests are shared out in proportion to the gaps: a bucket whose share of the
-    recent requests is furthest below its share of the total gap goes first. Fill-in (the biggest gap) never gets
-    less than BIGGEST_BUCKET_MIN_SHARE of the recent requests while it has a gap."""
+    recent requests is furthest below its share of the total gap goes first. Single choice (the biggest gap) never gets
+    less than SINGLE_CHOICE_MIN_SHARE of the recent requests while it has a gap."""
     if len(gaps) < 2:
         return list(gaps)
     recent = Counter()
@@ -824,10 +818,10 @@ def allocate_order(conn, gaps):
     starved = [g for g in ordered if seen >= ALLOCATION_WINDOW // 2 and recent[(g[0], g[1])] == 0]
     if starved:
         ordered = starved[:1] + [g for g in ordered if g is not starved[0]]
-    biggest = [g for g in ordered if g[1] == BIGGEST_BUCKET]
-    share = sum(v for (s_, t_), v in recent.items() if t_ == BIGGEST_BUCKET) / seen if seen else 0
-    if biggest and share < BIGGEST_BUCKET_MIN_SHARE:
-        ordered = biggest + [g for g in ordered if g[1] != BIGGEST_BUCKET]
+    single = [g for g in ordered if g[1] == "single_choice"]
+    share = sum(v for (s_, t_), v in recent.items() if t_ == "single_choice") / seen if seen else 0
+    if single and share < SINGLE_CHOICE_MIN_SHARE:
+        ordered = single + [g for g in ordered if g[1] != "single_choice"]
     return ordered
 
 

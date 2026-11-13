@@ -16,7 +16,7 @@ WEAK_CHAPTERS_SHOWN = 5   # chapters listed on the home card
 MIN_CHAPTER_ANSWERS = 3  # fewer graded answers than this say nothing about a chapter
 
 
-from app.training_spec_v5 import KIND_LABEL  # noqa: E402
+KIND_LABEL = {"objective": "客观题卷", "subjective": "主观题卷", "mixed": "旧版混合卷"}
 
 
 def paper_kind(spec):
@@ -47,7 +47,7 @@ def graded_rows(conn, uid):
         "SELECT p.id AS paper_id,p.paper_date,t.id AS attempt_id,t.submitted_at,"
         "p.blueprint->>'specification' AS spec,"
         "i.snapshot->>'subject' AS subject,i.snapshot->>'question_type' AS qtype,"
-        "(i.snapshot->>'max_points')::float8 AS max_points,i.snapshot->'evidence'->0->>'chapter' AS chapter,"
+        "(i.snapshot->>'max_points')::int AS max_points,i.snapshot->'evidence'->0->>'chapter' AS chapter,"
         "a.question_id,a.points,a.answer,tm.seconds "
         "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
@@ -226,7 +226,7 @@ def overview(conn, uid):
                 entry.update(objective_points=part["points"], objective_max=part["max"])
         today_papers[paper["kind"]] = entry
     # the one older field: today's paper as a single entry (the objective paper first, else the subjective, else a mixed one)
-    today_paper = next((today_papers[k] for k in ("objective", "objective_old", "subjective", "mixed") if k in today_papers), dict(state="none"))
+    today_paper = next((today_papers[k] for k in ("objective", "subjective", "mixed") if k in today_papers), dict(state="none"))
     last7, before7 = done[-7:], done[-14:-7]
     same = [p for p in last7 if done and p["max"] == done[-1]["max"]]
     objective = [0, 0]
@@ -256,7 +256,7 @@ def overview(conn, uid):
         streak=dict(current=current, longest=longest),
         today_paper=today_paper, today_papers=today_papers,
         # per kind of paper: the two v5 papers on their own, and the old mixed 60-question papers labelled separately
-        last7_by_kind={k: last_seven(k) for k in ("objective", "objective_old", "subjective", "mixed")},
+        last7_by_kind={k: last_seven(k) for k in ("objective", "subjective", "mixed")},
         last7=last_seven("mixed"),
         objective_only=_objective_only(rows),
         objective_rate=rate(*objective), subjective_rate=rate(*subjective),
@@ -266,7 +266,7 @@ def overview(conn, uid):
         has_data=bool(done),
         pending_papers=len(pending_ids),
         pending_by_kind={k: sum(1 for r in {(r["paper_id"], paper_kind(r["spec"])) for r in rows if r["paper_id"] in pending_ids} if r[1] == k)
-                         for k in ("objective", "objective_old", "subjective", "mixed")},
+                         for k in ("objective", "subjective", "mixed")},
     )
 
 
@@ -364,7 +364,7 @@ def timing(conn, uid, rows):
 def overtime_types(conn, uid, paper_id):
     """For the result page: question types that took far longer than their share of the hour."""
     rows = conn.execute(
-        "SELECT i.snapshot->>'question_type' AS qtype,(i.snapshot->>'max_points')::float8 AS max_points,tm.seconds "
+        "SELECT i.snapshot->>'question_type' AS qtype,(i.snapshot->>'max_points')::int AS max_points,tm.seconds "
         "FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id JOIN paper_items_v2 i ON i.paper_id=p.id "
         "LEFT JOIN answer_timings tm ON tm.attempt_id=t.id AND tm.question_id=i.question_id "
         "WHERE p.user_id=%s AND p.id=%s",
@@ -474,7 +474,7 @@ def history(conn, uid, only_kind=None):
             objective_points=p["obj_points"], objective_max=p["obj_max"],
             subjects=p["subjects"], seconds=seconds.get(p["paper_id"]), mistakes=p["mistakes"], consolidate=p["consolidate"],
         ))
-    counts = {k: sum(1 for c in cards if c["kind"] == k) for k in ("objective", "objective_old", "subjective", "mixed")}
+    counts = {k: sum(1 for c in cards if c["kind"] == k) for k in ("objective", "subjective", "mixed")}
     if only_kind in counts:
         cards = [c for c in cards if c["kind"] == only_kind]
     return dict(papers=cards, kinds=[dict(kind=k, label=KIND_LABEL[k], count=n) for k, n in counts.items()])

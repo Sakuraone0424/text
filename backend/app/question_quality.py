@@ -71,10 +71,9 @@ class Evidence(StrictModel):
 
 
 def _half_points(value):
-    """A scoring point is a whole number, a half, or an equal share of a question's points between blanks (a multiple of 1/12:
-    2.5 points over two blanks is 1.25 each, over three about 0.83 each: the exact value is kept, shown with two decimals)."""
-    if isinstance(value, float) and abs(value * 12 - round(value * 12)) > 1e-6:
-        raise ValueError("Scoring points must be whole, half or equal shares of a question's points")
+    """A scoring point is a whole number or a half (rescaling a question to the new maximum can leave halves)."""
+    if isinstance(value, float) and value * 2 != int(value * 2):
+        raise ValueError("Scoring points must be whole or half points")
     return int(value) if isinstance(value, float) and value == int(value) else value
 
 
@@ -113,7 +112,7 @@ class Question(StrictModel):
     knowledge_tags: list[str] = Field(default_factory=list, max_length=30)
     difficulty: Literal["core", "mechanism", "application"] = "core"
     style_reference_ids: list[StrictInt] = Field(default_factory=list, max_length=10)
-    max_points: Points = Field(ge=1, le=100)
+    max_points: int = Field(strict=True, ge=1, le=100)
 
     @model_validator(mode="after")
     def fit(self):
@@ -123,15 +122,12 @@ class Question(StrictModel):
             not set(c.knowledge_tags).issubset(self.knowledge_tags) for c in self.rubric
         ):
             raise ValueError("Rubric knowledge tags must belong to the question")
-        if abs(sum(c.points for c in self.rubric) - self.max_points) > 1e-6:
+        if sum(c.points for c in self.rubric) != self.max_points:
             raise ValueError("Rubric points must sum to max_points")
         permissible = {POINTS[self.question_type]}
         for module in (v2, v4, v5):
             if self.question_type in module.POINTS:
                 permissible.add(module.POINTS[self.question_type])
-        for scale in (v5.V5_POINTS, v5.V4_POINTS):
-            if self.question_type in scale:
-                permissible.add(scale[self.question_type])
         if self.max_points not in permissible:
             raise ValueError("max_points must match a supported versioned training specification")
         if self.question_type == "essay" and self.max_points == v4.POINTS["essay"]:
@@ -154,14 +150,11 @@ class Question(StrictModel):
                 raise ValueError("Multi-blank questions use blanks only")
             if (
                 self.stem.count("____") != len(self.blanks)
-                or abs(sum(b.points for b in self.blanks) - self.max_points) > 1e-6
+                or sum(b.points for b in self.blanks) != self.max_points
             ):
                 raise ValueError(
                     "Every blank needs a matching placeholder and points summing to max_points"
                 )
-            if self.max_points == v5.POINTS["fill_blank"] and len(self.rubric) != len(self.blanks):
-                # a fill-in of the current scale: one scoring point per blank
-                raise ValueError("Every blank needs its own scoring point")
         elif self.question_type == "fill_blank":
             if not self.accepted_answers or any(
                 not normalize(v) for v in self.accepted_answers
@@ -199,7 +192,7 @@ class Audit(StrictModel):
 
 
 class Blueprint(StrictModel):
-    points: dict[QuestionType, Union[StrictInt, StrictFloat]] = Field(default_factory=lambda: dict(POINTS))
+    points: dict[QuestionType, StrictInt] = Field(default_factory=lambda: dict(POINTS))
     duration_seconds: StrictInt = Field(default=DURATION_SECONDS, ge=60, le=14400)
     specification: str = Field(min_length=1, max_length=300)
     quotas: dict[Subject, dict[QuestionType, StrictInt]]
@@ -208,16 +201,16 @@ class Blueprint(StrictModel):
     @classmethod
     def versioned_default_scoring(cls, value):
         if isinstance(value, dict) and "points" not in value:
-            for module in (v2, v4, *v5.ALL_PAPERS.values()):
+            for module in (v2, v4, *v5.PAPERS.values()):
                 if value.get("specification") == module.SPECIFICATION:
-                    points = {k: module.POINTS[k] for k in module.QUESTION_TYPES} if module in v5.ALL_PAPERS.values() else dict(module.POINTS)
-                    extra = {"duration_seconds": module.DURATION_SECONDS} if "duration_seconds" not in value and module in v5.ALL_PAPERS.values() else {}
+                    points = {k: module.POINTS[k] for k in module.QUESTION_TYPES} if module in v5.PAPERS.values() else dict(module.POINTS)
+                    extra = {"duration_seconds": module.DURATION_SECONDS} if "duration_seconds" not in value and module in v5.PAPERS.values() else {}
                     return {**value, **extra, "points": points}
         return value
 
     @model_validator(mode="after")
     def total(self):
-        for module in (v2, v4, *v5.ALL_PAPERS.values()):
+        for module in (v2, v4, *v5.PAPERS.values()):
             if self.specification == module.SPECIFICATION:
                 module.validate_blueprint(self.model_dump())
                 return self

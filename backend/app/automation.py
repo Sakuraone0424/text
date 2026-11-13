@@ -10,7 +10,7 @@ from app import training_spec_v2, training_spec_v4, training_spec_v5 as papers_s
 from app.quiz_v2 import create_paper, BankShortage, PreparationPaused
 
 # specification IDs that earlier deployments set in QUIZ_DAILY_SPECIFICATION; nothing new is made from them any more
-RETIRED = (training_spec_v4.SPECIFICATION, training_spec_v2.SPECIFICATION, papers_spec.OBJECTIVE_V5_SPEC)
+RETIRED = (training_spec_v4.SPECIFICATION, training_spec_v2.SPECIFICATION)
 
 
 def daily_blueprints(env):

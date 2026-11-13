@@ -43,7 +43,7 @@ def plan(conn, uid):
 
 def _plan_attempt(conn, uid, attempt):
     rows = conn.execute(
-        "SELECT a.*,i.snapshot FROM answers_v2 a JOIN paper_items_v2 i ON i.question_id=a.question_id AND i.paper_id=%s WHERE a.attempt_id=%s AND a.points<(i.snapshot->>'max_points')::float8 ORDER BY a.question_id LIMIT 3",
+        "SELECT a.*,i.snapshot FROM answers_v2 a JOIN paper_items_v2 i ON i.question_id=a.question_id AND i.paper_id=%s WHERE a.attempt_id=%s AND a.points<(i.snapshot->>'max_points')::int ORDER BY a.question_id LIMIT 3",
         (attempt["paper_id"], attempt["id"]),
     ).fetchall()
     if not rows:
@@ -103,7 +103,7 @@ def readiness(conn, uid):
         "SELECT t.id,(SELECT count(*) FROM answers_v2 a WHERE a.attempt_id=t.id AND a.points IS NULL AND NOT EXISTS("
         "SELECT 1 FROM question_reports r WHERE r.paper_id=t.paper_id AND r.question_id=a.question_id)) AS pending,"
         "(SELECT count(*) FROM answers_v2 a JOIN paper_items_v2 i ON i.paper_id=t.paper_id AND i.question_id=a.question_id "
-        "WHERE a.attempt_id=t.id AND a.points<(i.snapshot->>'max_points')::float8) AS lost "
+        "WHERE a.attempt_id=t.id AND a.points<(i.snapshot->>'max_points')::int) AS lost "
         "FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id WHERE p.user_id=%s", (uid,)).fetchall()
     jobs = conn.execute(
         "SELECT state FROM ai_jobs WHERE user_id=%s AND kind IN ('explanation','study_plan')", (uid,)).fetchall()

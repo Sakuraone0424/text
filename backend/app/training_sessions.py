@@ -9,14 +9,13 @@ from psycopg.types.json import Jsonb
 from app.training_spec import DURATION_SECONDS, validate_items
 from app import training_spec_v2, training_spec_v4, training_spec_v5
 from app.question_quality import normalize_answer
-from app.training_spec_v5 import blanks_total
 
 
 def validate_paper_items(conn, paper_id, items):
     row = conn.execute("SELECT blueprint FROM papers_v2 WHERE id=%s", (paper_id,)).fetchone()
     if not row:
         raise LookupError("Paper not found")
-    for module in (training_spec_v4, training_spec_v2, *training_spec_v5.ALL_PAPERS.values()):
+    for module in (training_spec_v4, training_spec_v2, *training_spec_v5.PAPERS.values()):
         if row["blueprint"].get("specification") == module.SPECIFICATION:
             return module.validate_items(items)
     return validate_items(items)
@@ -276,16 +275,17 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
             points = q["max_points"] if text.upper() == q["answer"] else 0
         elif q["question_type"] == "fill_blank":
             if q.get("blanks"):
-                # one blank at a time: each is right or wrong against its own accepted answers; the score is the question's points
-                # shared by the blanks that are right (from the counts, so a whole answer is exactly the full score)
                 supplied = value.get("blanks", [])
-                right = [
-                    n < len(supplied)
-                    and normalize_answer(supplied[n]) in {normalize_answer(a) for a in b["accepted_answers"]}
+                per_blank = [
+                    b["points"]
+                    if n < len(supplied)
+                    and normalize_answer(supplied[n])
+                    in {normalize_answer(a) for a in b["accepted_answers"]}
+                    else 0
                     for n, b in enumerate(q["blanks"])
                 ]
-                points = blanks_total(q["max_points"], sum(right), len(right))
-                feedback = {"blank_points": [b["points"] if ok else 0 for b, ok in zip(q["blanks"], right)], "blank_correct": right}
+                points = sum(per_blank)
+                feedback = {"blank_points": per_blank}
             else:
                 points = (
                     q["max_points"]

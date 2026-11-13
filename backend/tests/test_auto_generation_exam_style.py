@@ -144,6 +144,6 @@ def test_generated_v2_prompt_explicitly_binds_scoring_and_evidence():
         assert f"EXACTLY {points} points" in prompt
         assert "verbatim continuous substring" in prompt
         assert "source_sha256" in prompt
-        assert "JSON number" in prompt
+        assert "JSON integer" in prompt
         assert "sum is exactly max_points" in prompt
         assert "single unwrapped JSON" in prompt

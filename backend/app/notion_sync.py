@@ -268,7 +268,7 @@ def mistake_rows(conn, user_id, rec):
         wrong = conn.execute(
             "SELECT count(*) AS n FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
             "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id WHERE p.user_id=%s AND a.question_id=%s "
-            "AND a.points IS NOT NULL AND a.points < (i.snapshot->>'max_points')::float8", (user_id, a["question_id"])).fetchone()["n"]
+            "AND a.points IS NOT NULL AND a.points < (i.snapshot->>'max_points')::int", (user_id, a["question_id"])).fetchone()["n"]
         due = conn.execute("SELECT due FROM fsrs_cards WHERE user_id=%s AND question_id=%s", (user_id, a["question_id"])).fetchone()
         chapters = [str(e.get("chapter") or "") for e in a["evidence"] or [] if e.get("chapter")]
         out.append(dict(question_id=a["question_id"], subject=SUBJECT_NAME.get(a["subject"], a["subject"]), type=TYPE_NAME.get(a["question_type"], a["question_type"]),

@@ -267,7 +267,7 @@
     $("stat-avg-mixed").hidden = !(mixed && mixed.papers > 0);
     if (mixed && mixed.papers > 0) $("stat-avg-mixed").textContent = `旧版混合卷（单独统计，不与上面混算）：近 ${mixed.papers} 次均分 ${Math.round(mixed.avg_points)} / ${mixed.max_points}`;
     none("stat-objective", o.objective_rate, "stat-objective-note", "做完首套后显示", Math.round((o.objective_rate ?? 0) * 100), "%");
-    if (o.objective_rate !== null) $("stat-objective-note").textContent = pending ? "填空（含判分中的卷子）" : "填空";
+    if (o.objective_rate !== null) $("stat-objective-note").textContent = pending ? "单选 + 填空（含判分中的卷子）" : "单选 + 填空";
     none("stat-subjective", o.subjective_rate, "stat-subjective-note", "判分后显示", Math.round((o.subjective_rate ?? 0) * 100), "%");
     if (o.subjective_rate !== null) $("stat-subjective-note").textContent = "AI 判分";
     weak($("weak-chapters"), o.weak_chapters);
@@ -385,7 +385,7 @@
     return h >= 1 ? (Math.round(h * 10) / 10) + "h" : Math.round(seconds / 60) + "m";
   };
   /* The trend is drawn per kind of paper (客观题卷 / 主观题卷 / 旧版混合卷): papers of different kinds are never put on one line. */
-  const KIND_LABEL = { objective: "客观题卷", objective_old: "旧版客观题卷（单选＋填空）", subjective: "主观题卷", mixed: "旧版混合卷" };
+  const KIND_LABEL = { objective: "客观题卷", subjective: "主观题卷", mixed: "旧版混合卷" };
   let trendKind = "";
   function trend(root, allRows) {
     const kindsHere = Object.keys(KIND_LABEL).filter((k) => allRows.some((r) => (r.kind || "mixed") === k));

@@ -59,7 +59,7 @@ def histories(conn, uid, question_ids):
         return out
     ids = list(out)
     for r in conn.execute(
-        "SELECT a.question_id,p.id AS paper_id,p.paper_date AS day,a.points,(i.snapshot->>'max_points')::float8 AS max_points,a.answer,t.submitted_at "
+        "SELECT a.question_id,p.id AS paper_id,p.paper_date AS day,a.points,(i.snapshot->>'max_points')::int AS max_points,a.answer,t.submitted_at "
         "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
         "WHERE p.user_id=%s AND a.question_id=ANY(%s) AND a.points IS NOT NULL ORDER BY t.submitted_at DESC",

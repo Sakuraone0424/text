@@ -65,8 +65,8 @@ IMPORT_BLOCK_REASONS = frozenset(
 # order and may hold at most PAST_TERM_MAX_SHARE of the generation tasks in flight (set the variable to 1 to restore).
 PAST_TERM_MAX_SHARE = float(os.environ.get("PAST_TERM_MAX_SHARE", "0.2"))
 _PRIORITY_SQL = (
-    "CASE question_type WHEN 'fill_blank' THEN 0 WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
-    "WHEN 'term' THEN 4 ELSE 3 END"
+    "CASE question_type WHEN 'single_choice' THEN 0 WHEN 'short_answer' THEN 1 WHEN 'essay' THEN 1 "
+    "WHEN 'fill_blank' THEN 2 WHEN 'term' THEN 4 ELSE 3 END"
 )
 
 _NUMBER = re.compile(r"^\s*\d{1,3}\s*[.、．)）]\s*")
@@ -991,11 +991,9 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
 
     satisfied = set(auto_generation.satisfied_keys(conn, uid))   # buckets that need nothing more
     for item in conn.execute(
-        # single choice is not written or imported any more (the objective paper is all fill-ins); the single blanks split out of real
-        # multi-blank fill-ins go first among the fill-ins
-        "SELECT * FROM past_exam_items WHERE status='imported' AND question_type<>'single_choice' ORDER BY "
+        "SELECT * FROM past_exam_items WHERE status='imported' ORDER BY "
         + _PRIORITY_SQL
-        + ",(source_blank_index IS NULL),year DESC NULLS LAST,id LIMIT 200"
+        + ",year DESC NULLS LAST,id LIMIT 200"
     ).fetchall():
         if queued >= room:
             break

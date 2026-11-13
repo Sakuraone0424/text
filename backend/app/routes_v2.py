@@ -586,7 +586,7 @@ def weekly_stats(username: str = Depends(require_auth)):
         lambda c, u: {
             "chapters": c.execute(
                 "SELECT i.snapshot->>'subject' AS subject,i.snapshot->'evidence'->0->>'chapter' AS chapter, "
-                "SUM(a.points) AS graded_points,SUM((i.snapshot->>'max_points')::float8) FILTER(WHERE a.points IS NOT NULL) AS graded_max_points, "
+                "SUM(a.points) AS graded_points,SUM((i.snapshot->>'max_points')::int) FILTER(WHERE a.points IS NOT NULL) AS graded_max_points, "
                 "COUNT(*) FILTER(WHERE a.points IS NULL) AS pending,COUNT(*) AS answers "
                 "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
                 "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
@@ -923,7 +923,7 @@ def unified_read_only_history(username: str = Depends(require_auth)):
         ]
         recent = c.execute(
             "SELECT p.id AS paper_id,p.paper_date,p.blueprint->>'specification' AS specification,t.id AS attempt_id,SUM(a.points) AS graded_points,COUNT(*) FILTER(WHERE a.points IS NULL) AS pending,"
-            "SUM((i.snapshot->>'max_points')::float8) AS max_points,(SELECT count(*) FROM question_reports qr WHERE qr.paper_id=p.id) AS excluded "
+            "SUM((i.snapshot->>'max_points')::int) AS max_points,(SELECT count(*) FROM question_reports qr WHERE qr.paper_id=p.id) AS excluded "
             "FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id JOIN answers_v2 a ON a.attempt_id=t.id "
             "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
             "WHERE p.user_id=%s AND NOT EXISTS(SELECT 1 FROM question_reports qr WHERE qr.paper_id=p.id AND qr.question_id=a.question_id) "

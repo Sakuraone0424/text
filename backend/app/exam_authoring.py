@@ -29,17 +29,12 @@ TYPE_GUIDANCE = {
     "fill_blank": (
         "Place an explicit ____ at the exact missing concept; test a key term, causal "
         "step, molecule, enzyme, localization, condition or mechanism, not a trivial word. "
-        "Include accepted synonyms and exact scientific nomenclature (case, units, acronyms) where genuinely "
-        "equivalent; never let the stem disclose the answer. A fill-in has ONE to THREE blanks "
-        "(the input says how many: payload.blank_count). ONE blank: the stem has exactly one ____, the canonical answer is in "
-        "accepted_answers, blanks=[], and the rubric has EXACTLY ONE item: the answer to that blank, worth the question's whole point value; "
-        "the rubric must never ask the student to explain a principle or answer a second question. TWO or THREE blanks: the stem has exactly "
-        "that many ____, each blank asks for its own fact (not one list split in two, not answers that give each other away), `blanks` has "
-        "one entry per blank in the order they appear in the stem (each with its own accepted_answers list), accepted_answers=[], `answer` "
-        "is the canonical answers joined in order by ；, and the rubric has EXACTLY one item per blank in the same order, each describing "
-        "that blank's answer. The question's points are shared equally by the blanks: every blank entry and every rubric item is worth "
-        "max_points divided by the number of blanks. The number of ____ in the stem, the number of blanks entries and the number of rubric "
-        "items must be the same."
+        "For multiple blanks independently allocate points, include accepted synonyms "
+        "and exact scientific nomenclature (case, units, acronyms) where genuinely "
+        "equivalent; never let the stem disclose the answer. No artificial multi-blank "
+        "padding. Canonical answer must be included in accepted_answers. A single-blank question has EXACTLY ONE "
+        "rubric item: the answer to that blank, worth the question's whole point value; the rubric must never ask the "
+        "student to explain a principle, give a reason or answer a second question."
     ),
     "term": (
         "Ask for a genuine named biochemical/cell-biological concept. Give a precise "
@@ -101,7 +96,7 @@ _SCHEMA_CONTRACT = (
     "(for single_choice this Question object is the `question` member of the "
     "wrapper described for that type). "
     "Copy subject, question_type and max_points EXACTLY from the input payload. "
-    "The rubric must be a nonempty list of criterion objects with numeric points "
+    "The rubric must be a nonempty list of criterion objects with integer points "
     "whose sum is exactly max_points, not an example or an estimate. All criterion "
     "knowledge_tags must be subsets of the top-level knowledge_tags; use [] for "
     "both when reliable tagging is unavailable. Each evidence object MUST have "
@@ -112,20 +107,17 @@ _SCHEMA_CONTRACT = (
     "do not guess ISBN or printed pages. Set isbn to null when not supplied. "
     "For single_choice use options with EXACTLY A,B,C,D unique nonempty values, "
     "answer exactly one of A/B/C/D, accepted_answers=[], blanks=[], and rubric "
-    "points summing to max_points. For fill_blank use options={}; with ONE blank the stem contains exactly "
-    "one literal ____ placeholder, the canonical answer is included verbatim in a "
+    "points summing to max_points. For fill_blank use options={}, stem containing exactly "
+    "one literal ____ placeholder, canonical answer included verbatim in a "
     "nonempty accepted_answers list (accepted_answers MUST contain the exact text of the answer field itself, "
-    "plus any equally correct variants), blanks=[], and the single rubric item is worth max_points; with TWO or THREE blanks the stem "
-    "contains exactly that many literal ____ placeholders, `blanks` lists one entry per blank in order (each with its own nonempty "
-    "accepted_answers and points = max_points divided by the number of blanks), accepted_answers=[], the rubric has one item per blank "
-    "with the same points. "
+    "plus any equally correct variants), blanks=[], and rubric points summing to max_points. "
     "For term use options={}, accepted_answers=[], blanks=[], a complete answer "
     "of meaningful length, and at least two independently gradable rubric items "
     "with points summing to max_points. For short_answer and essay use the same empty options, "
     "accepted_answers and blanks, and at least two independent rubric items "
     "with points summing to max_points (a term has two or three, a short answer four or five, an essay six to eight). "
-    "Every points value must be a JSON number, not a string: a whole number, "
-    "or for a fill-in the question's points divided equally between its blanks. Do not write comments, markdown, or wrapper keys. "
+    "Every points value must be a JSON integer, not "
+    "a string or decimal. Do not write comments, markdown, or wrapper keys. "
     "If evidence does not support the question, mark uncertainty by declining "
     "rather than fabricate missing claims; a declined response is rejected. "
 )
@@ -155,10 +147,10 @@ _UNHELPFUL_CHOICE = re.compile(
 def instructions(kind, points):
     if kind not in TYPE_GUIDANCE:
         raise ValueError("unsupported_generation_type")
-    if isinstance(points, bool) or not isinstance(points, (int, float)) or points <= 0:
+    if type(points) is not int or points <= 0:
         raise ValueError("invalid_generation_points")
     return _COMMON + " " + _SCHEMA_CONTRACT + " " + TYPE_GUIDANCE[kind] + (
-        f" This question has EXACTLY {points:g} points; rubric criterion points "
+        f" This question has EXACTLY {points} points; rubric criterion points "
         "must add up to that amount."
     )
 

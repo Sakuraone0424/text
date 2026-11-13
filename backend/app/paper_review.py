@@ -196,7 +196,7 @@ def recent(conn, uid, limit=5):
         "SELECT p.id,p.paper_date,p.blueprint->>'specification' AS spec,t.submitted_at,ts.started_at,"
         "(SELECT sum(a.points) FROM answers_v2 a WHERE a.attempt_id=t.id) AS points,"
         "(SELECT count(*) FROM answers_v2 a WHERE a.attempt_id=t.id AND a.points IS NULL) AS pending,"
-        "(SELECT sum((i.snapshot->>'max_points')::float8) FROM paper_items_v2 i WHERE i.paper_id=p.id) AS max_points "
+        "(SELECT sum((i.snapshot->>'max_points')::int) FROM paper_items_v2 i WHERE i.paper_id=p.id) AS max_points "
         "FROM papers_v2 p JOIN attempts_v2 t ON t.paper_id=p.id LEFT JOIN training_sessions ts ON ts.paper_id=p.id "
         "WHERE p.user_id=%s ORDER BY t.submitted_at DESC LIMIT %s",
         (uid, limit),

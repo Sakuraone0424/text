@@ -555,7 +555,7 @@ function render() {
       }
     } else if (q.question_type === "fill_blank" && q.blank_count) {
       for (let i = 0; i < q.blank_count; i++) {
-        const label = element("label", `${"①②③"[i]} 第${i + 1}空`, article);
+        const label = element("label", `第${i + 1}空`, article);
         const input = element("input", undefined, label);
         input.value = value.blanks?.[i] || "";
         input.setAttribute("aria-label", `第${q.position}题第${i + 1}空`);

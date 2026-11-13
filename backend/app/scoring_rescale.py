@@ -18,22 +18,9 @@ import math
 
 from psycopg.types.json import Jsonb
 
-from fractions import Fraction
+from app.training_spec_v5 import POINTS as NEW, V4_POINTS as OLD
 
-from app.training_spec_v5 import POINTS as NEW, V4_POINTS, V5_POINTS
-
-# every earlier maximum a question of each type may still carry (v4 and v5), converted to the current one. A fill-in's 2 (v5) and 4 (v4)
-# both become 2.5; single choice keeps 3 (a v4 single choice of 4 becomes 3: single choice is only used for practice now)
-OLD_MAXIMA = {
-    "single_choice": (4,),
-    "fill_blank": (4, 2),
-    "term": (6,),
-    "short_answer": (12,),
-    "essay": (18,),
-}
-OLD = V5_POINTS                              # the scale production is on when this runs: the "before" of the stock report
-
-STATE_KEY = "scoring_rescale_v6"
+STATE_KEY = "scoring_rescale_v5"
 NOTE = "分值已按比例换算"
 
 
@@ -83,32 +70,14 @@ def with_scoring(content, scoring):
     return out
 
 
-def scale_exactly(points, new_total):
-    """`points` in proportion to `new_total`, exactly (a fill-in's 2 -> 2.5 is a factor 1.25: 1 -> 1.25)."""
-    total = sum(Fraction(str(p)) for p in points)
-    if not points or total <= 0:
-        raise ValueError("nothing to scale")
-    return [_plain(float(Fraction(str(p)) * Fraction(str(new_total)) / total)) for p in points]
-
-
 def rescale_content(content):
-    """(new content, the scoring it had) for a question still on an earlier scale; None for any other question.
-
-    Most types: the scoring points are scaled in proportion to whole numbers or halves that add up exactly. A fill-in (2 or 4 -> 2.5):
-    a single blank's point is 2.5; several blanks share the 2.5 equally (the exact value is kept); other scoring points keep their
-    proportions exactly."""
+    """(new content, the scoring it had) for a question still on the old scale; None for any other question."""
     kind = content.get("question_type")
-    if kind not in OLD_MAXIMA or content.get("max_points") not in OLD_MAXIMA[kind] or content.get("max_points") == NEW[kind]:
+    if kind not in OLD or content.get("max_points") != OLD[kind]:
         return None
     before = original_scoring(content)
-    if kind == "fill_blank":
-        blanks = before["blanks"]
-        n = len(blanks)
-        rubric = [_plain(NEW[kind] / n)] * len(before["rubric"]) if n and len(before["rubric"]) == n else scale_exactly(before["rubric"], NEW[kind])
-        scaled = dict(max_points=NEW[kind], rubric=rubric, blanks=[_plain(NEW[kind] / n)] * n if n else [])
-    else:
-        scaled = dict(max_points=NEW[kind], rubric=scale_points(before["rubric"], NEW[kind]),
-                      blanks=scale_points(before["blanks"], NEW[kind]) if before["blanks"] else [])
+    scaled = dict(max_points=NEW[kind], rubric=scale_points(before["rubric"], NEW[kind]),
+                  blanks=scale_points(before["blanks"], NEW[kind]) if before["blanks"] else [])
     return with_scoring(content, scaled), before
 
 
@@ -156,17 +125,6 @@ def retired_total(conn):
 UNSCALABLE = "rescale_impossible"
 
 
-def pause_single_choice_work(conn):
-    """Single choice questions are no longer written (no new request, no past-exam single imported): a request still waiting is put aside
-    (its past-exam item goes back to the import queue, untouched). Questions already written stay in the bank and go on being reviewed."""
-    ids = [r["id"] for r in conn.execute(
-        "UPDATE ai_jobs SET state='blocked',error_code='superseded_scoring' WHERE kind='generation' AND state IN ('pending','retrying') "
-        "AND payload->>'question_type'='single_choice' RETURNING id").fetchall()]
-    if ids:
-        conn.execute("UPDATE past_exam_items SET status='imported',job_id=NULL,updated_at=clock_timestamp() WHERE job_id=ANY(%s) AND status='queued'", (ids,))
-    return len(ids)
-
-
 def run(conn):
     """Rescale every question still on the old scale (drafts and published ones, in flight or already used). Safe to call on
     every worker pass: a question that is already on the new scale is left alone.
@@ -177,13 +135,12 @@ def run(conn):
     Returns what happened; the first pass that converts something also records the stock before and after (STATE_KEY)."""
     from app import legacy_reuse
 
-    # only questions still at an old maximum are loaded: the pass runs every few minutes and must stay cheap once everything is converted.
-    # A fill-in converted before (v4 -> v5, it has its first scoring on record) is converted again (2 -> 2.5); the first record is kept.
-    old = [(kind, str(points)) for kind, points_list in OLD_MAXIMA.items() for points in points_list]
+    # only questions still at an old maximum are loaded: the pass runs every few minutes and must stay cheap once everything is converted
+    old = [(kind, str(points)) for kind, points in OLD.items()]
     rows = conn.execute(
         "SELECT q.id,q.content FROM reviewed_questions q WHERE q.status IN ('draft','published') "
         "AND (q.content->>'question_type',q.content->>'max_points') IN (SELECT * FROM unnest(%s::text[],%s::text[])) "
-        "AND (q.content->>'question_type'='fill_blank' OR NOT EXISTS(SELECT 1 FROM question_scoring_originals o WHERE o.question_id=q.id)) "
+        "AND NOT EXISTS(SELECT 1 FROM question_scoring_originals o WHERE o.question_id=q.id) "
         "AND NOT EXISTS(SELECT 1 FROM auto_question_states s WHERE s.question_id=q.id AND s.reason=%s) ORDER BY q.id",
         ([k for k, _ in old], [p for _, p in old], UNSCALABLE),
     ).fetchall()
@@ -201,14 +158,8 @@ def run(conn):
             continue
         if pair:
             todo.append((r["id"],) + pair)
-    paused = pause_single_choice_work(conn)
     if not todo:
-        out = dict(rescaled=0)
-        if failed:
-            out["failed"] = failed
-        if paused:
-            out["single_choice_requests_paused"] = paused
-        return out
+        return dict(rescaled=0, failed=failed) if failed else dict(rescaled=0)
     first = legacy_reuse._state(conn, STATE_KEY) is None
     retired_before = retired_total(conn)
     before = stock_by_type(conn, OLD) if first else None
@@ -228,13 +179,11 @@ def run(conn):
     # a question-writing request still carrying the old maximum would only make more old-scale questions: ask again instead
     conn.execute(
         "UPDATE ai_jobs SET state='blocked',error_code='superseded_scoring' WHERE kind='generation' AND state IN ('pending','retrying') "
-        "AND payload->>'max_points' IS DISTINCT FROM CASE payload->>'question_type'"
-        + " " + " ".join(f"WHEN '{k}' THEN '{v}'" for k, v in NEW.items()) + " END")
+        "AND payload->>'max_points' IS DISTINCT FROM CASE payload->>'question_type' "
+        "WHEN 'single_choice' THEN '3' WHEN 'fill_blank' THEN '2' WHEN 'term' THEN '5' WHEN 'short_answer' THEN '15' WHEN 'essay' THEN '25' END")
     report = dict(rescaled=sum(by_type.values()), by_type=by_type, invalidated=retired_total(conn) - retired_before)
     if failed:
         report["failed"] = failed
-    if paused:
-        report["single_choice_requests_paused"] = paused
     if first and report["rescaled"]:
         report.update(stock_before=before, stock_after=stock_by_type(conn, NEW))
         legacy_reuse._set_state(conn, STATE_KEY, report)
