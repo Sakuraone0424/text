@@ -96,15 +96,25 @@ def rescaled_ids(conn, ids):
 
 
 def stock_by_type(conn, points):
-    """Questions that could go on a paper right now (published, verified, never used by that learner), per learner, subject
-    and type, counted at the given point scale: the figure reported before and after rescaling."""
+    """How many questions per learner, subject and type are published, marked ready and unused by that learner, at the given point
+    scale. Plain counts (no per-question re-verification: that cost tens of seconds inside the worker's planning pass); this is the
+    figure reported before and after rescaling, and the two must match."""
     from app import auto_generation
     from app.training_spec_v5 import SUBJECTS, QUESTION_TYPES
 
     out = {}
     for user in conn.execute("SELECT id,username FROM users ORDER BY id").fetchall():
-        out[user["username"]] = {s: {k: auto_generation.eligible_reserve_count(conn, user["id"], s, k, points=points)
-                                     for k in QUESTION_TYPES} for s in SUBJECTS}
+        cells = {}
+        for subject in SUBJECTS:
+            cells[subject] = {}
+            for kind in QUESTION_TYPES:
+                cells[subject][kind] = conn.execute(
+                    "SELECT count(*) AS n FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
+                    "WHERE s.status='ready' AND q.status='published' AND q.content->>'subject'=%s AND q.content->>'question_type'=%s "
+                    "AND q.content->>'max_points'=%s AND " + auto_generation.UNUSED_SQL,
+                    (subject, kind, str(points[kind]), user["id"], user["id"]),
+                ).fetchone()["n"]
+        out[user["username"]] = cells
     return out
 
 
@@ -112,37 +122,65 @@ def retired_total(conn):
     return conn.execute("SELECT count(*) AS n FROM auto_question_states WHERE status='retired'").fetchone()["n"]
 
 
+UNSCALABLE = "rescale_impossible"
+
+
 def run(conn):
     """Rescale every question still on the old scale (drafts and published ones, in flight or already used). Safe to call on
-    every worker pass: a question that is already on the new scale is left alone. Returns what happened; the first pass that
-    does something also records the stock before and after in legacy_reuse_state (STATE_KEY)."""
+    every worker pass: a question that is already on the new scale is left alone.
+
+    One question that cannot be converted never stops the others (each is its own savepoint): it is counted under `failed` with a
+    fixed code and left as it is. A question whose scoring points cannot be shared out in half points (more points than half-points
+    of score) is marked blocked / rescale_impossible so the retirement step does not void it: it waits for a person.
+    Returns what happened; the first pass that converts something also records the stock before and after (STATE_KEY)."""
     from app import legacy_reuse
 
     rows = conn.execute(
         "SELECT q.id,q.content FROM reviewed_questions q WHERE q.status IN ('draft','published') "
-        "AND NOT EXISTS(SELECT 1 FROM question_scoring_originals o WHERE o.question_id=q.id) ORDER BY q.id"
+        "AND NOT EXISTS(SELECT 1 FROM question_scoring_originals o WHERE o.question_id=q.id) "
+        "AND NOT EXISTS(SELECT 1 FROM auto_question_states s WHERE s.question_id=q.id AND s.reason=%s) ORDER BY q.id", (UNSCALABLE,)
     ).fetchall()
-    todo = [(r["id"],) + pair for r in rows if (pair := rescale_content(r["content"]))]
+    todo, failed = [], {}
+    for r in rows:
+        try:
+            pair = rescale_content(r["content"])
+        except (ValueError, KeyError, TypeError) as exc:
+            code = UNSCALABLE if isinstance(exc, ValueError) else "rescale_bad_content_" + type(exc).__name__
+            failed[code] = failed.get(code, 0) + 1
+            if code == UNSCALABLE:
+                conn.execute(
+                    "UPDATE auto_question_states SET status='blocked',reason=%s,updated_at=clock_timestamp() WHERE question_id=%s "
+                    "AND status IN ('candidate','checking','repairing','ready','blocked')", (UNSCALABLE, r["id"]))
+            continue
+        if pair:
+            todo.append((r["id"],) + pair)
     if not todo:
-        return dict(rescaled=0)
+        return dict(rescaled=0, failed=failed) if failed else dict(rescaled=0)
     first = legacy_reuse._state(conn, STATE_KEY) is None
     retired_before = retired_total(conn)
     before = stock_by_type(conn, OLD) if first else None
-    conn.execute("SELECT set_config('app.rescale_scoring','1',true)")
     by_type = {}
     for qid, content, original in todo:
-        conn.execute("INSERT INTO question_scoring_originals(question_id,original) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-                     (qid, Jsonb(original)))
-        conn.execute("UPDATE reviewed_questions SET content=%s WHERE id=%s", (Jsonb(content), qid))
+        try:
+            with conn.transaction():
+                conn.execute("SELECT set_config('app.rescale_scoring','1',true)")
+                conn.execute("INSERT INTO question_scoring_originals(question_id,original) VALUES (%s,%s) ON CONFLICT DO NOTHING",
+                             (qid, Jsonb(original)))
+                conn.execute("UPDATE reviewed_questions SET content=%s WHERE id=%s", (Jsonb(content), qid))
+        except Exception as exc:  # noqa: BLE001  (one question's failure must not undo the others)
+            code = "rescale_failed_" + type(exc).__name__
+            failed[code] = failed.get(code, 0) + 1
+            continue
         by_type[content["question_type"]] = by_type.get(content["question_type"], 0) + 1
-    conn.execute("SELECT set_config('app.rescale_scoring','',true)")
     # a question-writing request still carrying the old maximum would only make more old-scale questions: ask again instead
     conn.execute(
         "UPDATE ai_jobs SET state='blocked',error_code='superseded_scoring' WHERE kind='generation' AND state IN ('pending','retrying') "
         "AND payload->>'max_points' IS DISTINCT FROM CASE payload->>'question_type' "
         "WHEN 'single_choice' THEN '3' WHEN 'fill_blank' THEN '2' WHEN 'term' THEN '5' WHEN 'short_answer' THEN '15' WHEN 'essay' THEN '25' END")
-    report = dict(rescaled=len(todo), by_type=by_type, invalidated=retired_total(conn) - retired_before)
-    if first:
+    report = dict(rescaled=sum(by_type.values()), by_type=by_type, invalidated=retired_total(conn) - retired_before)
+    if failed:
+        report["failed"] = failed
+    if first and report["rescaled"]:
         report.update(stock_before=before, stock_after=stock_by_type(conn, NEW))
         legacy_reuse._set_state(conn, STATE_KEY, report)
     return report

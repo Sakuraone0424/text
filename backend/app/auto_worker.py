@@ -151,10 +151,7 @@ def plan(conn, uid, target=None, report=None):
 
     auto_quality.requeue_past_exam_duplicates(conn)   # before anything can retire them
     auto_quality.retire_stale(conn)
-    from app import scoring_rescale
-
-    scoring_rescale.run(conn)                    # v4 -> v5 points, in place; no question is retired for it
-    auto_quality.retire_old_scoring(conn)
+    auto_quality.retire_old_scoring(conn)      # (v4 -> v5 points were already converted, in place, by rescale_scoring below)
     auto_quality.retire_unusable_sources(conn)   # literature-list sources, missing figures, answers written in the stem
     from app import memory
 
@@ -474,8 +471,28 @@ def _fmt(value):
     return "-" if value in (None, "") else str(value).replace(" ", "_")
 
 
+def rescale_scoring(conn, report):
+    """Move every question still on the previous point scale to the new one, in place (nothing is retired for it).
+
+    It runs in its OWN savepoint, ahead of and apart from the planning pass: planning raises ValueError for reasons of its own and the
+    worker swallows them, which would roll back everything done in the same transaction (so nothing was ever converted)."""
+    from app import scoring_rescale
+
+    t = time.monotonic()
+    try:
+        with conn.transaction():
+            done = scoring_rescale.run(conn)
+        if done.get("rescaled") or done.get("failed"):
+            report["rescale"] = ";".join(f"{k}={v}" for k, v in sorted(done.items()) if k in ("rescaled", "invalidated")) + (
+                ";failed=" + ",".join(f"{k}:{n}" for k, n in sorted(done["failed"].items())) if done.get("failed") else "")
+    except Exception as exc:  # noqa: BLE001  (a log line, never a stopped run)
+        report["rescale_error"] = type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
+    _lap(report, "rescale", t, "plan_detail")
+
+
 def _plan_queue(conn, report, users, private, first):
     """Fill the queue (so every call of a batch has a job) and put back what should be tried again."""
+    rescale_scoring(conn, report)
     t = time.monotonic()
     for user in users:
         if first:
@@ -503,8 +520,10 @@ def _plan_queue(conn, report, users, private, first):
                         auto_generation.plan(conn, user["user_id"])
                         auto_exams.plan(conn, user["user_id"])
                     auto_insights.plan(conn, user["user_id"])
-            except ValueError:
-                pass  # Not admitted is not a success; job/probe status remains visible.
+            except ValueError as exc:
+                # Not admitted is not a success; job/probe status remains visible. The reason is said in the log: a ValueError raised
+                # anywhere in the pass undoes the whole pass, so it must never be silent.
+                report["plan_error"] = type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
             # Say in the log WHY nothing was planned (no gap at all, or a gap that no request could be written for).
             try:
                 t = time.monotonic()
