@@ -52,7 +52,7 @@
      ------------------------------------------------------------------------------------------------------------------ */
   const PAPERS = ["objective", "subjective"];
   const PAPER_NAME = { objective: "客观题卷", subjective: "主观题卷" };
-  const PAPER_SPEC = { objective: (m) => `60 题 · 150 分 · ${m} 分钟`, subjective: (m) => `14 题 · 150 分 · ${m} 分钟` };
+  const PAPER_SPEC = { objective: (m) => `60 道填空 · 150 分 · ${m} 分钟`, subjective: (m) => `14 题 · 150 分 · ${m} 分钟` };
   const minutesOf = { objective: 60, subjective: 60 };      // the subjective paper's time limit is configurable: the server's value replaces this
   const seen = {};                                         // kind -> what the exam page last showed for today's paper of that kind
   let loaded = false;

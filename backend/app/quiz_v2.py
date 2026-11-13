@@ -19,7 +19,7 @@ from app.training_spec import COUNTS, SUBJECTS, validate_items
 from app import training_spec_v2 as spec_v2, training_spec_v4 as spec_v4, training_spec_v5 as spec_v5
 
 # Every versioned specification; v2 and v4 (the 60-question mixed papers) stay readable, the two v5 papers are the current ones.
-SPEC_MODULES = {spec_v2.SPECIFICATION: spec_v2, spec_v4.SPECIFICATION: spec_v4, **spec_v5.PAPERS}
+SPEC_MODULES = {spec_v2.SPECIFICATION: spec_v2, spec_v4.SPECIFICATION: spec_v4, **spec_v5.ALL_PAPERS}
 
 
 class PreparationPaused(ValueError):
@@ -173,6 +173,27 @@ def used_questions(conn, user_id):
         ids.add(r["id"])
         stems.append(r["stem"])
     return ids, stems
+
+
+def _limit_multi_blank(picked, pool, count, subject, shortages):
+    """At most a third of a paper's fill-ins may have more than one blank: the excess is swapped for single-blank questions of the same
+    pool that were not drawn; if the pool has too few of those the paper is short (it never exceeds the share)."""
+    from app.training_spec_v5 import MULTI_BLANK_SHARE
+
+    cap = int(count * MULTI_BLANK_SHARE + 1e-9)
+    multi = lambda row: len(row["content"].get("blanks") or []) > 1
+    over = [r for r in picked if multi(r)]
+    if len(over) <= cap:
+        return picked
+    chosen_ids = {r["id"] for r in picked}
+    spare = [r for r in pool if r["id"] not in chosen_ids and not multi(r)]
+    keep = [r for r in picked if not multi(r)] + over[:cap]
+    drop = len(over) - cap
+    if len(spare) < drop:
+        shortages.append({"subject": subject, "question_type": "fill_blank", "required": count, "available": len(keep) + len(spare),
+                          "missing": drop - len(spare), "reason": "multi_blank_share"})
+        return keep + spare
+    return keep + spare[:drop]
 
 
 def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
@@ -365,23 +386,24 @@ def create_paper(conn, user_id: int, blueprint: Blueprint, day=None):
                         "missing": count - len(pool),
                     }
                 )
-            selected.extend(
-                pick(
-                    pool,
-                    count,
-                    chapter_counts,
-                    context,
-                    policy,
-                    seed,
-                    subject,
-                    kind,
-                    decisions,
-                    due,
-                    difficulty_counts=difficulty_counts,
-                    relaxed=relaxed_rules,
-                    subject_total=sum(spec_counts.values()),
-                )
+            picked = pick(
+                pool,
+                count,
+                chapter_counts,
+                context,
+                policy,
+                seed,
+                subject,
+                kind,
+                decisions,
+                due,
+                difficulty_counts=difficulty_counts,
+                relaxed=relaxed_rules,
+                subject_total=sum(spec_counts.values()),
             )
+            if kind == "fill_blank" and spec_module in spec_v5.PAPERS.values():
+                picked = _limit_multi_blank(picked, pool, count, subject, shortages)
+            selected.extend(picked)
     if shortages:
         raise BankShortage(shortages)
     (spec_module.validate_items if is_v2 else validate_items)([r["content"] for r in selected])
@@ -511,7 +533,7 @@ def reported_question_ids(conn, paper_id):
 def excluded_summary(conn, paper_id):
     reported = reported_question_ids(conn, paper_id)
     items = conn.execute(
-        "SELECT question_id,(snapshot->>'max_points')::int AS points FROM paper_items_v2 WHERE paper_id=%s",
+        "SELECT question_id,(snapshot->>'max_points')::float8 AS points FROM paper_items_v2 WHERE paper_id=%s",
         (paper_id,),
     ).fetchall()
     excluded = sum(i["points"] for i in items if i["question_id"] in reported)
