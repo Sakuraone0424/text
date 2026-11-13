@@ -31,7 +31,7 @@ def _question_of_job(conn, job_id):
 def start(conn, uid):
     """Queue the paired tasks. Returns {set_id, pairs, skipped}: a slot with no gap or nothing writable is skipped, never faked."""
     from app import auto_generation
-    from app.ai_jobs import enqueue
+    from app.ai_jobs import enqueue_rekeyed as enqueue
 
     gaps = {(s, k) for s, k, _ in auto_generation.bucket_gaps(conn, uid)}
     auto_generation.past_exam_import.index_item_chapters(conn)

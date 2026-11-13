@@ -4,7 +4,7 @@ from pydantic import Field, StrictBool, StrictInt
 from psycopg.types.json import Jsonb
 from app.question_quality import StrictModel
 from app.candidate_review import snapshot_unit
-from app.ai_jobs import enqueue
+from app.ai_jobs import enqueue_rekeyed as enqueue
 
 RELATIONS = (
     "definition",

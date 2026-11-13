@@ -7,7 +7,7 @@ from psycopg.types.json import Jsonb
 from app.question_quality import StrictModel, Question, AXES, duplicate, similarity, stem_key
 from app.evidence_filter import MILD_FLAGS
 from app.candidate_review import snapshot_unit
-from app.ai_jobs import content_sha, enqueue
+from app.ai_jobs import content_sha, enqueue_rekeyed as enqueue
 from app.evidence_match import locate
 from app import scoring_rescale
 

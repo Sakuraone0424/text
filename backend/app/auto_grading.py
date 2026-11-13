@@ -4,7 +4,7 @@ import json
 from psycopg.types.json import Jsonb
 from pydantic import Field, StrictBool, StrictInt
 from app.question_quality import StrictModel, Points
-from app.ai_jobs import enqueue, content_sha
+from app.ai_jobs import enqueue_rekeyed as enqueue, content_sha
 
 
 class Grade(StrictModel):

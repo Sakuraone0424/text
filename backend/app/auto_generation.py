@@ -16,7 +16,7 @@ from app.question_quality import Question, AXES, StrictModel
 from app.exam_authoring import instructions as exam_instructions, issues as exam_issues
 from app.transcript_analysis import STYLE_SOURCE_BLOCKERS, stored_types
 from app.source_bibliography import from_database as source_bibliography
-from app.ai_jobs import enqueue, content_sha
+from app.ai_jobs import enqueue_rekeyed as enqueue, content_sha
 from app import cost_control, evidence_filter, past_exam_import
 from app.auto_fixes import autofix, FIX_LABELS
 from app.dispatch_codes import safe_dispatch_failure
@@ -1250,7 +1250,7 @@ REPAIR_INSTRUCTIONS = (
 
 def request_repair(conn, uid, job, exc):
     """Queue the one repair of a generation job whose draft had a fixable defect. None if it cannot be queued."""
-    from app.ai_jobs import enqueue as enqueue_job
+    from app.ai_jobs import enqueue_rekeyed as enqueue_job
 
     p = job["payload"]
     if p.get("origin") == past_exam_import.ORIGIN_PAST_EXAM or p.get("repair_of_job"):

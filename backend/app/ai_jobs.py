@@ -85,6 +85,50 @@ def extended_limits(snapshot):
     return "limited_trial" not in snapshot
 
 
+class IdempotencyConflict(ValueError):
+    """The same job key was used earlier for a different request. The text says which key, which kind, which planning route and which
+    payload fields differ (names only, never their content), so a run's log is enough to find the cause."""
+
+    def __init__(self, detail):
+        super().__init__("idempotency_conflict")
+        self.detail = detail
+
+
+ROUTES = (
+    ("past-exam:", "past_exam_generation"), ("gap:", "ai_new_question"), ("supplement:", "ai_new_question"),
+    ("compare:", "comparison"), ("repair:", "repair"), ("quality:", "quality_review"), ("campaign:", "review_campaign"),
+    ("pgrade:", "practice_grading"), ("legacy", "legacy_reuse"),
+)
+
+
+def route_of(key, kind):
+    return next((name for prefix, name in ROUTES if key.startswith(prefix)), kind)
+
+
+def conflict_detail(key, kind, old, payload, user_id):
+    changed = sorted(k for k in set(old["payload"] or {}) | set(payload) if (old["payload"] or {}).get(k) != payload.get(k))
+    return {
+        "key": key[:120], "kind": kind, "route": route_of(key, kind), "old_kind": old["kind"],
+        "differs": (["user"] if old["user_id"] != user_id else []) + (["kind"] if old["kind"] != kind else []) + changed[:12],
+    }
+
+
+# conflicts that planning resolved by giving the request a key of its own (read by the worker's one-line log)
+RESOLVED_CONFLICTS = []
+
+
+def enqueue_rekeyed(conn, user_id, key, kind, payload):
+    """enqueue() for planning: a key that was used earlier for a request written under other rules (a payload that changed with the
+    specification, point scale, instructions or schema) gets a key with the payload's fingerprint instead of stopping the planning pass."""
+    try:
+        return enqueue(conn, user_id, key, kind, payload)
+    except IdempotencyConflict as exc:
+        fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:12]
+        RESOLVED_CONFLICTS.append(exc.detail)
+        del RESOLVED_CONFLICTS[:-20]
+        return enqueue(conn, user_id, f"{key}:{fingerprint}", kind, payload)
+
+
 def enqueue(conn, user_id, key, kind, payload):
     if kind not in model_router.TASKS:
         raise ValueError("unknown_ai_task")
@@ -96,9 +140,9 @@ def enqueue(conn, user_id, key, kind, payload):
         if (
             old["user_id"] != user_id
             or old["kind"] != kind
-            or old["payload"] != payload
+            or json.dumps(old["payload"], ensure_ascii=False, sort_keys=True) != encoded   # compared as stored JSON: (1, 2) and [1, 2] are the same request
         ):
-            raise ValueError("idempotency_conflict")
+            raise IdempotencyConflict(conflict_detail(key, kind, old, payload, user_id))
         return old
     s = model_router.snapshot(conn, user_id)
     from app import cost_control
