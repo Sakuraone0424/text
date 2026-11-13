@@ -8,7 +8,7 @@ import json
 from collections import Counter
 
 from app import ai_jobs, grading_activity
-from app.ai_jobs import content_sha, enqueue
+from app.ai_jobs import content_sha, enqueue_rekeyed as enqueue
 
 # blocked for a reason that is not the answer's own: a later run may try again (budget came back, price verified, DeepSeek
 # was busy, the worker restarted ...). The one block that stays is an answer too long to send.

@@ -1,6 +1,7 @@
 """Short-lived leased automation tick, activated only with explicit API consent."""
 
 import httpx
+import json
 import os
 import sys
 import signal
@@ -128,7 +129,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job
                     **job["payload"],
                     "instructions": auto_grading.REASSESS_INSTRUCTIONS + auto_grading.GRADING_INSTRUCTIONS,
                 }
-                ai_jobs.enqueue(
+                ai_jobs.enqueue_rekeyed(
                     conn,
                     job["user_id"],
                     job["job_key"] + ":reassessment",
@@ -192,12 +193,12 @@ def plan(conn, uid, target=None, report=None):
             instructions="Repair the question using only the supplied actual excerpts. Return JSON {question: complete Question object, reason: detailed correction rationale}. No invented citation, no human approval. A new version will undergo the independent review again.",
             schema=auto_quality.Question.model_json_schema(),
         )
-        ai_jobs.enqueue(
+        repair_job = ai_jobs.enqueue_rekeyed(
             conn, uid, "repair:" + str(row["question_id"]), "repair", payload
         )
         conn.execute(
-            "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='repairing' WHERE question_id=%s AND EXISTS(SELECT 1 FROM ai_jobs j WHERE j.job_key=%s AND j.state IN ('pending','running','retrying'))",
-            (row["question_id"], "repair:" + str(row["question_id"])),
+            "UPDATE auto_question_states SET updated_at=clock_timestamp(),status='repairing' WHERE question_id=%s AND EXISTS(SELECT 1 FROM ai_jobs j WHERE j.id=%s AND j.state IN ('pending','running','retrying'))",
+            (row["question_id"], repair_job["id"]),
         )
     # Newest papers first: old papers whose leftover answers can never be graded (photos, too long) must not fill the slots.
     for row in conn.execute(
@@ -509,23 +510,35 @@ def _plan_queue(conn, report, users, private, first):
             and private
             and os.environ.get("AI_QUEUE_AUTOPLAN") == "1"
         ):
-            try:
-                with conn.transaction():
-                    first_new = conn.execute("SELECT COALESCE(max(id),0) AS m FROM ai_jobs").fetchone()["m"]
-                    # queue enough work that every call this batch can make has a job to claim
-                    plan(conn, user["user_id"], target=2 * calls_per_run(), report=report)
-                    t = _lap(report, "plan", t, "plan_detail")
-                    report["planned"] = report.get("planned", 0) + conn.execute(
-                        "SELECT count(*) AS n FROM ai_jobs WHERE id>%s", (first_new,)).fetchone()["n"]
-                    if os.environ.get("AI_FULL_CORPUS_ENABLED") == "1":
-                        auto_knowledge.plan_small_batch(conn, user["user_id"])
-                        auto_generation.plan(conn, user["user_id"])
-                        auto_exams.plan(conn, user["user_id"])
-                    auto_insights.plan(conn, user["user_id"])
-            except ValueError as exc:
-                # Not admitted is not a success; job/probe status remains visible. The reason is said in the log: a ValueError raised
-                # anywhere in the pass undoes the whole pass, so it must never be silent.
-                report["plan_error"] = type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
+            first_new = conn.execute("SELECT COALESCE(max(id),0) AS m FROM ai_jobs").fetchone()["m"]
+
+            def step(name, fn):
+                """One planning route in its own savepoint: whatever it raises undoes only that route, is written to the log with its
+                route name, and the other routes carry on."""
+                try:
+                    with conn.transaction():
+                        fn()
+                except ValueError as exc:
+                    detail = getattr(exc, "detail", None)
+                    text = type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
+                    if detail:
+                        text += ":" + json.dumps(detail, ensure_ascii=False, separators=(",", ":"))[:400]
+                    report["plan_error"] = (report.get("plan_error", "") + " | " if report.get("plan_error") else "") + name + "=" + text
+
+            # queue enough work that every call this batch can make has a job to claim
+            step("plan", lambda: plan(conn, user["user_id"], target=2 * calls_per_run(), report=report))
+            t = _lap(report, "plan", t, "plan_detail")
+            if os.environ.get("AI_FULL_CORPUS_ENABLED") == "1":
+                step("knowledge", lambda: auto_knowledge.plan_small_batch(conn, user["user_id"]))
+                step("generation", lambda: auto_generation.plan(conn, user["user_id"]))
+                step("exams", lambda: auto_exams.plan(conn, user["user_id"]))
+            step("insights", lambda: auto_insights.plan(conn, user["user_id"]))
+            report["planned"] = report.get("planned", 0) + conn.execute(
+                "SELECT count(*) AS n FROM ai_jobs WHERE id>%s", (first_new,)).fetchone()["n"]
+            if ai_jobs.RESOLVED_CONFLICTS:
+                report["key_conflicts_resolved"] = len(ai_jobs.RESOLVED_CONFLICTS)
+                report["key_conflicts"] = ai_jobs.RESOLVED_CONFLICTS[-3:]
+                ai_jobs.RESOLVED_CONFLICTS.clear()
             # Say in the log WHY nothing was planned (no gap at all, or a gap that no request could be written for).
             try:
                 t = time.monotonic()
