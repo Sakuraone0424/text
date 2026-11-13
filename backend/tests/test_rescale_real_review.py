@@ -72,18 +72,69 @@ def test_planning_with_old_scale_candidates_still_waiting_for_their_review(db, c
     assert run(db, review, quote) and quality.promote(db, qid) and quality.ready(db, qid)
 
 
-def test_one_question_that_cannot_be_converted_does_not_stop_the_others_or_get_retired(db, question_factory, passing_audit, monkeypatch):
+def odd_fill(db, question_factory, passing_audit, rubric_points, blanks=None):
     from psycopg.types.json import Jsonb
     from two_paper_helpers import add_question
-    from app.ai_jobs import content_sha
+
+    qid = add_question(db, question_factory, passing_audit, "biochemistry", "fill_blank", points=4)
+    db.execute("ALTER TABLE reviewed_questions DISABLE TRIGGER USER")
+    content = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]
+    content["rubric"] = [dict(description=f"要点{i}", points=p, knowledge_tags=[]) for i, p in enumerate(rubric_points)]
+    if blanks:
+        content["blanks"] = [dict(accepted_answers=[a], points=4 / len(blanks)) for a in blanks]
+        content["accepted_answers"] = []
+        content["stem"] = "、".join(["____"] * len(blanks)) + "是糖酵解的关键物质"
+    db.execute("UPDATE reviewed_questions SET content=%s WHERE id=%s", (Jsonb(content), qid))
+    db.execute("ALTER TABLE reviewed_questions ENABLE TRIGGER USER")
+    return qid
+
+
+def content_of(db, qid):
+    return db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["content"]
+
+
+def test_no_fill_in_is_left_impossible_the_scoring_points_share_the_two_and_a_half_points(db, question_factory, passing_audit, monkeypatch):
+    from app import question_quality as qq
+    from app.scoring_rescale import read_in_original_scoring
+
+    five = odd_fill(db, question_factory, passing_audit, [1, 1, 1, 0.5, 0.5])       # N=5: 2.5/5 = 0.5 each
+    seven = odd_fill(db, question_factory, passing_audit, [1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])   # N=7: not an exact share: one point of 2.5
+    two_blanks = odd_fill(db, question_factory, passing_audit, [2, 1, 1], blanks=["丙酮酸", "ATP"])   # three points for two blanks
+    report = scoring_rescale.run(db)
+    assert report["rescaled"] == 3 and "failed" not in report and report["invalidated"] == 0
+    assert [c["points"] for c in content_of(db, five)["rubric"]] == [0.5] * 5
+    merged = content_of(db, seven)
+    assert [c["points"] for c in merged["rubric"]] == [2.5] and merged["max_points"] == 2.5 and merged["rubric"][0]["description"].startswith("要点0；要点1")
+    cut = content_of(db, two_blanks)
+    assert [c["points"] for c in cut["rubric"]] == [1.25, 1.25] and [b["points"] for b in cut["blanks"]] == [1.25, 1.25]
+    for qid in (five, seven, two_blanks):
+        qq.Question.model_validate(content_of(db, qid))                    # every converted question is a valid question
+    # the review still matches: the content as it was reviewed is read back from the first record
+    original = read_in_original_scoring(db, seven, merged)
+    assert len(original["rubric"]) == 7 and original["max_points"] == 4 and [c["points"] for c in original["rubric"]][:2] == [1, 0.5]
+    assert db.execute("SELECT count(*) AS n FROM auto_question_states WHERE reason='rescale_impossible'").fetchone()["n"] == 0
+
+
+def test_fill_ins_an_earlier_pass_set_aside_are_taken_back_and_converted(db, question_factory, passing_audit):
+    qid = odd_fill(db, question_factory, passing_audit, [1, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
+    db.execute("UPDATE auto_question_states SET status='blocked',reason='rescale_impossible' WHERE question_id=%s", (qid,))
+    report = scoring_rescale.run(db)
+    assert report["rescaled"] == 1 and "failed" not in report
+    state = db.execute("SELECT status,reason FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()
+    assert state["status"] == "ready" and state["reason"] is None and content_of(db, qid)["max_points"] == 2.5
+
+
+def test_one_term_that_cannot_be_converted_does_not_stop_the_others_or_get_retired(db, question_factory, passing_audit, monkeypatch):
+    from psycopg.types.json import Jsonb
+    from two_paper_helpers import add_question
 
     good = add_question(db, question_factory, passing_audit, "biochemistry", "term", points=6)
-    odd = add_question(db, question_factory, passing_audit, "biochemistry", "fill_blank", points=4)
-    # a fill-in whose scoring points cannot each be worth at least half a point of its new 2 points
-    # five scoring points on a 4-point question: impossible at 2 points in half-point steps
+    odd = add_question(db, question_factory, passing_audit, "biochemistry", "term", points=6)
+    # a term whose scoring points are worth less than half a point each: nothing in half points can carry them
     db.execute("ALTER TABLE reviewed_questions DISABLE TRIGGER USER")
     content = db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (odd,)).fetchone()["content"]
-    content["rubric"] = [dict(description=f"要点{i}", points=p, knowledge_tags=[]) for i, p in enumerate([1, 1, 1, 0.5, 0.5])]
+    content["rubric"] = [dict(description=f"要点{i}", points=0.5, knowledge_tags=[]) for i in range(12)]
+    content["max_points"] = 6
     db.execute("UPDATE reviewed_questions SET content=%s WHERE id=%s", (Jsonb(content), odd))
     db.execute("ALTER TABLE reviewed_questions ENABLE TRIGGER USER")
     report = scoring_rescale.run(db)

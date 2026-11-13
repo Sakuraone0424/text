@@ -9,7 +9,7 @@ import threading
 import time
 from app.db import get_db
 from app import cost_control
-from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading
+from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading, auto_execution
 from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
 from app import cny_prices, cost_reconcile
 from app.harness_gateway import execute
@@ -153,9 +153,13 @@ def plan(conn, uid, target=None, report=None):
             lap = time.monotonic()
 
     auto_quality.requeue_past_exam_duplicates(conn)   # before anything can retire them
+    mark("dups")
     auto_quality.retire_stale(conn)
+    mark("stale")
     auto_quality.retire_old_scoring(conn)      # (v4 -> v5 points were already converted, in place, by rescale_scoring below)
+    mark("oldscale")
     auto_quality.retire_unusable_sources(conn)   # literature-list sources, missing figures, answers written in the stem
+    mark("unusable")
     from app import memory
 
     done = memory.reclassify_existing(conn)        # once: review cards sorted by the new mistake rule (nothing deleted)
@@ -188,7 +192,7 @@ def plan(conn, uid, target=None, report=None):
         payload = dict(
             question_id=row["question_id"],
             question=q,
-            evidence=refs,
+            evidence=auto_execution.fit_evidence(refs),
             style=style,
             instructions="Repair the question using only the supplied actual excerpts. Return JSON {question: complete Question object, reason: detailed correction rationale}. No invented citation, no human approval. A new version will undergo the independent review again.",
             schema=auto_quality.Question.model_json_schema(),

@@ -1,5 +1,7 @@
 """Read-only learning advice; never revises scores or overrides FSRS scheduling."""
 
+import json
+
 from pydantic import Field, StrictInt
 from app.question_quality import StrictModel
 from app.candidate_review import snapshot_unit
@@ -48,20 +50,10 @@ def _plan_attempt(conn, uid, attempt):
     ).fetchall()
     if not rows:
         return False
-    mistakes = []
-    for row in rows:
-        q = row["snapshot"]
-        units = [snapshot_unit(conn, e["source_unit_id"]) for e in q["evidence"]]
-        mistakes.append(
-            dict(
-                question_id=row["question_id"],
-                question=q,
-                answer=row["answer"],
-                points=row["points"],
-                feedback=row["feedback"],
-                evidence=units,
-            )
-        )
+    fitted = _fit(conn, rows)
+    if fitted is None:
+        return False                     # nothing of this paper fits one request: skipped, never an error that stops the other routes
+    mistakes = fitted
     for kind in ("explanation", "study_plan"):
         enqueue(
             conn,
@@ -78,6 +70,50 @@ def _plan_attempt(conn, uid, attempt):
     return True
 
 
+MAX_REQUEST_BYTES = 22000     # the queue refuses a request above 24000 bytes: stay well under it
+
+
+def _unit_view(conn, q, limit):
+    """The textbook paragraphs of one question, each reduced to the passages the question cites (word for word, so advice can still quote
+    them), cut at `limit` characters. Falls back to the paragraph's beginning when nothing was cited."""
+    cited = {}
+    for e in q["evidence"]:
+        cited.setdefault(e["source_unit_id"], [])
+        if e.get("excerpt") and e["excerpt"] not in cited[e["source_unit_id"]]:
+            cited[e["source_unit_id"]].append(e["excerpt"])
+    views = []
+    for unit_id, excerpts in cited.items():
+        unit = snapshot_unit(conn, unit_id)
+        unit["text"] = ("\n\n".join(excerpts) or unit["text"])[:limit]
+        views.append(unit)
+    return views
+
+
+def _fit(conn, rows):
+    """The mistakes of one paper as a request that fits the queue's size limit: first shorter textbook passages, then fewer mistakes.
+    None when even one mistake with short passages does not fit."""
+    for count in (3, 2, 1):
+        for limit in (1500, 700, 300):
+            mistakes = []
+            for row in rows[:count]:
+                answer = row["answer"]
+                if isinstance(answer, str) and len(answer) > 1500:
+                    answer = answer[:1500]
+                mistakes.append(
+                    dict(
+                        question_id=row["question_id"],
+                        question=row["snapshot"],
+                        answer=answer,
+                        points=row["points"],
+                        feedback=row["feedback"],
+                        evidence=_unit_view(conn, row["snapshot"], limit),
+                    )
+                )
+            if len(json.dumps(mistakes, ensure_ascii=False, sort_keys=True).encode()) + 3000 <= MAX_REQUEST_BYTES:
+                return mistakes
+    return None
+
+
 def accept(conn, job):
     if job["state"] != "succeeded" or job["result"].get("real_api") is not True:
         raise ValueError("actual_advice_call_required")
@@ -91,7 +127,9 @@ def accept(conn, job):
             raise ValueError("invented_learning_history_or_mapping")
         refs = {u["unit_id"]: u for u in q["evidence"]}
         u = snapshot_unit(conn, item.source_unit_id)
-        if u != refs.get(item.source_unit_id) or item.excerpt not in u["text"]:
+        ref = refs.get(item.source_unit_id)
+        # the request carries the cited passages of a paragraph, so the paragraph is matched by its fingerprint, the quote by its full text
+        if ref is None or ref.get("unit_sha256") != u["unit_sha256"] or item.excerpt not in u["text"]:
             raise ValueError("invented_or_stale_advice_evidence")
     return advice
 

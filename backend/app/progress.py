@@ -450,7 +450,8 @@ def _waste(conn):
 def _executor_report(conn):
     from app import external_executor
 
-    return dict(today=external_executor.executor_stats(conn), routing=external_executor.policy(conn))
+    return dict(today=external_executor.executor_stats(conn), routing=external_executor.policy(conn),
+                waiting=external_executor.waiting_for_claude(conn))
 
 
 def _rescale_report(conn):

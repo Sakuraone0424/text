@@ -5,6 +5,7 @@ from psycopg.types.json import Jsonb
 from pydantic import Field, StrictBool, StrictInt
 from app.question_quality import StrictModel, Points
 from app.ai_jobs import enqueue_rekeyed as enqueue, content_sha
+from app.auto_execution import fit_evidence
 
 
 class Grade(StrictModel):
@@ -59,10 +60,12 @@ def grading_payload(paper_id, r, q, answer):
             for k in ("subject", "question_type", "stem", "options", "answer", "accepted_answers",
                       "rubric", "blanks", "max_points", "knowledge_tags")
         },
-        evidence=[
+        # a question may cite more passages than one request may carry (the execution guard refuses more than four entries): they are merged
+        # one per paragraph, exactly as the independent review does
+        evidence=fit_evidence([
             {"unit_id": e["source_unit_id"], "locator": e["locator"], "text": e["excerpt"]}
             for e in q["evidence"]
-        ],
+        ]),
         answer=_typed(answer),
     )
 

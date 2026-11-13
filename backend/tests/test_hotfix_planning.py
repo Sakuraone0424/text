@@ -54,15 +54,30 @@ def test_a_question_that_passed_is_not_re_verified_on_every_planning_tick(db, mo
         db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready',%s)", (qid, "sha-1"))
     calls = []
     monkeypatch.setattr(auto_quality, "evidence", lambda conn, qid: calls.append(qid))
-    auto_quality.retire_stale(db, now=1000.0)
+    auto_quality.retire_stale(db)
     assert sorted(calls) == sorted(ids)                                               # the first pass checks every question
-    auto_quality.retire_stale(db, now=1000.0 + 5 * 60)                                # the next tick, five minutes later: nothing
+    auto_quality.retire_stale(db)                                                     # the next run (a new process: the memo is in the database): nothing
     assert len(calls) == 3
     db.execute("UPDATE auto_question_states SET content_sha256='sha-2' WHERE question_id=%s", (ids[0],))
-    auto_quality.retire_stale(db, now=1000.0 + 6 * 60)                                # changed content is looked at again at once
+    auto_quality.retire_stale(db)                                                     # changed content is looked at again at once
     assert calls.count(ids[0]) == 2 and calls.count(ids[1]) == 1
-    auto_quality.retire_stale(db, now=1000.0 + 45 * 60)                               # after the window every question is due again
+    db.execute("UPDATE auto_question_states SET stale_checked_at=clock_timestamp()-interval '45 minutes'")
+    auto_quality.retire_stale(db)                                                     # after the window every question is due again
     assert len(calls) == 3 + 1 + 3
+
+
+def test_one_pass_looks_at_no_more_than_its_share_of_the_questions(db, monkeypatch):
+    from stats_helpers import question
+
+    monkeypatch.setattr(auto_quality, "STALE_PER_RUN", 2)
+    ids = [question(db, "biochemistry", "single_choice", 3, "第一章", stem=f"题{n}") for n in range(5)]
+    for qid in ids:
+        db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
+    calls = []
+    monkeypatch.setattr(auto_quality, "evidence", lambda conn, qid: calls.append(qid))
+    for expected in (2, 4, 5, 5):
+        auto_quality.retire_stale(db)
+        assert len(calls) == expected                                                 # the rest follow in the next runs, none twice
 
 
 def test_a_superseded_question_is_still_withdrawn_when_it_is_due(db, monkeypatch):
@@ -71,14 +86,27 @@ def test_a_superseded_question_is_still_withdrawn_when_it_is_due(db, monkeypatch
     qid = question(db, "biochemistry", "single_choice", 3, "第一章", stem="将被取代的题")
     db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
     monkeypatch.setattr(auto_quality, "evidence", lambda conn, q: None)
-    auto_quality.retire_stale(db, now=0.0)
+    auto_quality.retire_stale(db)
 
     def gone(conn, q):
         raise ValueError("superseded_candidate")
 
     monkeypatch.setattr(auto_quality, "evidence", gone)
-    auto_quality.retire_stale(db, now=60.0)                                           # inside the window: not looked at
+    auto_quality.retire_stale(db)                                                     # inside the window: not looked at
     assert db.execute("SELECT status FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()["status"] == "ready"
-    auto_quality.retire_stale(db, now=60.0 * 60)                                      # due: withdrawn
+    db.execute("UPDATE auto_question_states SET stale_checked_at=clock_timestamp()-interval '60 minutes'")
+    auto_quality.retire_stale(db)                                                     # due: withdrawn
     row = db.execute("SELECT status,reason FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()
     assert (row["status"], row["reason"]) == ("retired", "source_or_candidate_superseded")
+
+
+def test_the_old_scoring_check_is_one_query_that_returns_only_the_questions_that_differ(db):
+    from stats_helpers import question
+
+    same = question(db, "biochemistry", "fill_blank", 2.5, "第一章", stem="新分值 ____")
+    old = question(db, "biochemistry", "term", 4, "第一章", stem="旧分值")
+    for qid in (same, old):
+        db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
+    assert auto_quality.retire_old_scoring(db) == 1
+    assert db.execute("SELECT status FROM auto_question_states WHERE question_id=%s", (same,)).fetchone()["status"] == "ready"
+    assert db.execute("SELECT status,reason FROM auto_question_states WHERE question_id=%s", (old,)).fetchone()["reason"] == "superseded_scoring"

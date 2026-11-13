@@ -76,8 +76,13 @@ def with_scoring(content, scoring):
     """A copy of the content carrying the given scoring (nothing else changes)."""
     out = copy.deepcopy(content)
     out["max_points"] = scoring["max_points"]
-    for criterion, points in zip(out["rubric"], scoring["rubric"]):
-        criterion["points"] = points
+    if scoring.get("rubric_full"):                      # new scoring that re-cut the scoring points: the whole list
+        out["rubric"] = copy.deepcopy(scoring["rubric_full"])
+    elif scoring.get("rubric_items"):                   # the original scoring of such a question: its points as they were
+        out["rubric"] = [{**item, "points": points} for item, points in zip(scoring["rubric_items"], scoring["rubric"])]
+    else:
+        for criterion, points in zip(out["rubric"], scoring["rubric"]):
+            criterion["points"] = points
     for blank, points in zip(out.get("blanks") or [], scoring.get("blanks") or []):
         blank["points"] = points
     return out
@@ -94,6 +99,35 @@ def scale_exactly(points, new_total):
     return [_plain(float(x)) for x in scaled]
 
 
+def _valid_share(points):
+    return points > 0 and abs(points * 12 - round(points * 12)) < 1e-9
+
+
+def fill_scoring(content):
+    """The new scoring of a fill-in (2 or 4 points -> 2.5), whatever shape its scoring points were written in:
+    - several blanks: each is worth 2.5 / blanks and each has its own scoring point; a question whose scoring points did not match its
+      blanks gets one point per blank (named after the blank's answer);
+    - one blank with N scoring points: they share the 2.5 equally (N = 1: the one point is 2.5) when that is an exact share, otherwise they
+      are merged into one point of 2.5.
+    Nothing is left impossible: such a question is converted, never blocked."""
+    new = NEW["fill_blank"]
+    blanks, rubric = content.get("blanks") or [], content["rubric"]
+    n, count = len(blanks), len(rubric)
+    if n >= 2:
+        share = _plain(new / n)
+        if count == n:
+            return dict(max_points=new, rubric=[share] * n, blanks=[share] * n)
+        items = [dict(description=f"第{i + 1}空：{(b.get('accepted_answers') or [''])[0]}", points=share, knowledge_tags=[]) for i, b in enumerate(blanks)]
+        return dict(max_points=new, rubric=[share] * n, blanks=[share] * n, rubric_full=items)
+    if count == 1 or (count > 1 and _valid_share(new / count)):
+        return dict(max_points=new, rubric=[_plain(new / count)] * count, blanks=[])
+    tags = []
+    for c in rubric:
+        tags += [t for t in c.get("knowledge_tags", []) if t not in tags]
+    merged = dict(description="；".join(c["description"] for c in rubric)[:2000], points=new, knowledge_tags=tags)
+    return dict(max_points=new, rubric=[new], blanks=[], rubric_full=[merged])
+
+
 def rescale_content(content):
     """(new content, the scoring it had) for a question still on an earlier scale; None for any other question.
 
@@ -105,10 +139,9 @@ def rescale_content(content):
         return None
     before = original_scoring(content)
     if kind == "fill_blank":
-        blanks = before["blanks"]
-        n = len(blanks)
-        rubric = [_plain(NEW[kind] / n)] * len(before["rubric"]) if n and len(before["rubric"]) == n else scale_exactly(before["rubric"], NEW[kind])
-        scaled = dict(max_points=NEW[kind], rubric=rubric, blanks=[_plain(NEW[kind] / n)] * n if n else [])
+        scaled = fill_scoring(content)
+        if "rubric_full" in scaled:          # the scoring points were re-cut: what the question had is kept whole beside it
+            before["rubric_items"] = [{k: v for k, v in c.items() if k != "points"} for c in content["rubric"]]
     else:
         scaled = dict(max_points=NEW[kind], rubric=scale_points(before["rubric"], NEW[kind]),
                       blanks=scale_points(before["blanks"], NEW[kind]) if before["blanks"] else [])
@@ -182,6 +215,12 @@ def run(conn):
 
     # only questions still at an old maximum are loaded: the pass runs every few minutes and must stay cheap once everything is converted.
     # A fill-in converted before (v4 -> v5, it has its first scoring on record) is converted again (2 -> 2.5); the first record is kept.
+    # fill-ins that an earlier version of this pass set aside as "impossible" are convertible now (see fill_scoring): they go back into
+    # the pool (a published one is ready again, any other is checked again) and are converted below
+    conn.execute(
+        "UPDATE auto_question_states s SET status=CASE WHEN q.status='published' THEN 'ready' ELSE 'candidate' END,reason=NULL,"
+        "updated_at=clock_timestamp() FROM reviewed_questions q WHERE q.id=s.question_id AND s.status='blocked' AND s.reason=%s "
+        "AND q.content->>'question_type'='fill_blank'", (UNSCALABLE,))
     old = [(kind, str(points)) for kind, points_list in OLD_MAXIMA.items() for points in points_list]
     rows = conn.execute(
         "SELECT q.id,q.content FROM reviewed_questions q WHERE q.status IN ('draft','published') "
@@ -222,6 +261,9 @@ def run(conn):
                 conn.execute("SELECT set_config('app.rescale_scoring','1',true)")
                 conn.execute("INSERT INTO question_scoring_originals(question_id,original) VALUES (%s,%s) ON CONFLICT DO NOTHING",
                              (qid, Jsonb(original)))
+                if original.get("rubric_items"):       # an earlier record of the first scoring gets the wording it was reviewed with
+                    conn.execute("UPDATE question_scoring_originals SET original=original || %s WHERE question_id=%s AND NOT (original ? 'rubric_items')",
+                                 (Jsonb({"rubric_items": original["rubric_items"]}), qid))
                 conn.execute("UPDATE reviewed_questions SET content=%s WHERE id=%s", (Jsonb(content), qid))
         except Exception as exc:  # noqa: BLE001  (one question's failure must not undo the others)
             code = "rescale_failed_" + type(exc).__name__
