@@ -21,12 +21,14 @@ def blueprint(module):
 
 def test_objective_paper_specification():
     spec = v5.OBJECTIVE
-    assert spec.SPECIFICATION == "xiaohan-obj-150-v5"
-    assert spec.COUNTS == {"single_choice": 15, "fill_blank": 15}
-    assert (spec.POINTS["single_choice"], spec.POINTS["fill_blank"]) == (3, 2)
+    assert spec.SPECIFICATION == "xiaohan-obj-fill-150-v6"
+    assert spec.COUNTS == {"fill_blank": 30}
+    assert spec.POINTS["fill_blank"] == 2.5
     assert spec.TOTAL_QUESTIONS == 60 and spec.TOTAL_POINTS == 150 and spec.POINTS_PER_SUBJECT == 75
     assert spec.DURATION_SECONDS == 3600
-    assert 15 * 3 + 15 * 2 == 75
+    assert 30 * 2.5 == 75
+    old = v5.OBJECTIVE_V5                       # the earlier objective paper: read-only, never generated again
+    assert old.SPECIFICATION == "xiaohan-obj-150-v5" and old.COUNTS == {"single_choice": 15, "fill_blank": 15}
 
 
 def test_subjective_paper_specification(monkeypatch):
@@ -48,13 +50,13 @@ def test_subjective_paper_specification(monkeypatch):
 
 
 def test_daily_demand_and_two_day_reserve_per_subject():
-    assert v5.COUNTS == {"single_choice": 15, "fill_blank": 15, "term": 4, "short_answer": 2, "essay": 1}
-    assert v5.RESERVE == {"single_choice": 30, "fill_blank": 30, "term": 8, "short_answer": 4, "essay": 2}
+    assert v5.COUNTS == {"fill_blank": 30, "term": 4, "short_answer": 2, "essay": 1}
+    assert v5.RESERVE == {"fill_blank": 60, "term": 8, "short_answer": 4, "essay": 2}
     from app import auto_generation, cost_control
     assert {k: cost_control.reserve_target(n, auto_generation.STARTUP_RESERVE_DAYS) for k, n in v5.COUNTS.items()} == v5.RESERVE
-    # single choice comes first when the generator picks what to write next
+    # the fill-in is the biggest gap: it comes first when the generator picks what to write next
     order = auto_generation.balanced_generation_buckets({})
-    assert order[0][1] == "single_choice"
+    assert order[0][1] == "fill_blank"
 
 
 def test_a_paper_must_hold_exactly_its_own_questions():
@@ -161,7 +163,7 @@ def test_the_daily_variable_may_still_name_a_retired_paper_or_one_new_paper():
     from app import automation
 
     both = automation.daily_blueprints({})
-    assert [b.specification for b in both] == ["xiaohan-obj-150-v5", "xiaohan-subj-150-v5"]
+    assert [b.specification for b in both] == ["xiaohan-obj-fill-150-v6", "xiaohan-subj-150-v5"]
     assert [b.specification for b in automation.daily_blueprints({"QUIZ_DAILY_SPECIFICATION": "xiaohan-60q-300pt-v4"})] == [b.specification for b in both]
     assert [b.specification for b in automation.daily_blueprints({"QUIZ_DAILY_SPECIFICATION": "xiaohan-subj-150-v5"})] == ["xiaohan-subj-150-v5"]
     with pytest.raises(ValueError):
@@ -201,6 +203,7 @@ def test_every_old_scale_question_is_converted_not_retired(db, question_factory,
 
     monkeypatch.setattr(source_policy, "pinned_science_evidence", lambda content: True)
     monkeypatch.setattr("app.auto_generation.pinned_science_evidence", lambda content: True)
+    monkeypatch.setattr(scoring_rescale, "OLD", V4)          # this test starts from the oldest scale (production runs from the v5 scale)
     uid = ensure_user(db, "rescale")
     ids = {}
     layout = {"single_choice": None, "fill_blank": None, "term": [3, 3], "short_answer": [4, 4, 4], "essay": [3, 3, 3, 3, 3, 3]}
@@ -239,11 +242,11 @@ def test_every_old_scale_question_is_converted_not_retired(db, question_factory,
             # the review bound to the content as reviewed still matches
             assert content_sha(scoring_rescale.read_in_original_scoring(db, qid, after)) == content_sha(was)
             assert qid in scoring_rescale.rescaled_ids(db, [qid])
-    # fixed examples: term [3,3] -> 5; short answer [4,4,4] -> 15; fill-in's single point -> 2; single choice -> 3
+    # fixed examples: term [3,3] -> 5; short answer [4,4,4] -> 15; fill-in's single point -> 2.5; single choice -> 3
     rubric_of = lambda q: [c["points"] for c in db.execute("SELECT content FROM reviewed_questions WHERE id=%s", (q,)).fetchone()["content"]["rubric"]]
     assert rubric_of(ids[("biochemistry", "term")][0]) == [2.5, 2.5]
     assert rubric_of(ids[("biochemistry", "short_answer")][0]) == [5, 5, 5]
-    assert rubric_of(ids[("biochemistry", "fill_blank")][0]) == [2]
+    assert rubric_of(ids[("biochemistry", "fill_blank")][0]) == [2.5]
     assert rubric_of(ids[("biochemistry", "single_choice")][0]) == [3]
     assert sum(rubric_of(ids[("biochemistry", "essay")][0])) == 25
     # run again: nothing left to do, nothing changes
@@ -315,21 +318,21 @@ def test_old_mixed_papers_stay_readable_and_are_labelled(db, question_factory, p
 def test_scores_and_history_are_kept_apart_by_kind(db):
     uid = ensure_user(db, "kinds")
     today = learning_stats.today_cn(db)
-    obj = lambda n, got: paper(db, uid, today - timedelta(days=n), [item(points=3, got=got), item(qtype="fill_blank", points=2, got=2)], spec="xiaohan-obj-150-v5")
+    obj = lambda n, got: paper(db, uid, today - timedelta(days=n), [item(qtype="fill_blank", points=2.5, got=got), item(qtype="fill_blank", points=2.5, got=2.5)], spec="xiaohan-obj-fill-150-v6")
     subj = lambda n, got: paper(db, uid, today - timedelta(days=n), [item(qtype="term", points=5, got=got), item(qtype="essay", points=25, got=10)], spec="xiaohan-subj-150-v5")
     mixed = lambda n: paper(db, uid, today - timedelta(days=n), [item(points=4, got=4)], spec="xiaohan-60q-300pt-v4")
-    obj(3, 3); obj(2, 0); subj(3, 5); subj(1, 1); mixed(4)
+    obj(3, 2.5); obj(2, 0); subj(3, 5); subj(1, 1); mixed(4)
     o = learning_stats.overview(db, uid)
     by = o["last7_by_kind"]
     assert by["objective"]["papers"] == 2 and by["objective"]["max_points"] == 5
-    assert by["objective"]["avg_rate"] == round((5 / 5 + 2 / 5) / 2, 4)
+    assert by["objective"]["avg_rate"] == round((5 / 5 + 2.5 / 5) / 2, 4)
     assert by["subjective"]["papers"] == 2 and by["subjective"]["max_points"] == 30
     assert by["subjective"]["avg_rate"] == round((15 / 30 + 11 / 30) / 2, 4)
     assert by["mixed"]["papers"] == 1 and by["mixed"]["max_points"] == 4
     # the old field is the old mixed papers' only
     assert o["last7"]["papers"] == 1 and o["last7"]["max_points"] == 4
     # per-question rates do not care which paper the question was on: objective = single choice + fill-in, in every paper
-    assert o["objective_rate"] == round((3 + 2 + 0 + 2 + 4) / (3 + 2 + 3 + 2 + 4), 4)
+    assert o["objective_rate"] == round((2.5 + 2.5 + 0 + 2.5 + 4) / (2.5 + 2.5 + 2.5 + 2.5 + 4), 4)
     profile = learning_stats.profile(db, uid)
     assert sorted({t["kind"] for t in profile["trend"]}) == ["mixed", "objective", "subjective"]
     assert all(t["kind"] == learning_stats.paper_kind(t["spec"]) for t in profile["trend"])

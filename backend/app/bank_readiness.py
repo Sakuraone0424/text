@@ -74,7 +74,7 @@ def report(conn, user_id):
     from app.exam_style_readiness import report as past_exam_style_report
     past_exam_style = past_exam_style_report(conn)
     return {
-        "specification": "xiaohan-obj-150-v5+xiaohan-subj-150-v5",
+        "specification": "xiaohan-obj-fill-150-v6+xiaohan-subj-150-v5",
         "genuine_past_exam_style": {
             "ready_for_same_type_style": past_exam_style["ready_for_same_type_style"],
             "missing_same_type_style": past_exam_style["missing_same_type_style"],

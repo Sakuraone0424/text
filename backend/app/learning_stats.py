@@ -477,4 +477,4 @@ def history(conn, uid, only_kind=None):
     counts = {k: sum(1 for c in cards if c["kind"] == k) for k in ("objective", "objective_old", "subjective", "mixed")}
     if only_kind in counts:
         cards = [c for c in cards if c["kind"] == only_kind]
-    return dict(papers=cards, kinds=[dict(kind=k, label=KIND_LABEL[k], count=n) for k, n in counts.items()])
+    return dict(papers=cards, kinds=[dict(kind=k, label=KIND_LABEL[k], count=n) for k, n in counts.items() if n or k != "objective_old"])   # the earlier objective paper is listed once there is one

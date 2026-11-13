@@ -8,7 +8,7 @@ from test_ai_automation import setup_ai  # noqa: F401
 
 def test_detail_has_a_row_per_bucket_with_the_numbers_its_gap_is_made_of(db, corpus, setup_ai):
     detail = gen.bucket_detail(db, setup_ai)
-    assert len(detail) == 10
+    assert len(detail) == 8
     row = detail[0]
     assert {"subject", "kind", "target", "avail", "pipeline", "inflight", "past", "gap"} <= set(row)
     assert row["gap"] == row["target"] - row["avail"] - row["pipeline"] - row["inflight"] - row["past"]
@@ -17,8 +17,8 @@ def test_detail_has_a_row_per_bucket_with_the_numbers_its_gap_is_made_of(db, cor
 def test_diagnosis_lists_avail_and_gap_for_every_bucket(db, corpus, setup_ai):
     d = gen.gap_diagnosis(db, setup_ai)
     assert d["gap"] > 0 and d["buckets"] > 0
-    assert d["avail"].count("=") == 10 and d["gap_detail"].count("=") == 10
-    assert "biochemistry"[:4] + ":single_choice=" in d["avail"]
+    assert d["avail"].count("=") == 8 and d["gap_detail"].count("=") == 8
+    assert "biochemistry"[:4] + ":fill_blank=" in d["avail"]
 
 
 def test_a_finished_request_nobody_dispatched_for_hours_is_not_supply(db, corpus, setup_ai):

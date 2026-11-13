@@ -11,9 +11,9 @@ def test_unset_specification_prepares_both_papers(env):
     objective, subjective = automation.daily_blueprints(env)
     assert (objective.specification, subjective.specification) == (v5.OBJECTIVE_SPEC, v5.SUBJECTIVE_SPEC)
     for subject in v5.SUBJECTS:
-        assert objective.quotas[subject] == {"single_choice": 15, "fill_blank": 15}
+        assert objective.quotas[subject] == {"fill_blank": 30}
         assert subjective.quotas[subject] == {"term": 4, "short_answer": 2, "essay": 1}
-    assert objective.points == {"single_choice": 3, "fill_blank": 2}
+    assert objective.points == {"fill_blank": 2.5}
     assert subjective.points == {"term": 5, "short_answer": 15, "essay": 25}
     for plan in (objective, subjective):
         assert sum(n * plan.points[k] for q in plan.quotas.values() for k, n in q.items()) == 150

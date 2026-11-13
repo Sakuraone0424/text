@@ -12,7 +12,7 @@ from app.learning_stats import SHANGHAI, TYPES
 from app.mistake_book import plain_answer, sources_of
 
 SPEC_NAMES = {
-    "xiaohan-obj-150-v5": "客观题卷 · 60 题 · 150 分", "xiaohan-subj-150-v5": "主观题卷 · 14 题 · 150 分",
+    "xiaohan-obj-fill-150-v6": "客观题卷 · 60 道填空 · 150 分", "xiaohan-obj-150-v5": "旧版客观题卷（单选＋填空）· 60 题 · 150 分", "xiaohan-subj-150-v5": "主观题卷 · 14 题 · 150 分",
     "xiaohan-60q-300pt-v4": "旧版混合卷 · 60 题 · 300 分", "xiaohan-60q-150pt-v2": "旧版混合卷 · 60 题 · 150 分", "xiaohan-150-60-v1": "28 题 · 150 分（旧卷，只读）",
 }
 

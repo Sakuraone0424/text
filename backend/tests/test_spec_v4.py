@@ -146,7 +146,7 @@ def test_health_stays_green_while_the_previous_specification_id_is_still_set(cli
     monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", v2.SPECIFICATION)
     body = client.get("/db/health").json()
     assert body["specification_env_outdated"] is True
-    assert body["formal_training"]["specification"] == "xiaohan-obj-150-v5+xiaohan-subj-150-v5"
+    assert body["formal_training"]["specification"] == "xiaohan-obj-fill-150-v6+xiaohan-subj-150-v5"
     assert [p["points"] for p in body["formal_training"]["papers"]] == [150, 150]
     monkeypatch.setenv("QUIZ_DAILY_SPECIFICATION", "nonsense")
     assert client.get("/db/health").status_code == 503

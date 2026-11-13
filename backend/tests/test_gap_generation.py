@@ -38,6 +38,17 @@ def corpus(db, tmp_path, monkeypatch):
     monkeypatch.delenv("AI_FULL_CORPUS_ENABLED", raising=False)
 
 
+def plan_single(db, uid):
+    """One single-choice writing request. Daily papers no longer use single choice and the planner no longer asks for it; the
+    request itself (practice by type, old stock) is still built and checked the same way."""
+    real = gen.bucket_gaps
+    gen.bucket_gaps = lambda conn, u: [("biochemistry", "single_choice", 1)]
+    try:
+        return gen.plan_gap(db, uid)
+    finally:
+        gen.bucket_gaps = real
+
+
 def generation_jobs(db):
     return db.execute(
         "SELECT * FROM ai_jobs WHERE kind='generation' AND COALESCE(payload->>'origin','')<>'past_exam' ORDER BY id"
@@ -51,14 +62,14 @@ def test_gap_planning_needs_no_corpus_flag_and_stays_within_caps(db, corpus, set
     job = gen.plan_gap(db, setup_ai)
     assert job is not None and job["kind"] == "generation"
     p = job["payload"]
-    assert (p["subject"], p["question_type"]) == ("biochemistry", "single_choice")
+    assert (p["subject"], p["question_type"]) == ("biochemistry", "fill_blank") and p["max_points"] == 2.5 and p["blank_count"] in (1, 2, 3)
     assert 1 <= len(p["evidence"]) <= pei.MAX_EVIDENCE_UNITS
     assert sum(len(u["text"]) for u in p["evidence"]) <= pei.MAX_EVIDENCE_CHARS
     assert all(u["source_kind"] == "textbook" and u["subject"] == "biochemistry" for u in p["evidence"])
     assert p["anchor_exact_excerpt"] in p["evidence"][0]["text"]
     assert len(job["payload"]["style"]) >= 1 and p["style"][0]["source_kind"] == "exam_transcription"
     assert len(__import__("json").dumps(p, ensure_ascii=False).encode()) <= 24000
-    assert "distractor_checks" in p["schema"]["properties"]  # single choice uses the wrapper schema
+    assert "distractor_checks" not in p["schema"]["properties"] and "blanks" in p["schema"]["properties"]  # a fill-in uses the plain question schema
 
 
 def test_every_question_type_respects_the_same_caps(db, corpus, setup_ai):
@@ -231,8 +242,9 @@ def test_used_paragraphs_count_requests_already_written_from_them(db, corpus, se
 def test_bucket_gap_deducts_work_already_on_its_way(db, corpus, setup_ai):
     pei.import_items(db)
     gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
-    # an imported past-exam single choice is work on its way now too (past-exam singles come first, AI singles fill the rest)
-    assert gaps[("biochemistry", "single_choice")] == 30 - 1
+    assert ("biochemistry", "single_choice") not in gaps     # single choice is no longer part of the daily papers
+    # an imported past-exam fill-in (a real fill-in, or a blank split out of one) is work on its way now too
+    assert gaps[("biochemistry", "fill_blank")] <= 60
     assert gaps[("biochemistry", "term")] == 8  # an imported past-exam term is throttled (20% cap): it no longer holds back a new one
     assert gaps[("biochemistry", "short_answer")] == 4 - 1
     job = gen.plan_gap(db, setup_ai)
@@ -244,7 +256,7 @@ def test_bucket_gap_deducts_work_already_on_its_way(db, corpus, setup_ai):
 def test_temporary_bank_target_gives_five_per_bucket_forty_in_all(db, corpus, setup_ai, monkeypatch):
     monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", "5")
     gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
-    assert len(gaps) == 10 and set(gaps.values()) == {5} and sum(gaps.values()) == 50
+    assert len(gaps) == 8 and set(gaps.values()) == {5} and sum(gaps.values()) == 40
     pei.import_items(db)
     gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
     assert gaps[("biochemistry", "term")] == 5  # an imported (not yet queued) past-exam term is throttled and not counted
@@ -261,7 +273,7 @@ def test_bank_target_unset_or_invalid_keeps_the_two_day_reserve(db, corpus, setu
         else:
             monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", value)
         gaps = {(s, k): g for s, k, g in gen.bucket_gaps(db, setup_ai)}
-        assert gaps[("biochemistry", "single_choice")] == 30
+        assert gaps[("biochemistry", "fill_blank")] == 60
 
 
 def test_a_stocked_bucket_is_not_fed_more_past_exam_work(db, corpus, setup_ai, monkeypatch):
@@ -309,7 +321,7 @@ def choice_response(job, *, drop=(), invent=None, answer="A"):
 
 
 def written(db, uid, **kwargs):
-    job = gen.plan_gap(db, uid)
+    job = plan_single(db, uid)
     finish_job(db, job, choice_response(job, **kwargs))
     auto_worker.dispatch_completed(db)
     return db.execute("SELECT * FROM ai_jobs WHERE id=%s", (job["id"],)).fetchone()
@@ -346,7 +358,7 @@ def test_unproven_distractors_never_become_a_candidate(db, corpus, setup_ai, kwa
 
 
 def test_a_bare_question_without_the_wrapper_is_refused(db, corpus, setup_ai):
-    job = gen.plan_gap(db, setup_ai)
+    job = plan_single(db, setup_ai)
     bare = choice_response(job)
     bare["response"] = bare["response"]["question"]
     finish_job(db, job, bare)
