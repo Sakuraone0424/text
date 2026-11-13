@@ -144,6 +144,17 @@
 .training-app .today-result { font-size: 17px; font-weight: 700; }
 .training-app .hero-action { width: 100%; }
 .training-app .stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.training-app .executor-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--primary-soft); color: var(--primary-soft-ink); margin-left: 6px; white-space: nowrap; }
+.training-app .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.training-app .cmp-grid { display: grid; gap: 12px; }
+.training-app .cmp-side { min-width: 0; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; }
+.training-app .cmp-stem { font-weight: 600; overflow-wrap: anywhere; }
+.training-app .cmp-answer, .training-app .cmp-rubric { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.training-app .cmp-field { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.training-app .cmp-field select, .training-app .cmp-note { font-size: 16px; min-height: 40px; max-width: 100%; }
+.training-app .cmp-note { width: 100%; box-sizing: border-box; }
+.training-app .cmp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.training-app .cmp-table th, .training-app .cmp-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .training-app .stat-legacy { grid-column: 1 / -1; margin: 0; }
 .training-app .stat-card { padding: 12px; border-radius: 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .training-app .stat-card strong { font-size: 24px; line-height: 1.25; font-weight: 700; }

@@ -20,6 +20,7 @@ const ASSETS = [
   "/static/live.js",
   "/static/progress.js",
   "/static/model.js",
+  "/static/compare.js",
   "/static/charts.js",
   "/static/insights.js",
   "/manifest.webmanifest",

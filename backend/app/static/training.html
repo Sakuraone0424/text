@@ -287,6 +287,9 @@
             ><a href="#/progress"
               ><span>出题进度<small>库存、被挡住的原因、费用、出题程序状态</small></span
               ><span aria-hidden="true">→</span></a
+            ><a href="#/compare" id="open-compare"
+              ><span>出题对比<small>同一份任务交给 DeepSeek 和 Claude，盲评打分</small></span
+              ><span aria-hidden="true">→</span></a
             ><a href="#/model"
               ><span
                 >模型与费用<small
@@ -350,6 +353,11 @@
           <div id="funnel-types" class="segmented wrap" role="group" aria-label="题型"></div>
           <div id="funnel"></div>
         </section>
+        <section class="card" aria-labelledby="h-executors">
+          <h2 id="h-executors">出题执行方（今日）</h2>
+          <p id="executors-note" class="muted"></p>
+          <ul id="executors" class="plain-list"></ul>
+        </section>
         <section class="card" aria-labelledby="h-waste">
           <h2 id="h-waste">近 24 小时被挡原因</h2>
           <div id="waste"></div>
@@ -391,6 +399,16 @@
         </section>
         <p id="updated" class="note center">正在读取…</p>
       </div>
+        </section>
+        <section data-page="compare" id="compare-view" class="view" hidden>
+          <header class="subbar"><button class="icon-button" type="button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>出题对比</h1><span></span></header>
+          <section class="card">
+            <p class="muted">从当前缺口里抽 10 份相同的出题任务（4 单选、2 填空、2 名词解释、1 简答、1 问答），同一份内容分别交给 DeepSeek 和 Claude 定时任务；两边的结果走一样的程序检查，审核统一用 DeepSeek。</p>
+            <button id="compare-start" class="primary" type="button">开始一次对比</button>
+            <p id="compare-note" class="note" role="status"></p>
+            <div id="compare-list" class="stack"></div>
+          </section>
+          <div id="compare-set" class="stack"></div>
         </section>
         <section data-page="model" id="model-view" class="view view-model" hidden>
           <header class="subbar"><button class="icon-button" type="button" data-back aria-label="返回"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><h1>模型与费用</h1><span></span></header>
@@ -469,6 +487,13 @@
             <p class="note">并发越高，一次运行完成得越快，但临近额度时更早被挡住。建议 2–3。</p>
             <p class="note">每次尝试只发一次官方请求；超时或结果不确定时，按预留额度计入并暂停，不会重复扣费。</p>
           </details>
+        </section>
+
+        <section class="card" aria-labelledby="h-executors-settings">
+          <h2 id="h-executors-settings">出题执行方</h2>
+          <p class="note">出题、审核、判分各自交给谁：DeepSeek（网站自己的程序）或 Claude 定时任务（用订阅额度，不计 DeepSeek 费用）。</p>
+          <div id="executor-form" class="stack"></div>
+          <p id="executor-note" class="note" role="status"></p>
         </section>
 
         <section class="card" aria-labelledby="h-price">
@@ -582,6 +607,7 @@
     <script src="/static/insights.js" defer></script>
     <script src="/static/progress.js" defer></script>
     <script src="/static/model.js" defer></script>
+    <script src="/static/compare.js" defer></script>
     <script src="/static/logic.js" defer></script>
     <script src="/static/manual.js" defer></script>
     <script src="/static/drill.js" defer></script>

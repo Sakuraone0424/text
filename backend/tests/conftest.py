@@ -253,3 +253,10 @@ def forget_module_caches():
         pass
     getattr(auto_quality, "_READY_SEEN", {}).clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def writing_is_deepseeks_in_the_older_tests(monkeypatch):
+    """The production default routes question writing to a Claude scheduled task first. The existing tests exercise the DeepSeek worker's
+    path, so they run with writing routed to DeepSeek; test_external_executor.py clears this to test the real default."""
+    monkeypatch.setenv("EXECUTOR_GENERATION", "deepseek")

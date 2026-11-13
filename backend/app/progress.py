@@ -209,7 +209,8 @@ def recent_jobs(conn, limit=20):
         "SELECT id,kind,state,attempts,transient_attempts,error_code,next_retry,dispatched_at,payload->>'subject' AS subject,"
         "payload->>'question_type' AS question_type,payload->>'origin' AS origin,payload->>'item_id' AS item_id,"
         "payload->>'question_id' AS question_id,settings_snapshot->>'effort' AS effort,settings_snapshot->>'model_id' AS model,"
-        "COALESCE(finished_at,started_at,created_at) AS at,result->'dispatch_failure' AS failure,result->'normalization' AS norm "
+        "COALESCE(finished_at,started_at,created_at) AS at,result->'dispatch_failure' AS failure,result->'normalization' AS norm,"
+        "COALESCE(executor,'deepseek') AS executor "
         "FROM ai_jobs ORDER BY COALESCE(finished_at,started_at,created_at) DESC,id DESC LIMIT %s",
         (limit,),
     ).fetchall()
@@ -261,6 +262,7 @@ def recent_jobs(conn, limit=20):
             outcome = dict(status=q["status"], reason=q["reason"])
         out.append(dict(
             id=r["id"], kind=r["kind"], label=label, source=source, state=r["state"], reason=reason,
+            executor="claude" if r["executor"] == "claude-subscription" else "deepseek",
             detail=detail["text"] if detail else None, notes=_notes(r["norm"]), at=r["at"], subject=r["subject"], question_type=r["question_type"],
             question_id=q["id"] if q else None, attempts=r["attempts"] - r["transient_attempts"],   # the task's own tries
             # DeepSeek busy / unreachable: the job is just waiting, which is not a failure of the task
@@ -445,6 +447,12 @@ def _waste(conn):
                 auto_fixed=stats["auto_fixed"], evidence_layers=stats["evidence_layers"])
 
 
+def _executor_report(conn):
+    from app import external_executor
+
+    return dict(today=external_executor.executor_stats(conn), routing=external_executor.policy(conn))
+
+
 def _rescale_report(conn):
     from app import legacy_reuse, scoring_rescale
 
@@ -465,6 +473,7 @@ def report(conn, uid):
         legacy=legacy_summary(conn),
         # the one-off move of every question to the new points: how many were converted, and the stock per type before / after
         scoring_rescale=_rescale_report(conn),
+        executors=_executor_report(conn),
         recent_jobs=recent_jobs(conn),
         waste=_waste(conn),
         ledger=dict(breakdown=cny_billing.ledger_breakdown(conn, uid), reconciliation=_reconciliation(conn)),

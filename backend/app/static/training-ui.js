@@ -59,8 +59,8 @@
   const scroller = () => document.querySelector(".workspace");
   const scrollMemory = {};
   let currentKey = null;
-  const PARENT = { progress: "profile", model: "profile", stats: "profile", mistakes: "home", practice: "home", exam: "practice", profile: "home", review: "stats", mistake: "mistakes", drill: "practice" };
-  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile", exam: "practice", review: "profile", mistake: "mistakes", drill: "practice" };
+  const PARENT = { progress: "profile", model: "profile", compare: "profile", stats: "profile", mistakes: "home", practice: "home", exam: "practice", profile: "home", review: "stats", mistake: "mistakes", drill: "practice" };
+  const NAV_FOR = { stats: "profile", progress: "profile", model: "profile", compare: "profile", exam: "practice", review: "profile", mistake: "mistakes", drill: "practice" };
   // how deep a route is: the four tabs are 0, their sub-pages 1, a sub-page's own sub-page 2
   const TABS = ["home", "practice", "mistakes", "profile"];
   const depthOf = (name, sub) => (TABS.includes(name) ? 0 : 1) + (sub ? 1 : 0);
@@ -101,7 +101,11 @@
     learning.hidden = !roots[view] || !learning.hasChildNodes();
     window.Insights?.onView(view);
     if (view === "progress") window.ProgressView?.show();
-    if (view === "model") window.ModelView?.show();
+    if (view === "model") {
+      window.ModelView?.show();
+      window.ExecutorSettings?.show();
+    }
+    if (view === "compare") window.CompareView?.show();
     if (scroller()) scroller().scrollTop = scrollMemory[currentKey] || 0;
     // motion: a sub-page slides in from the right, going back fades the page below in (the one above slid out first),
     // moving between the four tabs cross-fades. Nothing plays when the same route is merely re-applied.
@@ -114,7 +118,7 @@
   }
 
   /* ---- routes: one shell, hash URLs, the browser's own back stack ---- */
-  const VIEWS = ["home", "practice", "exam", "mistakes", "mistake", "review", "drill", "stats", "profile", "progress", "model"];
+  const VIEWS = ["home", "practice", "exam", "mistakes", "mistake", "review", "drill", "stats", "profile", "progress", "model", "compare"];
   const SUBS = ["weekly", "history", "insights", "archive", "source-status"];
   let routeChanges = 0;
   let suppressRoute = false;
