@@ -18,17 +18,19 @@ from app.worker import tick, integrations_tick
 from app.dispatch_codes import safe_dispatch_failure, _SAFE_VALIDATOR_ERRORS, _SAFE_QUALITY_CODES, _SAFE_PACKET_ERRORS  # noqa: F401  (re-exported)
 
 
-def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial"):
+def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job_id=None):
     if scope_kind not in ("limited_trial", "review_campaign", "qa_automation"):
         raise ValueError("unknown_execution_scope")
     scope_filter = (
         " AND settings_snapshot->'" + scope_kind + "'->>'scope_id'=%s" if scope_id else ""
     )
+    # only_job_id: an external executor's submit runs the checks of THAT one result right away (the same code as the worker's)
     rows = conn.execute(
         "SELECT * FROM ai_jobs WHERE state='succeeded' AND dispatched_at IS NULL"
         + scope_filter
+        + (" AND id=%s" if only_job_id else "")
         + " ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED",
-        (scope_id,) if scope_id else (),
+        ((scope_id,) if scope_id else ()) + ((only_job_id,) if only_job_id else ()),
     ).fetchall()
     for job in rows:
         try:

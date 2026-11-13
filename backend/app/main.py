@@ -348,6 +348,9 @@ app.include_router(model_router)
 from app.stats_api import router as stats_router
 
 app.include_router(stats_router)
+from app.external_api import router as external_router
+
+app.include_router(external_router)
 
 
 @app.get("/training", include_in_schema=False)

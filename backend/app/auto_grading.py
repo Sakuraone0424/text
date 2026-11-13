@@ -100,6 +100,13 @@ def schedule(conn, uid, paper_id):
                     "answer_too_long_for_automatic_grading")
             continue
         jobs.append(enqueue(conn, uid, key, "grading", grading_payload(paper_id, r, q, answer)))
+    if jobs:
+        try:
+            from app import routine_trigger
+
+            routine_trigger.fire_for_grading(conn, len(jobs))     # phase two, off unless configured and routed to Claude
+        except Exception:  # noqa: BLE001
+            pass
     return jobs
 
 

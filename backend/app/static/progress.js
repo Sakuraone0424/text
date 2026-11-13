@@ -445,6 +445,23 @@ function bank(report) {
 }
 
 let funnelType = "all";
+/* Who wrote today's questions: per executor, tasks done, the share that passed the program checks, and the average time. */
+const EXECUTOR = { deepseek: "DeepSeek", claude: "Claude（订阅）", "claude-subscription": "Claude（订阅）" };
+const ROUTE = { deepseek: "DeepSeek", claude: "Claude", claude_first: "Claude 优先" };
+function executors(report) {
+  const data = report.executors || { today: {}, routing: {} };
+  const root = $("executors");
+  root.replaceChildren();
+  const route = data.routing || {};
+  $("executors-note").textContent = route.generation ? `出题：${ROUTE[route.generation] || route.generation}` + (route.generation === "claude_first" ? `（${route.fallback_hours} 小时没人领就交给 DeepSeek）` : "") + `；审核：${ROUTE[route.review] || route.review}；判分：${ROUTE[route.grading] || route.grading}` : "";
+  for (const key of ["claude-subscription", "deepseek"]) {
+    const d = (data.today || {})[key] || { done: 0, passed: 0, pass_rate: null, avg_seconds: null };
+    const li = el("li", undefined, root);
+    el("b", EXECUTOR[key], li);
+    li.append(` 今日完成 ${d.done}` + (d.pass_rate === null ? "" : ` · 程序检查通过 ${Math.round(d.pass_rate * 100)}%`) + (d.avg_seconds === null ? "" : ` · 平均 ${Math.round(d.avg_seconds)} 秒`));
+  }
+}
+
 function funnel(report) {
   const data = report.funnel || {};
   $("funnel-types").replaceChildren();
@@ -621,6 +638,7 @@ function jobs(report) {
     el("span", undefined, li, "dot " + tagClass).setAttribute("aria-hidden", "true");
     const title = job.label || (KIND[job.kind] || job.kind) + (job.question_type ? " · " + (SUBJECT[job.subject] || "") + (TYPE[job.question_type] || "") : "");
     el("span", title, li, "kind");
+    if (job.executor === "claude") el("span", "Claude", li, "executor-tag");
     el("span", tagText, li, "state " + tagClass);
     const bits = [fmtTime(job.at)];
     if (job.state === "retrying" && job.next_retry) bits.push("下次重试 " + fmtTime(job.next_retry));
@@ -741,6 +759,7 @@ function render(report, meta) {
   status(report);
   if (!same("bank", "buckets", "legacy", "target_kind")) bank(report);
   if (!same("funnel", "funnel")) funnel(report);
+  if (!same("executors", "executors")) executors(report);
   if (!same("spend", "spend", "ledger")) spend(report);
   if (!same("waste", "waste")) waste(report);
   if (!same("jobs", "recent_jobs")) jobs(report);

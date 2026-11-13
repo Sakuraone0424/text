@@ -730,6 +730,13 @@ def anchor_sentence(text):
 
 
 def _enqueue_gap(conn, uid, subject, kind):
+    built = build_gap_request(conn, uid, subject, kind)
+    return enqueue(conn, uid, built[0], "generation", built[1]) if built else None
+
+
+def build_gap_request(conn, uid, subject, kind, avoid_units=()):
+    """The question-writing request for one bucket, built but not queued: (job key, payload), or None when nothing can be written.
+    Exactly what a DeepSeek request carries; the quality comparison sends the same payload to two executors."""
     if not select_exam_style(conn, subject, kind):
         return None  # no clean genuine past question of this type to imitate
     pool = paragraph_pool(conn, subject)
@@ -746,7 +753,7 @@ def _enqueue_gap(conn, uid, subject, kind):
     rng = random.Random(f"gap:{uid}:{subject}:{kind}:{prior}")
     skip = set()
     for _ in range(GAP_ATTEMPTS_PER_BUCKET):
-        unit_id = pick_paragraph(by_chapter, weights, used, rng, skip)
+        unit_id = pick_paragraph(by_chapter, weights, used, rng, skip | set(avoid_units))
         if unit_id is None:
             return None
         skip.add(unit_id)
@@ -771,7 +778,7 @@ def _enqueue_gap(conn, uid, subject, kind):
             {"unit_id": unit_id, "relation": {"name": primary["chapter"]}},
         )
         if payload is not None:
-            return enqueue(conn, uid, key, "generation", payload)
+            return key, payload
     return None
 
 
@@ -1267,9 +1274,13 @@ def request_repair(conn, uid, job, exc):
         evidence=[dict(unit_id=u["unit_id"], text=u["text"]) for u in p["evidence"]],
     )
     try:
-        return enqueue_job(conn, uid, f"genrepair:{job['id']}", "repair", payload)
+        repair = enqueue_job(conn, uid, f"genrepair:{job['id']}", "repair", payload)
     except ValueError:
         return None  # too large to send again: the draft is simply thrown away, as before
+    if (job.get("job_key") or "").startswith("compare:") and job.get("executor"):
+        # the blind comparison: a draft is repaired by the executor that wrote it, never by the other one
+        conn.execute("UPDATE ai_jobs SET executor=%s WHERE id=%s", (job["executor"], repair["id"]))
+    return repair
 
 
 def accept_repair(conn, job):

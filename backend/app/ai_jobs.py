@@ -239,6 +239,10 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         paced = [o["user_id"] for o in conn.execute(
             "SELECT DISTINCT user_id FROM ai_jobs WHERE state IN ('pending','retrying') AND kind=ANY(%s)", (list(cost_control.OFF_PEAK_ONLY),)
         ).fetchall() if cost_control.pace_exhausted(conn, o["user_id"])]
+    # A task routed to a Claude scheduled task (or one it is working on) is not the DeepSeek worker's until the fallback time.
+    from app import external_executor
+
+    hold_sql, hold_params = external_executor.deepseek_hold(conn)
     # Question writing, review and repair wait for off-peak hours; grading never does.
     job = conn.execute(
         "SELECT * FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp()"
@@ -250,8 +254,10 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         # one question is never written/reviewed/repaired by two calls at once
         + " AND NOT (payload ? 'question_id' AND EXISTS(SELECT 1 FROM ai_jobs r WHERE r.state='running' AND r.id<>ai_jobs.id"
         " AND r.payload->>'question_id'=ai_jobs.payload->>'question_id'))"
+        + hold_sql
         + " ORDER BY " + CLAIM_ORDER_SQL + " FOR UPDATE SKIP LOCKED LIMIT 1",
-        ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(), list(cost_control.OFF_PEAK_ONLY), satisfied, list(cost_control.OFF_PEAK_ONLY), paced),
+        ((scope_id,) if scope_id else ()) + (cost_control.held_back_kinds(), list(cost_control.OFF_PEAK_ONLY), satisfied, list(cost_control.OFF_PEAK_ONLY), paced)
+        + tuple(hold_params),
     ).fetchone()
     if not job:
         _note("no_claimable_job", held_back=",".join(cost_control.held_back_kinds() or (["daily_quota"] if paced else [])))
