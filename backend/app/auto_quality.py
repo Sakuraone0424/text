@@ -975,7 +975,7 @@ def retire_old_scoring(conn):
         for r in conn.execute(
             "SELECT s.question_id,q.content->>'question_type' AS kind,q.content->>'max_points' AS points "
             "FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
-            "WHERE s.status IN ('candidate','checking','repairing','ready','blocked')"
+            "WHERE s.status IN ('candidate','checking','repairing','ready','blocked') AND COALESCE(s.reason,'')<>'rescale_impossible'"
         ).fetchall()
         if str(POINTS.get(r["kind"])) != r["points"]
     ]

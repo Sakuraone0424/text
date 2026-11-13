@@ -559,6 +559,35 @@ def why_nothing_is_written(conn, subject, kind):
     return "writable"
 
 
+def ready_breakdown(conn, uid, subject, kind):
+    """Why ready, published questions of one bucket are NOT counted as stock, as numbers: points (still on an old scale), used (already
+    on this learner's paper or practice set), unpinned (source not one of the pinned books), unverified (review no longer current),
+    and counted (what the stock is made of)."""
+    from app.auto_quality import ready_many
+
+    rows = conn.execute(
+        "SELECT q.id,q.content,q.content->>'max_points'=%s AS points_ok,NOT (" + UNUSED_SQL + ") AS used "
+        "FROM auto_question_states s JOIN reviewed_questions q ON q.id=s.question_id "
+        "WHERE s.status='ready' AND q.status='published' AND q.content->>'subject'=%s AND q.content->>'question_type'=%s",
+        (str(POINTS[kind]), uid, uid, subject, kind),
+    ).fetchall()
+    out = dict(points=0, used=0, unpinned=0, unverified=0, counted=0)
+    fresh = []
+    for r in rows:
+        if not r["points_ok"]:
+            out["points"] += 1
+        elif r["used"]:
+            out["used"] += 1
+        elif not pinned_science_evidence(r["content"]):
+            out["unpinned"] += 1
+        else:
+            fresh.append(r["id"])
+    verdict = ready_many(conn, fresh)
+    out["counted"] = sum(1 for i in fresh if verdict.get(i))
+    out["unverified"] = len(fresh) - out["counted"]
+    return out
+
+
 def short_bucket_report(conn, uid):
     """For the worker log: for every bucket that has a gap, 'subject:type=<step>/<funnel>' (one line each, joined by ',')."""
     parts = []
@@ -569,8 +598,10 @@ def short_bucket_report(conn, uid):
         top = f"{f['top_reason'][0]}x{f['top_reason'][1]}" if f["top_reason"] else "-"
         states = "/".join(f"{k}{v}" for k, v in sorted(f["states"].items())) or "-"
         past = "/".join(f"{k}{v}" for k, v in sorted(f["past"].items())) or "-"
+        rb = ready_breakdown(conn, uid, d["subject"], d["kind"])
         parts.append(f"{d['subject'][:4]}:{d['kind']}={why_nothing_is_written(conn, d['subject'], d['kind'])}"
-                     f"|jobs{f['jobs']}|failed{f['failed_jobs']}|q:{states}|top:{top}|past:{past}")
+                     f"|jobs{f['jobs']}|failed{f['failed_jobs']}|q:{states}|top:{top}|past:{past}"
+                     f"|ready_not_counted:oldpts{rb['points']}/used{rb['used']}/unpinned{rb['unpinned']}/unverified{rb['unverified']}/counted{rb['counted']}")
     return ";".join(parts) or "-"
 
 
