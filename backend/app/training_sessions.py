@@ -240,6 +240,24 @@ def submit_training(conn, user_id, paper_id, answers, expected_version):
     return result(conn, user_id, paper_id)
 
 
+def grade_blanks(q, supplied):
+    """One blank at a time: each is right or wrong against its own accepted answers. The score is the question's points shared by the blanks
+    that are right, computed from the counts (a whole answer is exactly the full score, no rounding error). A question from before the
+    equal split, whose blanks are worth different amounts, keeps adding up its right blanks' own points."""
+    right = [
+        n < len(supplied)
+        and normalize_answer(supplied[n]) in {normalize_answer(a) for a in b["accepted_answers"]}
+        for n, b in enumerate(q["blanks"])
+    ]
+    blank_points = [b["points"] if ok else 0 for b, ok in zip(q["blanks"], right)]
+    shares = {round(b["points"], 9) for b in q["blanks"]}
+    if len(shares) == 1:
+        points = blanks_total(q["max_points"], sum(right), len(right))
+    else:
+        points = sum(blank_points)
+    return {"right": right, "points": points, "blank_points": blank_points}
+
+
 def finalize(conn, user_id, paper_id, session, *, timed_out):
     from app.quiz_v2 import schedule_review
 
@@ -278,14 +296,9 @@ def finalize(conn, user_id, paper_id, session, *, timed_out):
             if q.get("blanks"):
                 # one blank at a time: each is right or wrong against its own accepted answers; the score is the question's points
                 # shared by the blanks that are right (from the counts, so a whole answer is exactly the full score)
-                supplied = value.get("blanks", [])
-                right = [
-                    n < len(supplied)
-                    and normalize_answer(supplied[n]) in {normalize_answer(a) for a in b["accepted_answers"]}
-                    for n, b in enumerate(q["blanks"])
-                ]
-                points = blanks_total(q["max_points"], sum(right), len(right))
-                feedback = {"blank_points": [b["points"] if ok else 0 for b, ok in zip(q["blanks"], right)], "blank_correct": right}
+                graded = grade_blanks(q, value.get("blanks", []))
+                points = graded["points"]
+                feedback = {"blank_points": graded["blank_points"], "blank_correct": graded["right"]}
             else:
                 points = (
                     q["max_points"]

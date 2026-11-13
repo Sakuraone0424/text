@@ -137,11 +137,13 @@ BLANK_EXAM = units(
     "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP。",
     "2. 糖酵解中____和____是两个关键的限速酶。",
     "3. 血红蛋白含有____个亚基，其辅基是____，该辅基的中心离子是____。",
-    "4. 蛋白质合成中，____负责携带氨基酸，而____负责识别起始密码子。",
+    "4. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP，基质中的____催化丙酮酸氧化脱羧，外膜上的____形成通透性孔道。",
+    "5. 甲____乙乙乙乙____丙丙丙丙____丁丁丁丁____戊戊戊戊。",
     "参考答案",
     "1. 氧化磷酸化；ADP/ATP转位酶",
     "2. 己糖激酶、磷酸果糖激酶",
     "3. 4、血红素、二价铁",
+    "4. 氧化磷酸化；ADP/ATP转位酶；丙酮酸脱氢酶复合体；孔蛋白",
 )
 
 
@@ -149,37 +151,42 @@ def parsed(lines, doc=DOC):
     return list(pei.questions_in_document(doc, lines))
 
 
-def test_a_question_with_independent_blanks_becomes_one_question_per_blank():
-    got = [q for q in parsed(BLANK_EXAM) if q["question_number"] in ("1", "3")]
-    assert [(q["question_number"], q["source_blank_index"], q["source_blank_count"], q["blocked"]) for q in got] == [
-        ("1", 1, 2, None), ("1", 2, 2, None), ("3", 1, 3, None), ("3", 2, 3, None), ("3", 3, 3, None)]
+def test_a_fill_in_with_two_or_three_blanks_is_imported_whole_dependent_or_not():
+    got = {q["question_number"]: q for q in parsed(BLANK_EXAM)}
+    for number, blanks in (("1", 2), ("2", 2), ("3", 3)):
+        q = got[number]
+        assert q["blocked"] is None and q["source_blank_index"] is None and q["stem"].count("____") == blanks
+        assert q["question_type"] == "fill_blank" and q["options"] == {}
+    assert len({q["stem_hash"] for q in got.values()}) == len(got)
+
+
+def test_a_fill_in_with_more_than_three_independent_blanks_is_still_split_one_question_per_blank():
+    got = [q for q in parsed(BLANK_EXAM) if q["question_number"] == "4"]
+    assert [(q["source_blank_index"], q["source_blank_count"], q["blocked"]) for q in got] == [(1, 4, None), (2, 4, None), (3, 4, None), (4, 4, None)]
     first = got[0]
-    assert first["stem"] == "线粒体通过____合成ATP，其内膜上的ADP/ATP转位酶负责转运ADP与ATP。"
-    assert first["source_answer"] == "氧化磷酸化" and first["source_stem"].count("____") == 2
-    assert got[3]["stem"] == "血红蛋白含有4个亚基，其辅基是血红素，该辅基的中心离子是____。".replace("血红素，该辅基的中心离子是____", "____，该辅基的中心离子是二价铁")
+    assert first["stem"] == "线粒体通过____合成ATP，其内膜上的ADP/ATP转位酶负责转运ADP与ATP，基质中的丙酮酸脱氢酶复合体催化丙酮酸氧化脱羧，外膜上的孔蛋白形成通透性孔道。"
+    assert first["source_answer"] == "氧化磷酸化" and first["source_stem"].count("____") == 4
     assert all(q["question_type"] == "fill_blank" and q["options"] == {} for q in got)
-    assert len({q["stem_hash"] for q in got}) == 5                       # five different questions
 
 
-def test_dependent_blanks_and_missing_answers_stay_skipped_with_the_reason():
-    got = {q["question_number"]: q for q in parsed(BLANK_EXAM) if q["question_number"] in ("2", "4")}
-    assert got["2"]["blocked"] == "fill_blank_marker_unsupported" and got["2"]["blocked_detail"] == "blanks_depend_on_each_other"
-    assert got["4"]["blocked"] == "fill_blank_marker_unsupported"
-    assert got["4"]["blocked_detail"] == "reference_answers_missing_or_not_one_per_blank"   # the answer sheet has no line 4
+def test_more_than_three_blanks_without_one_answer_each_stay_skipped_with_the_reason():
+    got = {q["question_number"]: q for q in parsed(BLANK_EXAM)}
+    assert got["5"]["blocked"] == "fill_blank_marker_unsupported"
+    assert got["5"]["blocked_detail"] == "reference_answers_missing_or_not_one_per_blank"   # the answer sheet has no line 5
 
 
 def test_an_ambiguous_answer_line_is_not_used():
     lines = units("2024年中国科学技术大学生物化学真题", "填空题",
-                  "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP。",
-                  "参考答案", "1. 氧化磷酸化；ADP/ATP转位酶", "1. 别的答案；另一个")
+                  "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP，基质中的____催化丙酮酸氧化脱羧，外膜上的____形成通透性孔道。",
+                  "参考答案", "1. 氧化磷酸化；ADP/ATP转位酶；丙酮酸脱氢酶复合体；孔蛋白", "1. 别的答案；另一个；第三个；第四个")
     (q,) = parsed(lines)
     assert q["blocked"] == "fill_blank_marker_unsupported" and q["blocked_detail"].startswith("reference_answers")
 
 
 def test_answers_of_another_year_are_not_used():
     lines = units("2023年中国科学技术大学生物化学真题", "填空题",
-                  "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP。",
-                  "2024年中国科学技术大学生物化学真题", "参考答案", "1. 氧化磷酸化；ADP/ATP转位酶")
+                  "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP，基质中的____催化丙酮酸氧化脱羧，外膜上的____形成通透性孔道。",
+                  "2024年中国科学技术大学生物化学真题", "参考答案", "1. 氧化磷酸化；ADP/ATP转位酶；丙酮酸脱氢酶复合体；孔蛋白")
     (q,) = parsed(lines)
     assert q["blocked"] and q["blocked_detail"].startswith("reference_answers")
 
@@ -219,17 +226,17 @@ def test_other_blocking_reasons_are_not_hidden_by_the_table_logic():
 IMPORT_EXAMS = [
     "2023年中国科学技术大学生物化学真题",
     "填空题",
-    "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP。",
+    "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP，基质中的____催化丙酮酸氧化脱羧，外膜上的____形成通透性孔道。",
     "单项选择题",
     "2. 下列哪种酶负责封闭冈崎片段之间的缺口？",
     "（A）DNA连接酶（B）拓扑异构酶（C）解旋酶（D）引发酶",
     "参考答案",
-    "1. 氧化磷酸化；ADP/ATP转位酶",
+    "1. 氧化磷酸化；ADP/ATP转位酶；丙酮酸脱氢酶复合体；孔蛋白",
     "2024年中国科学技术大学生物化学真题",
     "填空题",
-    "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP。",
+    "1. 线粒体通过____合成ATP，其内膜上的____负责转运ADP与ATP，基质中的____催化丙酮酸氧化脱羧，外膜上的____形成通透性孔道。",
     "参考答案",
-    "1. 氧化磷酸化；ADP/ATP转位酶",
+    "1. 氧化磷酸化；ADP/ATP转位酶；丙酮酸脱氢酶复合体；孔蛋白",
     "2025年中国科学技术大学生物化学真题",
 ]
 
@@ -247,10 +254,10 @@ def test_split_questions_are_stored_with_their_source_and_repeats_across_years_c
     summary = pei.import_items(db)
     rows = db.execute("SELECT * FROM past_exam_items WHERE source_blank_index IS NOT NULL ORDER BY source_blank_index").fetchall()
     assert [(r["source_blank_index"], r["source_blank_count"], r["source_answer"]) for r in rows] == [
-        (1, 2, "氧化磷酸化"), (2, 2, "ADP/ATP转位酶")]
+        (1, 4, "氧化磷酸化"), (2, 4, "ADP/ATP转位酶"), (3, 4, "丙酮酸脱氢酶复合体"), (4, 4, "孔蛋白")]
     assert all(r["question_type"] == "fill_blank" and r["status"] == "imported" for r in rows)
-    assert all(r["years"] == [2024, 2023] and r["source_stem"].count("____") == 2 for r in rows)   # same question in two years: one item each
-    assert summary["split_blanks"] == 2 and summary["duplicates_collapsed"] == 2
+    assert all(r["years"] == [2024, 2023] and r["source_stem"].count("____") == 4 for r in rows)   # same question in two years: one item each
+    assert summary["split_blanks"] == 4 and summary["duplicates_collapsed"] == 4
     choice = db.execute("SELECT * FROM past_exam_items WHERE question_type='single_choice'").fetchone()
     assert choice["status"] == "imported" and choice["options"]["D"] == "引发酶" and choice["blocked_detail"] is None
 
@@ -272,13 +279,13 @@ def test_reclassify_reports_usable_items_before_and_after(db, corpus, monkeypatc
     monkeypatch.undo()
     monkeypatch.setattr(pei, "pinned_source_bytes", lambda file_id, sha: True)
     summary = pei.reclassify(db)
-    assert summary["usable_before"] == {} and summary["usable_after"] == {"fill_blank": 2, "single_choice": 1}
+    assert summary["usable_before"] == {} and summary["usable_after"] == {"fill_blank": 4, "single_choice": 1}
     assert summary["skipped_before"].get("single_choice:choice_options_not_parsed") == 1
     assert summary["skipped_after"] == {}
-    assert summary["split_blanks"] == 2
+    assert summary["split_blanks"] == 4
     report = pei.import_breakdown(db)
-    assert report["usable_by_type"] == {"fill_blank": 2, "single_choice": 1}
-    assert len(report["samples"]["split_blank"]) == 2 and report["samples"]["split_blank"][0]["of"] == 2
+    assert report["usable_by_type"] == {"fill_blank": 4, "single_choice": 1}
+    assert len(report["samples"]["split_blank"]) == 2 and report["samples"]["split_blank"][0]["of"] == 4
 
 
 def test_a_started_item_is_never_replaced_by_the_split(db, corpus):

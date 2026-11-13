@@ -105,7 +105,6 @@ def test_unusable_questions_are_blocked_with_a_reason_and_never_queued(db, corpu
     reasons = {key: r["blocked_reason"] for key, r in got.items() if r["status"] == "blocked"}
     assert reasons == {
         ("term", "2"): "image_dependent",
-        ("fill_blank", "4"): "fill_blank_marker_unsupported",
         ("single_choice", "6"): "choice_options_not_parsed",
     }
     assert got[("short_answer", "2")]["status"] == "imported"
@@ -327,7 +326,7 @@ def test_choice_and_blank_items_also_import_with_exact_points(db, corpus, setup_
         finish_job(db, job, model_result(job))
     auto_worker.dispatch_completed(db)
     got = items(db)
-    for key, answer, points in [(("single_choice", "5"), "A", 3), (("fill_blank", "3"), "冈崎片段", 2)]:
+    for key, answer, points in [(("fill_blank", "3"), "冈崎片段", 2.5)]:     # single choice is no longer written for the daily papers
         q = db.execute("SELECT content FROM reviewed_questions WHERE id=%s",
                        (got[key]["question_id"],)).fetchone()["content"]
         assert q["max_points"] == points and q["answer"] == answer

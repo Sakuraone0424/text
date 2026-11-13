@@ -187,7 +187,7 @@ def test_the_paragraph_count_report_shows_the_old_and_the_new_rule(db, corpus):
 # ---- 五: single-blank rubric ------------------------------------------------------------------------------------------
 
 def test_a_single_blank_question_prompt_and_format_check_allow_one_rubric_item_only():
-    assert "EXACTLY ONE rubric item" in exam_authoring.instructions("fill_blank", 4)
+    assert "the single rubric item is worth max_points" in exam_authoring.instructions("fill_blank", 2.5)
     raw = dict(question_type="fill_blank", stem="G蛋白由____三个亚单位构成", answer="αβγ", accepted_answers=["αβγ"], blanks=[], max_points=4,
                knowledge_tags=[], rubric=[dict(description="答案：αβγ", points=2, knowledge_tags=[]), dict(description="解释其原理", points=2, knowledge_tags=[])])
     fixed, notes = auto_fixes.autofix(raw, 4)
@@ -198,18 +198,18 @@ def test_a_single_blank_question_prompt_and_format_check_allow_one_rubric_item_o
 
 # ---- 六: planning shares --------------------------------------------------------------------------------------------
 
-def test_requests_are_shared_out_by_gap_and_single_choice_keeps_at_least_30_percent(db, setup_ai):
-    gaps = [("biochemistry", "single_choice", 20), ("cell_biology", "single_choice", 20), ("biochemistry", "fill_blank", 6),
-            ("biochemistry", "term", 8), ("cell_biology", "short_answer", 6)]
-    assert gen.allocate_order(db, gaps)[0][1] == "single_choice"                      # nothing written yet: the biggest gap first
-    for i in range(10):                                                              # the last requests were all fill-in-the-blank
-        ai_jobs.enqueue(db, setup_ai, f"w{i}", "generation", dict(subject="biochemistry", question_type="fill_blank", stem=str(i), evidence=[]))
+def test_requests_are_shared_out_by_gap_and_the_fill_in_keeps_at_least_30_percent(db, setup_ai):
+    gaps = [("biochemistry", "fill_blank", 30), ("cell_biology", "fill_blank", 30), ("biochemistry", "term", 8),
+            ("biochemistry", "short_answer", 6), ("cell_biology", "essay", 2)]
+    assert gen.allocate_order(db, gaps)[0][1] == "fill_blank"                         # nothing written yet: the biggest gap first
+    for i in range(10):                                                              # the last requests were all term definitions
+        ai_jobs.enqueue(db, setup_ai, f"w{i}", "generation", dict(subject="biochemistry", question_type="term", stem=str(i), evidence=[]))
     order = gen.allocate_order(db, gaps)
-    assert order[0][1] == "single_choice" and {g[1] for g in order[:2]} == {"single_choice"}   # below 30%: single choice first
+    assert order[0][1] == "fill_blank" and {g[1] for g in order[:2]} == {"fill_blank"}   # below 30%: fill-in first
     for i in range(10, 16):
-        ai_jobs.enqueue(db, setup_ai, f"w{i}", "generation", dict(subject="biochemistry", question_type="single_choice", stem=str(i), evidence=[]))
-    order = gen.allocate_order(db, gaps)                                             # 6 of 16 are single choice: above 30%, by deficit
-    assert [g[:2] for g in order][0] != ("biochemistry", "fill_blank")                # fill-in-the-blank is over-served
+        ai_jobs.enqueue(db, setup_ai, f"w{i}", "generation", dict(subject="biochemistry", question_type="fill_blank", stem=str(i), evidence=[]))
+    order = gen.allocate_order(db, gaps)                                             # 6 of 16 are fill-ins: above 30%, by deficit
+    assert [g[:2] for g in order][0] != ("biochemistry", "term")                      # term is over-served
 
 
 # ---- 七: failure kinds follow the reviewer's own axes ------------------------------------------------------------------

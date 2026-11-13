@@ -30,7 +30,7 @@ def test_the_objective_paper_is_sixty_two_and_a_half_point_fill_ins():
     assert spec.SPECIFICATION == "xiaohan-obj-fill-150-v6" and spec.TYPES == ("fill_blank",)
     assert spec.COUNTS == {"fill_blank": 30} and spec.POINTS["fill_blank"] == 2.5
     assert spec.TOTAL_QUESTIONS == 60 and spec.TOTAL_POINTS == 150 and spec.POINTS_PER_SUBJECT == 75 and spec.DURATION_SECONDS == 3600
-    assert v5.OBJECTIVE_V5.retired and v5.KIND_OF[v5.OBJECTIVE_V5.SPECIFICATION] == "objective_old"   # the earlier paper is read-only
+    assert v5.OBJECTIVE_V5.RETIRED and v5.KIND_OF[v5.OBJECTIVE_V5.SPECIFICATION] == "objective_old"   # the earlier paper is read-only
     assert v5.RESERVE["fill_blank"] == 60 and v5.RESERVE["term"] == 8 and v5.COUNTS["term"] == 4
 
 

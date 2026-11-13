@@ -88,7 +88,10 @@ def scale_exactly(points, new_total):
     total = sum(Fraction(str(p)) for p in points)
     if not points or total <= 0:
         raise ValueError("nothing to scale")
-    return [_plain(float(Fraction(str(p)) * Fraction(str(new_total)) / total)) for p in points]
+    scaled = [Fraction(str(p)) * Fraction(str(new_total)) / total for p in points]
+    if any((x * 12).denominator != 1 for x in scaled):      # a scoring point must be a whole number, a half or an equal share (a multiple of 1/12)
+        raise ValueError("rescale_impossible")
+    return [_plain(float(x)) for x in scaled]
 
 
 def rescale_content(content):

@@ -342,7 +342,7 @@ def test_the_paper_description_has_an_arrow_and_the_card_texts_do_not_wrap_a_lon
     assert summary.evaluate("n => getComputedStyle(n, '::after').content") not in ("none", "normal")           # the arrow
     assert summary.bounding_box()["height"] >= 40                                                              # a finger-sized target
     page.locator(".paper-info summary").first.click()
-    assert page.locator(".paper-info").first.evaluate("n => n.open") and "60 题" in page.locator(".paper-info").first.inner_text()
+    assert page.locator(".paper-info").first.evaluate("n => n.open") and "60 道填空" in page.locator(".paper-info").first.inner_text()
     lines = page.evaluate("""() => [...document.querySelectorAll('.practice-card small, .practice-card .practice-count')].map((n) => {
         const r = document.createRange(); r.selectNodeContents(n); const rects = [...r.getClientRects()].filter((x) => x.width > 0);
         const tops = [...new Set(rects.map((x) => Math.round(x.top)))]; const last = rects.filter((x) => Math.round(x.top) === tops[tops.length - 1]);

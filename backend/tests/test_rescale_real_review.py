@@ -6,12 +6,13 @@ from app.training_spec_v5 import V4_POINTS
 from spec_helpers import rubric  # noqa: F401
 from test_ai_automation import setup_ai, synthetic_result  # noqa: F401
 from test_gap_generation import choice_response, corpus, finish_job  # noqa: F401
+from test_gap_generation import plan_single  # noqa: F401
 from test_review_gate import run
 
 
 def old_scale_choice(db, uid, monkeypatch):
     monkeypatch.setattr(gen, "POINTS", dict(V4_POINTS))
-    job = gen.plan_gap(db, uid)
+    job = plan_single(db, uid)
     response = choice_response(job)
     q = response["response"]["question"]
     q["max_points"] = 4
@@ -117,4 +118,4 @@ def test_the_stuck_line_says_why_ready_questions_are_not_stock(db, corpus, setup
     scoring_rescale.run(db)
     after = gen.ready_breakdown(db, setup_ai, "biochemistry", "single_choice")
     assert after == dict(points=0, used=0, unpinned=0, unverified=0, counted=1)
-    assert "ready_not_counted:oldpts0/used0/unpinned0/unverified0/counted1" in gen.short_bucket_report(db, setup_ai)
+    assert "single_choice" not in gen.short_bucket_report(db, setup_ai)       # single choice is no longer a bucket of the daily papers

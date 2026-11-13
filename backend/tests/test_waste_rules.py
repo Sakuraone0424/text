@@ -10,6 +10,7 @@ from app.evidence_match import locate
 from app.provider_diagnostics import extract_json_object
 from test_ai_automation import setup_ai  # noqa: F401  (fixture)
 from test_gap_generation import BOOK, choice_response, corpus, finish_job, packets, review_jobs, review_round  # noqa: F401
+from test_gap_generation import plan_single  # noqa: F401
 from test_gap_generation import pei, synthetic_result  # noqa: F401
 
 
@@ -154,7 +155,7 @@ def test_json_is_taken_out_of_a_code_block_or_surrounding_text_but_never_complet
 # ---- 3. in the pipeline -------------------------------------------------------------------------------------
 
 def written_with(db, uid, mutate=None, keep_job=False):
-    job = gen.plan_gap(db, uid)
+    job = plan_single(db, uid)
     result = choice_response(job)
     if mutate:
         mutate(result["response"], job)
@@ -353,7 +354,7 @@ def test_the_stats_rank_reasons_and_the_replay_rescues_what_the_new_rules_can(db
         text = job["payload"]["anchor_exact_excerpt"]
         response["question"]["evidence"][0]["excerpt"] = text[:12] + "\n" + text[12:]
 
-    job = gen.plan_gap(db, setup_ai)
+    job = plan_single(db, setup_ai)
     result = choice_response(job)
     tidy(result["response"], job)
     # as the OLD rules saw it: finished, then blocked for a mismatched quote
