@@ -23,10 +23,17 @@ def lines(conn, user_id):
 def classify(question_type, points, max_points, mistake_below=0.60, consolidate_below=0.85):
     """What one graded answer is: 'mistake' (review rating Again), 'consolidate' (rating Hard) or 'mastered' (no review card).
 
-    Single choice and fill-in-the-blank stay right or wrong (anything short of full marks is a mistake). The three subjective
+    Single choice stays right or wrong (anything short of full marks is a mistake); a fill-in goes by its blanks (see below). The three subjective
     types go by their score rate: below the first line a mistake, up to the second still to be consolidated, from there on mastered."""
     if points is None or not max_points:
         return None
+    if question_type == "fill_blank":
+        # a fill-in may have up to three blanks: all right = mastered; at least half of them right = still to be consolidated (rating
+        # Hard); fewer than half = a mistake (rating Again). A single blank is right or wrong, as before.
+        rate = points / max_points
+        if rate >= 1 - 1e-9:
+            return "mastered"
+        return "consolidate" if rate >= 0.5 - 1e-9 else "mistake"
     if question_type not in SUBJECTIVE:
         return "mastered" if points >= max_points else "mistake"
     rate = points / max_points
@@ -37,7 +44,7 @@ def classify(question_type, points, max_points, mistake_below=0.60, consolidate_
 
 def record_failure(conn, attempt_id, question_id):
     row = conn.execute(
-        "SELECT p.user_id,a.answer,a.points,(i.snapshot->>'max_points')::int AS max_points,i.snapshot->>'question_type' AS question_type FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id "
+        "SELECT p.user_id,a.answer,a.points,(i.snapshot->>'max_points')::float8 AS max_points,i.snapshot->>'question_type' AS question_type FROM attempts_v2 t JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN answers_v2 a ON a.attempt_id=t.id JOIN paper_items_v2 i ON i.paper_id=t.paper_id AND i.question_id=a.question_id WHERE t.id=%s AND a.question_id=%s",
         (attempt_id, question_id),
     ).fetchone()
@@ -156,7 +163,7 @@ def reclassify_existing(conn):
     ).fetchall():
         before[card["status"]] += 1
         latest = conn.execute(
-            "SELECT a.points,(i.snapshot->>'max_points')::int AS max_points FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id "
+            "SELECT a.points,(i.snapshot->>'max_points')::float8 AS max_points FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id "
             "JOIN papers_v2 p ON p.id=t.paper_id JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
             "WHERE p.user_id=%s AND a.question_id=%s AND a.points IS NOT NULL ORDER BY t.submitted_at DESC NULLS LAST,t.id DESC LIMIT 1",
             (card["user_id"], card["question_id"]),
@@ -203,7 +210,7 @@ def sync_score_card(conn, uid, attempt_id, question_id):
     otherwise). A new mistake makes a card (rated Again / Hard as usual); an existing card only changes its status; a score that is now
     mastered leaves the cards and the mistake book (history stays)."""
     row = conn.execute(
-        "SELECT a.points,(i.snapshot->>'max_points')::int AS max_points,i.snapshot->>'question_type' AS question_type FROM answers_v2 a "
+        "SELECT a.points,(i.snapshot->>'max_points')::float8 AS max_points,i.snapshot->>'question_type' AS question_type FROM answers_v2 a "
         "JOIN attempts_v2 t ON t.id=a.attempt_id JOIN paper_items_v2 i ON i.paper_id=t.paper_id AND i.question_id=a.question_id "
         "WHERE a.attempt_id=%s AND a.question_id=%s", (attempt_id, question_id)).fetchone()
     if not row or row["points"] is None:

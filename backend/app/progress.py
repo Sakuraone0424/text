@@ -27,7 +27,7 @@ def _current_points(type_expr, points_expr):
     from app.training_spec_v5 import POINTS
 
     cases = " ".join(f"WHEN '{kind}' THEN {points}" for kind, points in POINTS.items())
-    return f"(({points_expr})::int IS NOT DISTINCT FROM (CASE {type_expr} {cases} END))"
+    return f"(({points_expr})::numeric IS NOT DISTINCT FROM (CASE {type_expr} {cases} END)::numeric)"
 
 
 # Only work created under the current specification counts in the stages. A job or question written on an

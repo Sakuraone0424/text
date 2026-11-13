@@ -11,6 +11,7 @@ _SAFE_VALIDATOR_ERRORS = {
     "Only single choice accepts options": "unexpected_options",
     "Multi-blank questions use blanks only": "invalid_blank_representation",
     "Every blank needs a matching placeholder and points summing to max_points": "blank_count_or_points_mismatch",
+    "Every blank needs its own scoring point": "blank_count_or_points_mismatch",
     "Fill blank requires explicit nonempty accepted answers": "missing_accepted_answers",
     "Canonical answer must be accepted": "canonical_fill_answer_missing",
     "Fill blank requires exactly one ____ blank": "blank_marker_count",

@@ -43,7 +43,7 @@ def _decorate(conn, rows):
 
 def reserve_of(subject, kind):
     """The two-day reserve of one cell: what the daily paper keeps for itself."""
-    return cost_control.reserve_target(COUNTS[kind], auto_generation.STARTUP_RESERVE_DAYS)
+    return cost_control.reserve_target(COUNTS.get(kind, 0), auto_generation.STARTUP_RESERVE_DAYS)       # single choice: no daily demand, so no reserve
 
 
 def sources(conn, uid, kinds=None):
