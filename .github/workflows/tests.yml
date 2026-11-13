@@ -89,6 +89,17 @@ jobs:
             echo "pip install did not finish (attempt $attempt)"; sleep $((attempt * 5))
           done
           exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the lint tool (exact versions from package-lock.json; retried)
+        timeout-minutes: 5
+        run: |
+          for attempt in 1 2 3; do
+            timeout 120 npm ci --no-audit --no-fund && exit 0
+            echo "npm ci did not finish (attempt $attempt)"; sleep $((attempt * 5))
+          done
+          exit 1
       - name: Start the throw-away PostgreSQL (the image pull is retried; a second registry is the fallback)
         working-directory: .
         timeout-minutes: 8

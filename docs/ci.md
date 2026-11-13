@@ -75,3 +75,10 @@
 - 一个 PR 只做一类改动（一个缺陷，或一个功能，或一处重构），能在几句话里说清；
 - 多项反馈拆成多个 PR 依次合并；确实必须一起上线的（例如同一个迁移）才放在一起，并在描述里写明原因；
 - 每个 PR 自带它的测试；合并后在 `feat/60q-v2-spec` 上出问题，可以只回退那一个合并提交。
+
+## 前端检查（`backend/package.json`）
+
+- 每个页面脚本都要能通过语法解析；`eslint`（`backend/eslint.config.mjs`）发现错误（未定义变量、重复键等）会让测试失败，警告不会。
+- 与页面无关的判断（今日两张卷子的状态、手动判分的选项等）放在 `backend/app/static/logic.js`，由 `node --test tests/js/logic.test.js` 单元测试。
+- `tests/test_api_contract.py`：页面测试里的假数据必须带有服务端真实返回里页面要读的字段。
+- CI 在跑测试前执行 `npm ci`（按 `package-lock.json` 安装精确版本）；本地想跑 lint 先在 `backend/` 里 `npm ci`。
