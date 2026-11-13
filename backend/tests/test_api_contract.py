@@ -28,11 +28,11 @@ def world(db, uid, monkeypatch):
     monkeypatch.setattr(auto_generation, "pinned_science_evidence", lambda content: True)
     monkeypatch.setattr(practice_center, "reserve_of", lambda subject, kind: 0)
     for n in range(12):
-        qid = question(db, "biochemistry", "single_choice", 4, "6 核酸", stem=f"契约题 {n}", options={"A": "a", "B": "b"}, answer="A")
+        qid = question(db, "biochemistry", "single_choice", 3, "6 核酸", stem=f"契约题 {n}", options={"A": "a", "B": "b"}, answer="A")
         db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
     t = today(db)
-    made = paper(db, uid, t - timedelta(days=1), [item("biochemistry", "single_choice", 4, 4, "6 核酸"), item("biochemistry", "single_choice", 4, 0, "6 核酸"),
-                                                  item("cell_biology", "short_answer", 12, None, "2 膜"), item("cell_biology", "term", 6, 3, "2 膜")], when=at(t - timedelta(days=1)))
+    made = paper(db, uid, t - timedelta(days=1), [item("biochemistry", "single_choice", 3, 3, "6 核酸"), item("biochemistry", "single_choice", 3, 0, "6 核酸"),
+                                                  item("cell_biology", "short_answer", 15, None, "2 膜"), item("cell_biology", "term", 5, 2.5, "2 膜")], when=at(t - timedelta(days=1)))
     wrong = made["question_ids"][1]
     db.execute("INSERT INTO fsrs_cards(user_id,question_id,card,due,status) VALUES (%s,%s,'{}',clock_timestamp(),'mistake')", (uid, wrong))
     started = practice.start(db, uid, "quick", size=3)
@@ -127,9 +127,9 @@ def test_a_graded_written_answer_in_the_review_carries_its_scored_criteria_where
     db.execute("ALTER TABLE answers_v2 DISABLE TRIGGER USER")
     from psycopg.types.json import Jsonb
 
-    db.execute("UPDATE answers_v2 SET feedback=%s WHERE question_id=%s", (Jsonb({"criteria": [{"description": "得分点", "points": 3, "max_points": 6}], "criterion_reasons": ["只答了一半"]}), term))
+    db.execute("UPDATE answers_v2 SET feedback=%s WHERE question_id=%s", (Jsonb({"criteria": [{"description": "得分点", "points": 2.5, "max_points": 5}], "criterion_reasons": ["只答了一半"]}), term))
     db.execute("ALTER TABLE answers_v2 ENABLE TRIGGER USER")
     one = paper_review.detail(db, uid, world["paper"]["paper_id"], term)
-    assert one["scores"]["criteria"][0]["points"] == 3 and one["scores"]["criterion_reasons"] == ["只答了一半"]
+    assert one["scores"]["criteria"][0]["points"] == 2.5 and one["scores"]["criterion_reasons"] == ["只答了一半"]
     untouched = paper_review.detail(db, uid, world["paper"]["paper_id"], world["wrong"])
     assert untouched["scores"] is None
