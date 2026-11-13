@@ -42,9 +42,9 @@ def bucket(report, subject, kind):
     return next(b for b in report["buckets"] if b["subject"] == subject and b["question_type"] == kind)
 
 
-def test_an_empty_system_reports_ten_buckets_with_zeroes_and_an_honest_worker_state(db, setup_ai):
+def test_an_empty_system_reports_eight_buckets_with_zeroes_and_an_honest_worker_state(db, setup_ai):
     report = progress.report(db, setup_ai)
-    assert len(report["buckets"]) == 10 and {b["subject"] for b in report["buckets"]} == set(SUBJECTS)
+    assert len(report["buckets"]) == 8 and {b["subject"] for b in report["buckets"]} == set(SUBJECTS)
     assert all(b["target"] == 2 * COUNTS[b["question_type"]] and b["stocked"] == 0 for b in report["buckets"])
     assert report["totals"]["required"] == 74 and report["totals"]["target"] == 148
     assert report["worker"]["outcome"] == "never_ran" and report["worker"]["stale"] is True
@@ -146,10 +146,10 @@ def test_ready_counts_each_cell_only_up_to_one_papers_need(db, setup_ai, monkeyp
     from app import learning_stats
 
     need = dict(COUNTS)
-    stock = {(s, k): (30 if k == "single_choice" else 0) for s in ("biochemistry", "cell_biology") for k in need}
+    stock = {(s, k): (30 if k == "fill_blank" else 0) for s in ("biochemistry", "cell_biology") for k in need}
     monkeypatch.setattr(progress, "eligible_reserve_count", lambda conn, uid, subject, kind, cached=False: stock[(subject, kind)])
     t = learning_stats.tomorrow_ready(db, setup_ai)
-    assert t["needed"] == 74 and t["ready"] == 30 and t["missing"] == 44 and t["complete"] is False  # not 60
+    assert t["needed"] == 74 and t["ready"] == 60 and t["missing"] == 14 and t["complete"] is False  # not 120
     stock.update({(s, k): need[k] + 5 for s in ("biochemistry", "cell_biology") for k in need})
     assert learning_stats.tomorrow_ready(db, setup_ai)["ready"] == 74 and learning_stats.tomorrow_ready(db, setup_ai)["complete"]
 
@@ -219,7 +219,7 @@ def test_the_endpoint_needs_login_and_returns_only_numbers(client, db, monkeypat
     response = client.get("/v2/model/progress", headers=LEARNER)
     assert response.status_code == 200
     body = response.json()
-    assert len(body["buckets"]) == 10 and "spend" in body and "worker" in body and "next_paper" in body
+    assert len(body["buckets"]) == 8 and "spend" in body and "worker" in body and "next_paper" in body
     assert SECRET_TEXT not in response.text and "DEEPSEEK" not in response.text
     # the same "today's remaining budget" the model page's ledger shows (daily budget minus today's usage)
     assert body["spend"]["remaining_daily_cny"] == "0"  # no daily budget set yet
@@ -255,7 +255,7 @@ def test_work_from_an_earlier_scale_is_folded_into_one_history_line(db, setup_ai
     report = progress.report(db, setup_ai)
     term = bucket(report, "biochemistry", "term")
     assert (term["queued"], term["blocked"]) == (1, 1) and term["blocked_reasons"] == {"rubric_not_fully_evidenced": 1}
-    assert bucket(report, "biochemistry", "single_choice")["blocked"] == 0 and bucket(report, "cell_biology", "term")["blocked"] == 0
+    assert bucket(report, "biochemistry", "fill_blank")["blocked"] == 0 and bucket(report, "cell_biology", "term")["blocked"] == 0
     assert report["legacy"]["count"] == 4
     assert {r["code"]: r["count"] for r in report["legacy"]["reasons"]} == {"invalid_qa_automation_grant": 1, "OSError": 2, "unresolved_quality_findings": 1}
     assert sum(b["blocked"] for b in report["buckets"]) == 1  # the stage totals never include history
@@ -285,7 +285,7 @@ def test_the_target_says_whether_it_is_the_first_batch_or_the_two_day_reserve(db
     assert report["target_kind"] == "two_day_reserve" and {b["target_kind"] for b in report["buckets"]} == {"two_day_reserve"}
     monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", "5")
     report = progress.report(db, setup_ai)
-    assert report["target_kind"] == "first_batch" and report["totals"]["target"] == 50
+    assert report["target_kind"] == "first_batch" and report["totals"]["target"] == 40
 
 
 def test_no_reviews_today_means_no_rate_not_zero(db, setup_ai):

@@ -29,6 +29,13 @@ def api(db, client, monkeypatch):
     return client
 
 
+@pytest.fixture(autouse=True)
+def single_choice_requests(monkeypatch):
+    """These tests drive the interface with single-choice requests (their answer format is the richest). Daily papers no longer ask for
+    single choice, so the planner is told that the single-choice buckets are short."""
+    monkeypatch.setattr(gen, "bucket_gaps", lambda conn, uid: [("biochemistry", "single_choice", 5), ("cell_biology", "single_choice", 5)])
+
+
 def one_job(db, uid):
     job = gen.plan_gap(db, uid)
     assert job is not None

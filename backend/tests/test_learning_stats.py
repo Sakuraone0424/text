@@ -198,7 +198,7 @@ def bank(db, monkeypatch):
         kind = "single_choice" if n % 2 == 0 else "fill_blank"
         extra = (dict(options={"A": "a", "B": "b", "C": "c", "D": "d"}, answer="A", stem=f"合成练习题 {n}") if kind == "single_choice"
                  else dict(options={}, answer="糖酵解", accepted_answers=["糖酵解"], stem=f"合成练习题 {n} ____"))
-        qid = question(db, "biochemistry", kind, 3 if kind == "single_choice" else 2, "第三章 糖代谢", **extra)
+        qid = question(db, "biochemistry", kind, 3 if kind == "single_choice" else 2.5, "第三章 糖代谢", **extra)
         db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
         ids[qid] = kind
     other = question(db, "cell_biology", "single_choice", 3, "别的章")
@@ -231,7 +231,7 @@ def test_answers_are_checked_at_once_recorded_once_and_summarised(db, uid, bank)
     with pytest.raises(ValueError, match="not_in_this_set"):
         practice.answer(db, uid, s["set_id"], 999999, {"text": "A"})
     sm = practice.summary(db, uid, s["set_id"])
-    assert (sm["answered"], sm["correct"], sm["points"], sm["max_points"], sm["total"]) == (2, 1, 3, 5, 6) and len(sm["remaining"]) == 4
+    assert (sm["answered"], sm["correct"], sm["points"], sm["max_points"], sm["total"]) == (2, 1, 3, 5.5, 6) and len(sm["remaining"]) == 4
 
 
 def test_a_practice_question_is_used_for_good_and_other_users_cannot_touch_a_set(db, uid, bank):

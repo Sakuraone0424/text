@@ -67,7 +67,8 @@
 3. 对每个任务：
    - 严格按任务里的 prompt（等同 payload.instructions 加上 payload.schema）完成，只输出 payload.schema 要求的严格 JSON 对象，不要任何解释、不要 Markdown。
    - 只能使用任务里给的教材段落（payload.evidence）。不能编造教材内容；evidence 里的 excerpt 必须逐字来自给你的段落，一个字也不能改；source_unit_id、file_id、source_sha256、ocr_page、paragraph_id、locator 必须原样抄给定的值。
-   - 满分用 payload.max_points，评分要点的分值之和必须正好等于满分，评分要点数量和格式按 instructions 里的要求。
+   - 满分用 payload.max_points（填空题 2.5 分，名词解释 5、简答 15、问答 25），评分要点的分值之和必须正好等于满分，评分要点数量和格式按 instructions 里的要求。分值是 JSON 数字，不是字符串。
+   - 只出四种题：填空、名词解释、简答、问答，不出单选题。填空题看 payload.blank_count：1 个空时题干里恰有一个 ____，answer 是标准答案，accepted_answers 列出所有等价写法，评分要点只有一条（2.5 分）；2 或 3 个空时题干里恰有这么多个 ____，blanks 里按顺序给每个空各自的 accepted_answers（每个空的分值 = 2.5 ÷ 空数），评分要点正好一空一条、分值与该空相同，accepted_answers 留空，answer 写各空标准答案用“；”连接。
    - 不能在题干里写出答案，不能写“根据教材/本章/文献”“如图”这类措辞，题目要像真题。
    - 做不了（教材段落不够支撑一道题）就不要硬写：用 release 放回这个任务，继续下一个。
 4. 提交：curl -sS -X POST -H "X-External-Token: $EXTERNAL_EXECUTOR_TOKEN" -H "Content-Type: application/json" https://training-api-qa-qa.up.railway.app/v2/external/submit -d '{"lease_id":"<lease_id>","session":"<SESSION>","model_label":"<你的模型名称，如实填写>","result":<你的 JSON>}'
@@ -110,7 +111,7 @@
 
 ## 六、质量对比（“我的 → 出题对比”）
 
-1. 点“开始一次对比”：从当前缺口里抽 10 份相同的出题任务（4 单选、2 填空、2 名词解释、1 简答、1 问答，两科混合），每份内容都建两个任务——一个固定给 DeepSeek，一个固定给 Claude 定时任务，内容一字不差。
+1. 点“开始一次对比”：从当前缺口里抽 10 份相同的出题任务（6 填空、2 名词解释、1 简答、1 问答，两科混合），每份内容都建两个任务——一个固定给 DeepSeek，一个固定给 Claude 定时任务，内容一字不差。
 2. 等两边都出完（Claude 要等定时任务下一次运行，DeepSeek 要等网站 worker）。两边的结果都走完整的程序检查和审核，审核统一用 DeepSeek。
 3. 页面成对显示“甲”“乙”两道题（不显示是谁出的，数据里也不带出处）。每道题给“像真题程度 / 答案正确 / 评分要点合理”各 1–5 分，加一句备注。
 4. 所有能比较的题都评完后揭晓：谁是谁，以及两边的程序检查通过率、审核通过率、平均分。只有一边出成题的那一对不能比较，会算进通过率。

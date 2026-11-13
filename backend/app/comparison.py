@@ -1,6 +1,6 @@
 """Blind comparison of the two executors on identical writing tasks (我的 → 出题对比).
 
-Ten tasks are drawn from the current gaps (4 single choice, 2 fill-in, 2 term, 1 short answer, 1 essay, the two subjects mixed). Each is
+Ten tasks are drawn from the current gaps (6 fill-in, 2 term, 1 short answer, 1 essay, the two subjects mixed). Each is
 built ONCE, exactly as it would be sent to DeepSeek, and queued twice: one copy pinned to DeepSeek, one to a Claude scheduled task. Both
 results go through the same program checks and the same review (DeepSeek, so the review is the same for both). The page shows the two
 questions of a pair as 甲 / 乙 in random order, without saying who wrote which; after everything is rated it reveals the sources and the
@@ -10,7 +10,7 @@ import secrets
 
 from app.external_executor import CLAUDE, DEEPSEEK
 
-SLOTS = ("single_choice",) * 4 + ("fill_blank",) * 2 + ("term",) * 2 + ("short_answer", "essay")
+SLOTS = ("fill_blank",) * 6 + ("term",) * 2 + ("short_answer", "essay")
 SUBJECTS = ("biochemistry", "cell_biology")
 SIDES = ("A", "B")
 LABEL = {"A": "甲", "B": "乙"}

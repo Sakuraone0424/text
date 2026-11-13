@@ -10,7 +10,7 @@ PHONE = dict(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=T
 SHOTS = Path(os.environ.get("SHOT_DIR", "/tmp/claude-0/shots"))
 
 
-def test_the_page_asks_for_login_then_shows_ten_buckets_without_horizontal_scroll(live_app, browser):
+def test_the_page_asks_for_login_then_shows_eight_buckets_without_horizontal_scroll(live_app, browser):
     client, dsn, blueprint = live_app
     base = str(client.base_url).rstrip("/")
     page = browser.new_context(**PHONE).new_page()
@@ -23,11 +23,11 @@ def test_the_page_asks_for_login_then_shows_ten_buckets_without_horizontal_scrol
     expect(page.locator("#pv-content")).to_be_visible()  # no reload needed
     page.goto(base + "/training#/progress")
     expect(page.locator("#pv-content")).to_be_visible()
-    expect(page.locator("#bank .row")).to_have_count(10)
-    expect(page.locator("#bank .row:visible")).to_have_count(5)  # one subject at a time
+    expect(page.locator("#bank .row")).to_have_count(8)
+    expect(page.locator("#bank .row:visible")).to_have_count(4)  # one subject at a time
     page.locator("[data-subject=cell_biology]").click()
-    expect(page.locator("#bank .row:visible")).to_have_count(5)
-    expect(page.locator("#bank .group:visible .name").first).to_have_text("单选")
+    expect(page.locator("#bank .row:visible")).to_have_count(4)
+    expect(page.locator("#bank .group:visible .name").first).to_have_text("填空")
     expect(page.locator("#paper-main")).to_contain_text("还差 74 题")
     expect(page.locator("#worker")).to_have_text("没有记录")
     expect(page.locator("#worker-note")).to_contain_text("还没有留下运行记录")

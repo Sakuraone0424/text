@@ -29,6 +29,7 @@ FIX_LABELS = {
     "blank_marker_unified": "填空的空格写法统一成 ____",
     "fill_answer_added_to_accepted": "标准答案补进了可接受答案",
     "fill_rubric_merged": "单空填空题的多条评分要点合并成一条（只保留答案项）",
+    "blank_points_equalised": "多空填空题的每个空和评分要点的分值改成满分的等分",
     "rubric_tags_dropped": "评分要点里不在题目标签中的知识标签已删除",
     "difficulty_mapped": "难度改成了规定的三档之一",
     "max_points_set_to_spec": "满分改成了规格分值（评分要点合计正好等于它）",
@@ -40,6 +41,14 @@ _BLANK = re.compile(r"[_＿]{2,}|[（(]\s*[_＿]*\s*[)）]")
 
 def _is_int_text(value):
     return isinstance(value, str) and re.fullmatch(r"\s*\d{1,4}\s*", value) is not None
+
+
+def _is_number_text(value):
+    return isinstance(value, str) and re.fullmatch(r"\s*\d{1,3}\.\d{1,6}\s*", value) is not None
+
+
+def _num(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _norm(text):
@@ -65,6 +74,9 @@ def autofix(raw, spec_points=None, *, evidence_has_rubric_tags=True):
     ]:
         if _is_int_text(holder.get(key)):
             holder[key] = int(holder[key])
+            note("numbers_to_int")
+        elif _is_number_text(holder.get(key)):
+            holder[key] = float(holder[key])
             note("numbers_to_int")
     if isinstance(q.get("style_reference_ids"), list) and any(_is_int_text(x) for x in q["style_reference_ids"]):
         q["style_reference_ids"] = [int(x) if _is_int_text(x) else x for x in q["style_reference_ids"]]
@@ -133,6 +145,12 @@ def autofix(raw, spec_points=None, *, evidence_has_rubric_tags=True):
             m = found[0]
             q["stem"] = stem[: m.start()] + "____" + stem[m.end():]
             note("blank_marker_unified")
+    elif qtype == "fill_blank" and isinstance(stem, str) and isinstance(q.get("blanks"), list):
+        # several blanks: all written as ____ when their number matches the blanks listed (otherwise it goes to the repair)
+        found = list(_BLANK.finditer(stem))
+        if len(found) == len(q["blanks"]) and any(m.group(0) != "____" for m in found):
+            q["stem"] = _BLANK.sub("____", stem)
+            note("blank_marker_unified")
 
     # 1. the canonical answer must be one of the accepted answers
     answer, accepted = q.get("answer"), q.get("accepted_answers")
@@ -145,7 +163,7 @@ def autofix(raw, spec_points=None, *, evidence_has_rubric_tags=True):
     # 1b. a single-blank question is graded on the one answer: extra rubric items (a principle, a second answer) are merged
     rubric = q.get("rubric")
     if qtype == "fill_blank" and not q.get("blanks") and isinstance(rubric, list) and len(rubric) > 1 \
-            and all(isinstance(c, dict) and type(c.get("points")) is int for c in rubric):
+            and all(isinstance(c, dict) and _num(c.get("points")) for c in rubric):
         keep = next((c for c in rubric if isinstance(answer, str) and answer.strip()
                      and _norm(answer) in _norm(str(c.get("description", "")))), rubric[0])
         q["rubric"] = [{**keep, "points": sum(c["points"] for c in rubric)}]
@@ -173,10 +191,27 @@ def autofix(raw, spec_points=None, *, evidence_has_rubric_tags=True):
         q["difficulty"] = mapped or "core"
         note("difficulty_mapped")
 
+    # 9b. several blanks: the question's points are shared equally. When the stem, the blanks and the rubric all have the same number of
+    # blanks, a model's rounding (0.83 + 0.83 + 0.83) is put right: every blank and rubric item gets the exact equal share.
+    blanks = q.get("blanks")
+    if (qtype == "fill_blank" and spec_points is not None and isinstance(blanks, list) and 2 <= len(blanks) <= 3
+            and isinstance(rubric, list) and len(rubric) == len(blanks)
+            and isinstance(q.get("stem"), str) and q["stem"].count("____") == len(blanks)
+            and all(isinstance(b, dict) for b in blanks) and all(isinstance(c, dict) for c in rubric)):
+        share = spec_points / len(blanks)
+        if q.get("max_points") != spec_points or any(b.get("points") != share for b in blanks) or any(c.get("points") != share for c in rubric):
+            q["max_points"] = spec_points
+            for b in blanks:
+                b["points"] = share
+            for c in rubric:
+                c["points"] = share
+            note("blank_points_equalised")
+        rubric = q.get("rubric")
+
     # 9. max_points written wrongly, but the rubric adds up to the specification's value
     if spec_points is not None and isinstance(rubric, list) and q.get("max_points") != spec_points:
         points = [c.get("points") for c in rubric if isinstance(c, dict)]
-        if points and all(type(x) is int for x in points) and sum(points) == spec_points:
+        if points and all(_num(x) for x in points) and abs(sum(points) - spec_points) < 1e-6:
             q["max_points"] = spec_points
             note("max_points_set_to_spec")
     return q, fixes

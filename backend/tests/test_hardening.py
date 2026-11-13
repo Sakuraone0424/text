@@ -204,7 +204,7 @@ def test_db_health_says_what_the_bank_lacks_and_health_stays_green(client):
     gaps = r.json()["detail"]["missing"]
     assert r.json()["detail"]["code"] == "not_ready_for_training"
     assert {"kind": "questions", "subject": "cell_biology", "question_type": "essay", "have": 0, "need": 1} in gaps
-    assert len(gaps) == 10
+    assert len(gaps) == 8
 
 
 def test_db_health_is_green_once_every_bucket_has_a_papers_worth(client, db, bank, monkeypatch):

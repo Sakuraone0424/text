@@ -6,7 +6,7 @@ import pytest
 from app import auto_execution, auto_quality as quality, cost_control, waste_report
 from app.question_quality import similarity
 from test_ai_automation import setup_ai, synthetic_result  # noqa: F401  (fixture/helper)
-from test_gap_generation import corpus, review_jobs, review_round, tweak, written  # noqa: F401
+from test_gap_generation import corpus, plan_single, review_jobs, review_round, tweak, written  # noqa: F401
 from test_waste_rules import written_with  # noqa: F401
 
 

@@ -59,7 +59,7 @@ def histories(conn, uid, question_ids):
         return out
     ids = list(out)
     for r in conn.execute(
-        "SELECT a.question_id,p.id AS paper_id,p.paper_date AS day,a.points,(i.snapshot->>'max_points')::int AS max_points,a.answer,t.submitted_at "
+        "SELECT a.question_id,p.id AS paper_id,p.paper_date AS day,a.points,(i.snapshot->>'max_points')::float8 AS max_points,a.answer,t.submitted_at "
         "FROM answers_v2 a JOIN attempts_v2 t ON t.id=a.attempt_id JOIN papers_v2 p ON p.id=t.paper_id "
         "JOIN paper_items_v2 i ON i.paper_id=p.id AND i.question_id=a.question_id "
         "WHERE p.user_id=%s AND a.question_id=ANY(%s) AND a.points IS NOT NULL ORDER BY t.submitted_at DESC",
@@ -152,6 +152,25 @@ def book(conn, uid, today=None):
     )
 
 
+def blank_rows(snap, raw_answer, feedback):
+    """A fill-in with several blanks, blank by blank: what was written, the accepted answer, what the blank earned and what it was worth.
+    None for every other question."""
+    blanks = snap.get("blanks") or []
+    if snap.get("question_type") != "fill_blank" or len(blanks) < 2:
+        return None
+    try:
+        value = json.loads(raw_answer) if isinstance(raw_answer, str) else raw_answer
+    except ValueError:
+        value = {}
+    supplied = (value or {}).get("blanks") if isinstance(value, dict) else None
+    earned = feedback.get("blank_points") or []
+    return [
+        dict(index=i + 1, yours=(supplied[i] if supplied and i < len(supplied) else "") or "", correct=(b.get("accepted_answers") or [""])[0],
+             accepted=b.get("accepted_answers") or [], points=earned[i] if i < len(earned) else None, max_points=b["points"])
+        for i, b in enumerate(blanks)
+    ]
+
+
 def detail(conn, uid, question_id):
     """Everything on one mistake: the full question, the learner's answer, the reference answer, the criteria with their scores,
     the textbook source (no internal unit numbers) and the history of answers."""
@@ -182,6 +201,7 @@ def detail(conn, uid, question_id):
         correct_choice=content.get("answer") if content["question_type"] == "single_choice" else None,
         reference=content.get("answer"), accepted_answers=content.get("accepted_answers") or [],
         rubric=[dict(description=c["description"], points=c["points"]) for c in content.get("rubric") or []],
+        blanks=blank_rows(content, last["answer"], scores or {}) if last else None,
         scores=scores, evidence=sources_of(content), history=[dict(date=h["date"], points=h["points"], max_points=h["max_points"], kind=h["kind"]) for h in history],
         status=card["status"], due=card["due"].isoformat(), version=card["version"],
     )

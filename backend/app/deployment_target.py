@@ -17,7 +17,7 @@ QA_TARGET = {
 QA_SOURCE_SCHEMA = "source_staging_ocr_20261030"
 # Current specification, and the previous one accepted only so a deployment keeps starting
 # while the variable is being switched (new papers are created from the current one only).
-QA_SPECIFICATIONS = ("xiaohan-obj-150-v5", "xiaohan-subj-150-v5", "xiaohan-60q-300pt-v4", "xiaohan-60q-150pt-v2")
+QA_SPECIFICATIONS = ("xiaohan-obj-fill-150-v6", "xiaohan-obj-150-v5", "xiaohan-subj-150-v5", "xiaohan-60q-300pt-v4", "xiaohan-60q-150pt-v2")
 # The QA website and the automation worker are two services of one environment.
 # Exactly these two are admitted; any other service ID is refused.
 QA_WORKER_SERVICE = "9295cd65-7355-4804-aa06-f10a5327846c"

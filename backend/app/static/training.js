@@ -1,5 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
+const n2 = (v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v);   // points are exact inside, shown with at most two decimals
 const names = {
   single_choice: "单选",
   fill_blank: "填空",
@@ -555,7 +556,7 @@ function render() {
       }
     } else if (q.question_type === "fill_blank" && q.blank_count) {
       for (let i = 0; i < q.blank_count; i++) {
-        const label = element("label", `第${i + 1}空`, article);
+        const label = element("label", `${"①②③"[i]} 第${i + 1}空`, article);
         const input = element("input", undefined, label);
         input.value = value.blanks?.[i] || "";
         input.setAttribute("aria-label", `第${q.position}题第${i + 1}空`);
@@ -762,8 +763,8 @@ async function showResult() {
   element(
     "h2",
     (result.score === null
-      ? (result.objective_max ? `客观题 ${result.objective_points} / ${result.objective_max} 分 · 主观题判分中` : `判分中 · 已判 ${result.graded_points} 分，${result.pending} 题待判`)
-      : `成绩 ${result.score} / ${result.max_points}`) +
+      ? (result.objective_max ? `客观题 ${n2(result.objective_points)} / ${n2(result.objective_max)} 分 · 主观题判分中` : `判分中 · 已判 ${n2(result.graded_points)} 分，${result.pending} 题待判`)
+      : `成绩 ${n2(result.score)} / ${n2(result.max_points)}`) +
       (excludedCount
         ? `（原满分 ${result.nominal_max_points}，已扣除 ${excludedCount} 道反馈题共 ${result.excluded.points} 分）`
         : ""),
@@ -850,7 +851,7 @@ async function showResult() {
       scored.forEach((c, i) => {
         const line = element(
           "p",
-          `评分点 ${i + 1}（${c.description}）：${c.points} / ${c.max_points} 分`,
+          `评分点 ${i + 1}（${c.description}）：${n2(c.points)} / ${n2(c.max_points)} 分`,
           article,
         );
         line.className = c.points < c.max_points ? "criterion lost" : "criterion";
@@ -861,7 +862,7 @@ async function showResult() {
       for (const criterion of answer.rubric)
         element(
           "p",
-          `评分点（${criterion.points}分）：${criterion.description}`,
+          `评分点（${n2(criterion.points)}分）：${criterion.description}`,
           article,
         );
     }
@@ -879,7 +880,7 @@ async function showResult() {
       element(
         "p",
         answer.feedback.comment ||
-          "逐空得分：" + (answer.feedback.blank_points || []).join(" / "),
+          "逐空得分：" + (answer.feedback.blank_points || []).map(n2).join(" / "),
         article,
       );
       for (const [field, label] of [

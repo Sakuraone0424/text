@@ -23,7 +23,7 @@ def test_single_current_product_contract_and_retired_legacy_routes(client):
     for paper, (questions, per_subject) in ((objective, (60, 30)), (subjective, (14, 7))):
         assert (paper["questions"], paper["points"], paper["duration_seconds"]) == (questions, 150, 3600)
         assert (paper["questions_per_subject"], paper["points_per_subject"]) == (per_subject, 75)
-    assert objective["quotas"]["biochemistry"] == {"single_choice": 15, "fill_blank": 15}
+    assert objective["quotas"]["biochemistry"] == {"fill_blank": 30}
     assert subjective["quotas"]["biochemistry"] == {"term": 4, "short_answer": 2, "essay": 1}
     assert value["points_by_type"] == v5.POINTS
     assert value["daily_demand_per_subject"] == v5.COUNTS and value["reserve_per_subject"] == v5.RESERVE

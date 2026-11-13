@@ -30,9 +30,9 @@ def test_the_queue_is_filled_to_twice_the_calls_per_run(db, corpus, setup_ai):
 
 
 def test_planning_never_goes_beyond_what_the_bank_is_short_of(db, corpus, setup_ai, monkeypatch):
-    monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", "1")  # ten cells, one question each: the gaps add up to 10
+    monkeypatch.setenv("AI_BANK_TARGET_PER_BUCKET", "1")  # eight cells, one question each: the gaps add up to 8
     gaps = sum(g for _, _, g in gen.bucket_gaps(db, setup_ai))
-    assert gaps == 10
+    assert gaps == 8
     queued = gen.fill_queue(db, setup_ai, 16)
     assert queued <= gaps and sum(g for _, _, g in gen.bucket_gaps(db, setup_ai)) == gaps - queued
     assert gen.fill_queue(db, setup_ai, 16) == 0 and len(generation_jobs(db)) == queued

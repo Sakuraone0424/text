@@ -192,7 +192,7 @@ def test_the_progress_page_shows_ring_bars_dots_and_a_split_bar(engine, live_app
         assert tile.evaluate("(n) => getComputedStyle(n).borderTopWidth") == "1px"   # card style, not a bare row
     # bank rows: name + bar + stocked/target, then small tags
     row = page.locator("#bank .group:visible .row").first
-    expect(row.locator(".name")).to_have_text("单选")
+    expect(row.locator(".name")).to_have_text("填空")
     expect(row.locator(".bar")).to_be_visible()
     expect(row.locator(".count")).to_contain_text("/")
     expect(page.locator("#bank .group:visible .row .tags .tag").first).to_contain_text("今日 +")

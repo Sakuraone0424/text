@@ -10,7 +10,7 @@ from datetime import date
 
 @pytest.mark.parametrize("qtype,points,maximum,expected", [
     ("single_choice", 4, 4, "mastered"), ("single_choice", 0, 4, "mistake"),
-    ("fill_blank", 4, 4, "mastered"), ("fill_blank", 2, 4, "mistake"),                  # right or wrong: partial credit is a mistake
+    ("fill_blank", 4, 4, "mastered"), ("fill_blank", 2, 4, "consolidate"), ("fill_blank", 1, 4, "mistake"),   # a fill-in goes by its blanks: half right is still to be consolidated, fewer is a mistake
     ("term", 3, 6, "mistake"),                                                          # 50% < 60%
     ("term", 3.5, 6, "mistake"),                                                        # 58%
     ("term", 4, 6, "consolidate"),                                                      # 67%: 60-85% to consolidate

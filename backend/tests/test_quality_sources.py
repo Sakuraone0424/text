@@ -144,7 +144,7 @@ def test_planning_resumes_after_a_paper_has_used_the_stock(db, bank, blueprint, 
         db.execute("INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready','x')", (qid,))
     after = gen.gap_diagnosis(db, uid)
     assert after["gap"] > before["gap"] and after["buckets"] >= before["buckets"]
-    assert after["gap"] == 3 * 10                              # 10 buckets, each back to 3 missing
+    assert after["gap"] == 3 * 8                               # 8 buckets, each back to 3 missing
     job = gen.plan_gap(db, uid)
     assert job is not None and job["kind"] == "generation"      # planning is not stuck: a request is queued
 
@@ -186,8 +186,8 @@ def test_the_writing_instructions_forbid_it():
         assert phrase in text, phrase
 
 
-def test_past_exam_single_choice_goes_first_and_ai_singles_cover_only_the_rest():
+def test_past_exam_fill_ins_go_first_and_single_choice_is_no_longer_imported_for_the_daily_papers():
     from app import auto_generation as gen, past_exam_import as pei
-    assert pei._PRIORITY_SQL.index("'single_choice' THEN 0") < pei._PRIORITY_SQL.index("'term'")
+    assert pei._PRIORITY_SQL.index("'fill_blank' THEN 0") < pei._PRIORITY_SQL.index("'term'")
     import inspect
-    assert "'single_choice'" in inspect.getsource(gen.bucket_detail)
+    assert "single_choice" not in inspect.getsource(gen.bucket_detail) or "COUNTS" in inspect.getsource(gen.bucket_detail)
