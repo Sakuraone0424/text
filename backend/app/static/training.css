@@ -145,6 +145,7 @@
 .training-app .hero-action { width: 100%; }
 .training-app .stat-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .training-app .executor-tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--primary-soft); color: var(--primary-soft-ink); margin-left: 6px; white-space: nowrap; }
+.training-app .plain-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .training-app .cmp-grid { display: grid; gap: 12px; }
 .training-app .cmp-side { min-width: 0; border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 8px; }
 .training-app .cmp-stem { font-weight: 600; overflow-wrap: anywhere; }

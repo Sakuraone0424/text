@@ -38,8 +38,8 @@ FAMILY_SQL = {
 
 # A question written for the blind comparison is reviewed by DeepSeek whatever the review route says (both sides get the same reviewer).
 COMPARISON_REVIEW_SQL = (
-    "EXISTS(SELECT 1 FROM candidate_review_packets cp JOIN ai_jobs cg ON cp.candidate_key LIKE 'auto-generated-' || cg.id || '-%' "
-    "WHERE cp.question_id=(ai_jobs.payload->>'question_id')::bigint AND cg.job_key LIKE 'compare:%')")
+    "EXISTS(SELECT 1 FROM candidate_review_packets cp JOIN ai_jobs cg ON starts_with(cp.candidate_key, 'auto-generated-' || cg.id || '-') "
+    "WHERE cp.question_id=(ai_jobs.payload->>'question_id')::bigint AND starts_with(cg.job_key, 'compare:'))")
 
 
 class ExternalError(Exception):
