@@ -931,10 +931,18 @@ def _enqueue_item(conn, uid, item):
         except ValueError:
             _block(conn, item["id"], "textbook_or_exam_source_unavailable")
             return "blocked"
+        # the key version follows the point scale (v5: single 3, fill-in 2, term 5, short answer 15, essay 25): a request written under an
+        # earlier scale has the same item but a different payload, and the same key would be an idempotency conflict
+        key = f"past-exam:v5:{item['id']}:{item['stem_hash'][:16]}"
         try:
-            job = enqueue(
-                conn, uid, f"past-exam:v4:{item['id']}:{item['stem_hash'][:16]}", "generation", payload
-            )
+            try:
+                job = enqueue(conn, uid, key, "generation", payload)
+            except ValueError as exc:
+                if str(exc) != "idempotency_conflict":
+                    raise
+                # the same item and stem, but its earlier request was written under other rules (instructions, points): this request gets its
+                # own key instead of stopping the whole planning pass
+                job = enqueue(conn, uid, f"{key}:{content_sha(payload)[:12]}", "generation", payload)
             break
         except ValueError as exc:
             if str(exc) != "bounded_input_exceeded":

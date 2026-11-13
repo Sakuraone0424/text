@@ -1020,13 +1020,29 @@ def retire_old_scoring(conn):
     return len(old)
 
 
-def retire_stale(conn):
+STALE_RECHECK_MINUTES = 30
+_STALE_CHECKED = {}     # question id -> (monotonic time of its last successful check, content hash)
+
+
+def retire_stale(conn, now=None):
+    """Withdraw a ready / checking question whose candidate or source was superseded. Re-verifying every question on every planning tick
+    (every few minutes) cost tens of seconds, so a question that passed is not looked at again for 30 minutes (a few minutes more or
+    less per question, so they do not all fall due on the same tick); the first pass after a restart checks them all."""
+    import time
+
+    now = time.monotonic() if now is None else now
     for row in conn.execute(
-        "SELECT question_id FROM auto_question_states WHERE status IN ('ready','checking')"
+        "SELECT question_id,content_sha256 FROM auto_question_states WHERE status IN ('ready','checking')"
     ).fetchall():
+        qid = row["question_id"]
+        seen = _STALE_CHECKED.get(qid)
+        if seen and seen[1] == row["content_sha256"] and now - seen[0] < (STALE_RECHECK_MINUTES + qid % 10) * 60:
+            continue
         try:
             evidence(conn, row["question_id"])
+            _STALE_CHECKED[qid] = (now, row["content_sha256"])
         except (ValueError, LookupError):
+            _STALE_CHECKED.pop(qid, None)
             conn.execute(
                 "UPDATE auto_question_states SET status='retired',reason='source_or_candidate_superseded',updated_at=clock_timestamp() WHERE question_id=%s",
                 (row["question_id"],),
