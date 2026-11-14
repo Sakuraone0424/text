@@ -265,6 +265,17 @@ def plan(conn, uid, target=None, report=None):
     mark("fill")
     past_exam_import.plan(conn, uid, batch=max(past_exam_import.MAX_CONCURRENT_JOBS, target or 0))
     mark("past")
+    if report is not None:
+        # per route: what it wanted, what it queued and what stopped it (a short token each, numbers and codes only)
+        f, p = auto_generation.FILL_DETAIL, past_exam_import.PLAN_DETAIL
+        report["plan_routes"] = (
+            f"gap:want={f.get('want', '-')}/had={f.get('claimable_before', '-')}/queued={f.get('queued', '-')}/stop={f.get('stop') or '-'}"
+            + (f"/{f['buckets']}" if f.get("buckets") else "")
+            + f"|past:want={p.get('want', '-')}/active={p.get('active', '-')}/queued={p.get('queued', '-')}"
+            + f"/stocked={p.get('skipped_stocked', 0)}/termcap={p.get('skipped_term_cap', 0)}/blocked={p.get('not_queued', 0)}"
+        )
+        if f.get("deferred"):
+            report["deferred_surplus"] = f["deferred"]
 
 
 # Sizing: about 160 calls a day (60 questions at ~75% review pass rate = ~80 written
@@ -741,6 +752,14 @@ def _locked_run(report, run_began):
         _plan_queue(conn, report, users, private, True)
         lap = _lap(report, "queue", lap)
         states, held, head = queue_snapshot(conn)
+        deferred = auto_generation.deferred_count(conn, users[0]["user_id"])[0] if users else 0
+        if deferred:
+            # waiting only because their bucket is stocked above the reserve: shown apart, not as work waiting to be done
+            take = min(deferred, states.get("pending", 0))
+            states["pending"] = states.get("pending", 0) - take
+            if deferred - take:
+                states["retrying"] = max(0, states.get("retrying", 0) - (deferred - take))
+            states["deferred_surplus"] = deferred
         report["queue"] = ",".join(f"{k}={v}" for k, v in sorted(states.items())) or "empty"
         report["peak_held"] = ",".join(held) or "-"
         report["head"] = (

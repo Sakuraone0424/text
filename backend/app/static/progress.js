@@ -426,6 +426,7 @@ function bank(report) {
       if (b.generating) chip(tags, `出题中 ${b.generating}`);
       if (b.reviewing) chip(tags, `审核中 ${b.reviewing}`);
       if (b.queued) chip(tags, `排队 ${b.queued}`);
+      if (b.deferred) chip(tags, `已超额、暂缓 ${b.deferred}`);
       if (b.blocked) chip(tags, `被挡住 ${b.blocked}`, manyBlocked(b) ? "attn" : "");
       if (Object.keys(b.blocked_reasons).length) reasonList(row, b.blocked_reasons);
     }

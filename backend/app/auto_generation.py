@@ -739,9 +739,11 @@ def build_gap_request(conn, uid, subject, kind, avoid_units=()):
     """The question-writing request for one bucket, built but not queued: (job key, payload), or None when nothing can be written.
     Exactly what a DeepSeek request carries; the quality comparison sends the same payload to two executors."""
     if not select_exam_style(conn, subject, kind):
+        GAP_WHY["bucket"] = "no_exam_style"
         return None  # no clean genuine past question of this type to imitate
     pool = paragraph_pool(conn, subject)
     if not pool:
+        GAP_WHY["bucket"] = "no_paragraph_pool"
         return None
     used = used_paragraphs(conn)
     by_chapter, weights = chapter_weights(pool, past_exam_import.chapter_frequency(conn, subject), used)
@@ -756,6 +758,7 @@ def build_gap_request(conn, uid, subject, kind, avoid_units=()):
     for _ in range(GAP_ATTEMPTS_PER_BUCKET):
         unit_id = pick_paragraph(by_chapter, weights, used, rng, skip | set(avoid_units))
         if unit_id is None:
+            GAP_WHY["bucket"] = "no_paragraph_left"
             return None
         skip.add(unit_id)
         try:
@@ -781,15 +784,42 @@ def build_gap_request(conn, uid, subject, kind, avoid_units=()):
         )
         if payload is not None:
             return key, payload
+    GAP_WHY["bucket"] = f"no_usable_paragraph_in_{GAP_ATTEMPTS_PER_BUCKET}_tries"
     return None
 
 
-def claimable_count(conn):
-    """Jobs a worker could claim right now (peak-hour holds aside): due pending/retrying work, not scoped trial jobs."""
+_BUCKET_OF_JOB = ("(COALESCE(payload->>'subject',payload->'question'->>'subject') || '|' "
+                  "|| COALESCE(payload->>'question_type',payload->'question'->>'question_type'))")
+
+
+def surplus_filter(conn, uid):
+    """(SQL, params) that leaves out the tasks of buckets that already hold more than the two-day reserve: the worker does not claim them
+    (they wait until the bucket has a gap again), so they are no work on the way and must not hold back the planning of real work."""
+    keys = satisfied_keys(conn, uid) if uid else []
+    if not keys:
+        return "", []
+    return f" AND NOT ({_BUCKET_OF_JOB}=ANY(%s))", [keys]
+
+
+def claimable_count(conn, uid=None):
+    """Jobs a worker could claim right now (peak-hour holds aside): due pending/retrying work, not scoped trial jobs. With `uid`, the tasks
+    of buckets that are already stocked above the reserve are left out: they are not claimed, so they are not work waiting to be done."""
+    extra, params = surplus_filter(conn, uid)
     return conn.execute(
         "SELECT count(*) AS n FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp() "
-        "AND NOT (settings_snapshot ?| ARRAY['limited_trial','review_campaign','qa_automation'])"
+        "AND NOT (settings_snapshot ?| ARRAY['limited_trial','review_campaign','qa_automation'])" + extra, params
     ).fetchone()["n"]
+
+
+def deferred_count(conn, uid):
+    """Tasks waiting only because their bucket is stocked above the reserve ('已超额、暂缓'), and how many per bucket."""
+    keys = satisfied_keys(conn, uid)
+    if not keys:
+        return 0, {}
+    rows = conn.execute(
+        f"SELECT {_BUCKET_OF_JOB} AS b,count(*) AS n FROM ai_jobs WHERE state IN ('pending','retrying') AND kind IN ('generation','quality_review') "
+        f"AND {_BUCKET_OF_JOB}=ANY(%s) GROUP BY 1", (keys,)).fetchall()
+    return sum(r["n"] for r in rows), {r["b"]: r["n"] for r in rows}
 
 
 # how many blanks a newly written fill-in is asked to have: mostly one, sometimes two or three (a paper never holds more than a third)
@@ -831,6 +861,9 @@ def allocate_order(conn, gaps):
     return ordered
 
 
+GAP_WHY = {}       # why the last plan_gap queued nothing (read by the worker's log): the cap, no gap, or what stopped each bucket
+
+
 def plan_gap(conn, uid, max_active=2):
     """Queue one question-writing request for the largest uncovered bucket.
 
@@ -838,17 +871,26 @@ def plan_gap(conn, uid, max_active=2):
     through a model. Each request carries one weighted-random paragraph and a
     few neighbours (hard caps in past_exam_import), nothing more.
     """
+    extra, params = surplus_filter(conn, uid)
     active = conn.execute(
         "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' "
-        "AND COALESCE(payload->>'origin','')<>'past_exam' AND state IN ('pending','running','retrying')"
+        "AND COALESCE(payload->>'origin','')<>'past_exam' AND state IN ('pending','running','retrying')" + extra, params
     ).fetchone()["n"]
+    GAP_WHY.clear()
     if active >= max_active:
+        GAP_WHY["stop"] = f"active_cap:{active}>={max_active}"
         return None
     past_exam_import.index_item_chapters(conn)
-    for subject, kind, _ in allocate_order(conn, bucket_gaps(conn, uid)):
+    gaps = allocate_order(conn, bucket_gaps(conn, uid))
+    if not gaps:
+        GAP_WHY["stop"] = "no_gap"
+        return None
+    for subject, kind, _ in gaps:
         job = _enqueue_gap(conn, uid, subject, kind)
         if job:
             return job
+        GAP_WHY.setdefault("buckets", []).append(f"{subject[:4]}.{kind}:{GAP_WHY.pop('bucket', None) or 'no_request'}")
+    GAP_WHY["stop"] = "no_request_could_be_written"
     return None
 
 
@@ -861,15 +903,30 @@ def fill_queue(conn, uid, target):
     the per-task limit, the monthly cap and the off-peak rules. When the monthly writing/review budget is
     already used up, only the single request of the old rule is queued.
     """
+    detail = FILL_DETAIL
+    detail.clear()
+    detail.update(want=target, claimable_before=claimable_count(conn, uid), deferred=deferred_count(conn, uid)[0])
     first = plan_gap(conn, uid)
     queued = 1 if first else 0
-    if first is None or cost_control.spend_report(conn, uid)["writing_review_exhausted"]:
+    if first is None:
+        detail.update(queued=0, stop=GAP_WHY.get("stop"), buckets=",".join(GAP_WHY.get("buckets", [])[:6]))
         return queued
-    while claimable_count(conn) < target:
+    if cost_control.spend_report(conn, uid)["writing_review_exhausted"]:
+        detail.update(queued=queued, stop="writing_budget_exhausted")
+        return queued
+    stop = "target_reached"
+    # the target counts the work a worker will really take: tasks of buckets stocked above the reserve are left out (they are not claimed)
+    while claimable_count(conn, uid) < target:
         if plan_gap(conn, uid, max_active=target) is None:
+            stop = GAP_WHY.get("stop") or "no_request"
+            detail["buckets"] = ",".join(GAP_WHY.get("buckets", [])[:6])
             break
         queued += 1
+    detail.update(queued=queued, stop=stop)
     return queued
+
+
+FILL_DETAIL = {}   # what the last fill_queue wanted, did and was stopped by (read by the worker's log)
 
 
 def repair_source_identity_from_locked_units(raw_question, units):

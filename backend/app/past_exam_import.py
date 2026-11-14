@@ -999,14 +999,18 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
         import_items(conn)
     reclassify_once(conn)
     release_failed(conn)
+    from app import auto_generation
+
+    extra, extra_params = auto_generation.surplus_filter(conn, uid)     # tasks of buckets stocked above the reserve are not work on the way
     active = conn.execute(
         "SELECT count(*) AS n FROM ai_jobs WHERE kind='generation' AND payload->>'origin'=%s "
-        "AND state IN ('pending','running','retrying')",
-        (ORIGIN_PAST_EXAM,),
+        "AND state IN ('pending','running','retrying')" + extra,
+        [ORIGIN_PAST_EXAM] + extra_params,
     ).fetchone()["n"]
     room, queued = batch - active, 0
     term_room = term_room_now(conn)
-    from app import auto_generation
+    PLAN_DETAIL.clear()
+    PLAN_DETAIL.update(want=batch, active=active, skipped_stocked=0, skipped_term_cap=0, skipped_first_batch=0, not_queued=0)
 
     satisfied = set(auto_generation.satisfied_keys(conn, uid))   # buckets that need nothing more
     for item in conn.execute(
@@ -1019,18 +1023,27 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
         if queued >= room:
             break
         if f"{item['subject']}|{item['question_type']}" in satisfied:
+            PLAN_DETAIL["skipped_stocked"] += 1
             continue  # stocked above the two-day reserve: the item waits (status 'imported') until the bucket has a gap
         target = cost_control.bank_target()
         if target and cost_control.bucket_supply(conn, item["subject"], item["question_type"]) >= target:
+            PLAN_DETAIL["skipped_first_batch"] += 1
             continue  # temporary first-batch limit: this bucket is already stocked
         if item["question_type"] == "term":
             if term_room <= 0:
+                PLAN_DETAIL["skipped_term_cap"] += 1
                 continue  # the 20% cap: the places go to the other types
         if _enqueue_item(conn, uid, item) == "queued":
             queued += 1
             if item["question_type"] == "term":
                 term_room -= 1
+        else:
+            PLAN_DETAIL["not_queued"] += 1                  # blocked on the way (no textbook evidence, ...)
+    PLAN_DETAIL["queued"] = queued
     return queued
+
+
+PLAN_DETAIL = {}   # what the last plan() wanted, did and was stopped by (read by the worker's log)
 
 
 _TERM_PREFIX = re.compile(r"^\s*(?:\d{1,3}\s*[.、．)）]\s*)?(?:名词解释|解释名词|名词)?\s*[:：]?\s*")

@@ -120,10 +120,17 @@ RESOLVED_CONFLICTS = []
 def enqueue_rekeyed(conn, user_id, key, kind, payload):
     """enqueue() for planning: a key that was used earlier for a request written under other rules (a payload that changed with the
     specification, point scale, instructions or schema) gets a key with the payload's fingerprint instead of stopping the planning pass."""
+    # a request that was already given its own key (an earlier pass met the conflict) is found again by that key: the conflict happens once
+    # and is kept, instead of being met and "resolved" anew on every pass
+    fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:12]
+    own_keys = [f"{key}:{fingerprint}" + ("" if n == 1 else f":{n}") for n in range(1, 6)]
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    for row in conn.execute("SELECT * FROM ai_jobs WHERE job_key=ANY(%s) ORDER BY id", (own_keys,)).fetchall():
+        if row["user_id"] == user_id and row["kind"] == kind and json.dumps(row["payload"], ensure_ascii=False, sort_keys=True) == encoded:
+            return row
     try:
         return enqueue(conn, user_id, key, kind, payload)
     except IdempotencyConflict as exc:
-        fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:12]
         RESOLVED_CONFLICTS.append(exc.detail)
         del RESOLVED_CONFLICTS[:-20]
         # the new key may itself be taken (by another kind, another owner, other content): then the next suffix, never an error
