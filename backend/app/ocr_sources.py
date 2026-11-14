@@ -344,21 +344,27 @@ def review_unit(conn, unit_id, kind, status, reviewer, note, details=None):
     }
 
 
+_VERIFIED_FILES = set()  # (document id, sha256) whose stored bytes were hashed and matched: stored files never change
+
+
 def integrity_issues(conn, row, *, verify_hash=True):
-    columns = "source_sha256,source_content" if verify_hash else "source_sha256"
     version = conn.execute(
-        f"SELECT {columns} FROM source_versions WHERE document_id=%s",
+        "SELECT source_sha256 FROM source_versions WHERE document_id=%s",
         (row["document_id"],),
     ).fetchone()
     if not version or version["source_sha256"] != row.get(
         "sha256", row.get("document_sha256")
     ):
         return ["missing_or_changed_ocr_file"]
-    if (
-        verify_hash
-        and sha(bytes(version["source_content"])) != version["source_sha256"]
-    ):
-        return ["missing_or_changed_ocr_file"]
+    if verify_hash and (row["document_id"], version["source_sha256"]) not in _VERIFIED_FILES:
+        # the full file is read and hashed once; before this, every check of every cited paragraph of every question
+        # loaded and hashed the whole multi-megabyte file again
+        content = conn.execute(
+            "SELECT source_content FROM source_versions WHERE document_id=%s", (row["document_id"],)
+        ).fetchone()["source_content"]
+        if sha(bytes(content)) != version["source_sha256"]:
+            return ["missing_or_changed_ocr_file"]
+        _VERIFIED_FILES.add((row["document_id"], version["source_sha256"]))
     if row.get("pdf_page") is not None or row.get("printed_page") is not None:
         return ["ocr_source_cannot_assert_pdf_or_printed_page"]
     return []

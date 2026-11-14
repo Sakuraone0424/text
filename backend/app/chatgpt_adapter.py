@@ -19,13 +19,17 @@ class TrainingAdapter:
         response.raise_for_status()
         return response.json()
 
-    def prepare(self):
-        from app.training_spec import default_blueprint
+    def prepare(self, historical_blueprint=None):
+        from app.training_spec_v5 import OBJECTIVE
 
+        default_blueprint = OBJECTIVE.default_blueprint
+
+        # Only the public default is 60q; an existing 28q integration test
+        # may still pass its immutable legacy blueprint explicitly.
         return self.request(
             "POST",
             "/v2/papers",
-            default_blueprint(),
+            historical_blueprint if historical_blueprint is not None else default_blueprint(),
         )
 
     def start(self, paper_id):

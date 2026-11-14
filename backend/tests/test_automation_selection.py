@@ -35,9 +35,36 @@ def test_daily_preparation_only_after_20_and_reports_shortage(db, monkeypatch):
     assert db.execute("SELECT COUNT(*) AS n FROM papers_v2").fetchone()["n"] == 0
 
 
-def test_daily_preparation_idempotent_and_does_not_start_clock(db, bank, monkeypatch):
+def test_daily_preparation_idempotent_and_does_not_start_clock(
+    db, question_factory, passing_audit, monkeypatch
+):
+    from app import auto_quality, source_policy, quiz_v2 as q
+    from app.question_quality import Question
+    from spec_helpers import rubric
+    from app.training_spec_v5 import COUNTS, POINTS, OBJECTIVE, SUBJECTIVE_PAPER
+
+    # Synthetic 60q bank; review predicates are stubbed for this mechanics test.
+    bank_ids = []
+    for subject in ("biochemistry", "cell_biology"):
+        for kind, count in COUNTS.items():
+            for _ in range(count):
+                raw = question_factory(subject, kind).model_dump()
+                raw["max_points"] = POINTS[kind]
+                raw["rubric"] = rubric(kind, POINTS[kind])
+                qid = q.create_question(db, Question.model_validate(raw))["id"]
+                assert q.review_question(db, qid, passing_audit)["passed"]
+                q.publish_question(db, qid)
+                db.execute(
+                    "INSERT INTO auto_question_states(question_id,status,content_sha256) VALUES (%s,'ready',%s)",
+                    (qid, "synthetic-only-test"),
+                )
+                bank_ids.append(qid)
+    monkeypatch.setattr(auto_quality, "ready", lambda c, qid: qid in bank_ids)
+    monkeypatch.setattr(source_policy, "pinned_science_evidence", lambda content: True)
+
     ensure_user(db, "daily")
     monkeypatch.setenv("QUIZ_DAILY_PREP_ENABLED", "1")
+    monkeypatch.delenv("QUIZ_DAILY_SPECIFICATION", raising=False)
     # Use an actual future date for consistency with database retry timestamps.
     from app.training_sessions import server_now
 
@@ -46,24 +73,19 @@ def test_daily_preparation_idempotent_and_does_not_start_clock(db, bank, monkeyp
     if fixed < now:
         fixed += __import__("datetime").timedelta(days=1)
     monkeypatch.setattr(automation, "server_now", lambda c: fixed)
-    assert automation.prepare_daily(db) == 1
+    assert automation.prepare_daily(db) == 2          # the objective and the subjective paper
     assert automation.prepare_daily(db) == 0
-    assert (
-        db.execute("SELECT state FROM automation_jobs").fetchone()["state"]
-        == "prepared"
-    )
+    assert {r["state"] for r in db.execute("SELECT state FROM automation_jobs").fetchall()} == {"prepared"}
     assert (
         db.execute("SELECT COUNT(*) AS n FROM training_sessions").fetchone()["n"] == 0
     )
-    from app.training_spec import default_blueprint, validate_items
-
-    paper = db.execute("SELECT blueprint FROM papers_v2").fetchone()["blueprint"]
-    expected = default_blueprint()
-    assert paper["specification"] == expected["specification"]
-    assert paper["quotas"] == expected["quotas"]
-    items = [r["snapshot"] for r in db.execute("SELECT snapshot FROM paper_items_v2").fetchall()]
-    validate_items(items)
-    assert len(items) == 28 and sum(q["max_points"] for q in items) == 150
+    for module in (OBJECTIVE, SUBJECTIVE_PAPER):
+        paper = db.execute("SELECT id,blueprint FROM papers_v2 WHERE blueprint->>'specification'=%s", (module.SPECIFICATION,)).fetchone()
+        expected = module.default_blueprint()
+        assert paper["blueprint"]["quotas"] == expected["quotas"]
+        items = [r["snapshot"] for r in db.execute("SELECT snapshot FROM paper_items_v2 WHERE paper_id=%s", (paper["id"],)).fetchall()]
+        module.validate_items(items)
+        assert len(items) == module.TOTAL_QUESTIONS and sum(i["max_points"] for i in items) == 150
 
 
 def test_ranking_balances_chapters_and_uses_recorded_signals():

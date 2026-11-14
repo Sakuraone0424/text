@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from app import candidate_review as service
 from app.source_intake import isolated_db
-from app.training_spec import COUNTS, SUBJECTS, validate_items
+from app.training_spec_v4 import COUNTS, SUBJECTS, validate_items
 
 app = FastAPI(
     title="私有候选题审核（非生产）", docs_url=None, redoc_url=None, openapi_url=None
@@ -90,7 +90,8 @@ def csrf(token):
 
 def write_identity(request: Request, name=Depends(identity)):
     if not hmac.compare_digest(
-        request.headers.get("x-review-csrf", ""), csrf(request.cookies.get(COOKIE, ""))
+        request.headers.get("x-review-csrf", "").encode("utf-8", "surrogatepass"),
+        csrf(request.cookies.get(COOKIE, "")).encode("utf-8"),
     ):
         raise HTTPException(403, "Reload the review session before saving")
     origin = request.headers.get("origin")

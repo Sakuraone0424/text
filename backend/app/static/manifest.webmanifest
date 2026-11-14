@@ -1,0 +1,17 @@
+{
+  "name": "肖涵 · 中科大考研智能答题",
+  "short_name": "研习空间",
+  "description": "生物化学 + 细胞生物学每日 60 题训练",
+  "lang": "zh-CN",
+  "start_url": "/training",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F6FA",
+  "theme_color": "#F4F6FA",
+  "icons": [
+    {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "/static/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
