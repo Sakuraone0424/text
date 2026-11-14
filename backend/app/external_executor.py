@@ -23,11 +23,13 @@ RESULT_LIMIT_BYTES = 131072
 MAX_EXPIRED_LEASES = 3                 # a task that keeps timing out in Routines is left to DeepSeek's fallback
 CLAUDE = "claude-subscription"
 DEEPSEEK = "deepseek"
-MODES = ("deepseek", "claude", "claude_first")
+MODES = ("deepseek", "claude", "claude_first", "none")      # "none" (no review) is for the review task only
 TASKS = ("generation", "review", "grading")
 STATE_KEY = "executor_routing"
 # DeepSeek does everything until the owner has seen a Routine run through and switches "出题" to Claude first himself
-DEFAULTS = {"generation": "deepseek", "review": "deepseek", "grading": "deepseek", "fallback_hours": 4}
+# Review: "none" = a question a Claude Routine wrote is published on the program checks alone (the owner's choice); DeepSeek's questions are still
+# reviewed by DeepSeek. "deepseek" = DeepSeek reviews everything, "claude" = a Routine (another session) reviews.
+DEFAULTS = {"generation": "deepseek", "review": "none", "grading": "deepseek", "fallback_hours": 4}
 ENV_FOR = {"generation": "EXECUTOR_GENERATION", "review": "EXECUTOR_REVIEW", "grading": "EXECUTOR_GRADING"}
 
 # which queued jobs belong to which kind of task a Routine can lease
@@ -95,7 +97,7 @@ def policy(conn):
     out = {}
     for task in TASKS:
         value = saved.get(task) or os.environ.get(ENV_FOR[task]) or DEFAULTS[task]
-        out[task] = value if value in MODES else DEFAULTS[task]
+        out[task] = value if value in MODES and (value != "none" or task == "review") else DEFAULTS[task]
     hours = saved.get("fallback_hours") or os.environ.get("EXECUTOR_FALLBACK_HOURS") or DEFAULTS["fallback_hours"]
     try:
         hours = int(hours)
@@ -111,7 +113,7 @@ def save_policy(conn, values):
     current = policy(conn)
     for task in TASKS:
         if task in values:
-            if values[task] not in MODES:
+            if values[task] not in MODES or (values[task] == "none" and task != "review"):
                 raise ValueError("unknown_executor_mode")
             current[task] = values[task]
     if "fallback_hours" in values:
@@ -129,7 +131,7 @@ def waiting_for_claude(conn):
     parts, params = [], []
     for task in TASKS:
         mode = pol[task]
-        if mode == "deepseek":
+        if mode in ("deepseek", "none"):
             parts.append(f"({FAMILY_SQL[task]} AND executor='claude-subscription')")
         else:
             parts.append(f"({FAMILY_SQL[task]} AND (executor='claude-subscription' OR executor IS NULL))")
@@ -143,6 +145,26 @@ def waiting_for_claude(conn):
     fallback = pol["fallback_hours"] if "claude_first" in (pol["generation"], pol["review"], pol["grading"]) else None
     left = None if fallback is None else max(0.0, round(fallback - float(row["oldest_hours"] or 0), 1))
     return dict(count=row["n"], oldest_hours=round(float(row["oldest_hours"] or 0), 1), hand_over_hours=left, fallback_hours=fallback)
+
+
+REPORT_ADVISE_RATE = 0.10        # above this share of reported questions, the progress page advises turning review on
+REPORT_MIN_SAMPLE = 10           # fewer used questions than this say nothing yet
+
+
+def report_rates(conn):
+    """The share of questions a learner marked 「这题有问题」, per executor that wrote them (the questions that were on a paper):
+    {executor: {used, reported, rate, enough, advise}}. Only questions whose writer is on record are counted."""
+    out = {}
+    for name in (CLAUDE, DEEPSEEK):
+        row = conn.execute(
+            "SELECT count(DISTINCT i.question_id) AS used,count(DISTINCT r.question_id) AS reported FROM paper_items_v2 i "
+            "JOIN question_origins o ON o.question_id=i.question_id AND o.source_ref->>'executor'=%s "
+            "LEFT JOIN question_reports r ON r.question_id=i.question_id", (name,)).fetchone()
+        used, reported = row["used"], row["reported"]
+        enough = used >= REPORT_MIN_SAMPLE
+        rate = round(reported / used, 3) if used else None
+        out[name] = dict(used=used, reported=reported, rate=rate, enough=enough, advise=bool(enough and rate is not None and rate > REPORT_ADVISE_RATE))
+    return out
 
 
 def rebuild_state(conn):
@@ -302,6 +324,9 @@ def slim_task(payload, limit=TASK_CHAR_TARGET):
     import json
 
     task = {k: v for k, v in payload.items() if k not in RULE_FIELDS}
+    if isinstance(task.get("evidence"), list):
+        # a quote's citation carries paragraph_id: it is the paragraph's own number (unit_id), given so it need not be guessed
+        task["evidence"] = [{**u, "paragraph_id": u.get("unit_id")} if isinstance(u, dict) and "unit_id" in u else u for u in task["evidence"]]
 
     def size():
         return len(json.dumps(task, ensure_ascii=False, separators=(",", ":")))

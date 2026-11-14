@@ -112,7 +112,11 @@ def detail(conn, uid, paper_id, question_id):
     feedback = row["feedback"] or {}
     raw = (snap.get("evidence") or [{}])[0].get("chapter")
     reference = snap.get("answer")
+    origin = conn.execute("SELECT source_ref FROM question_origins WHERE question_id=%s", (question_id,)).fetchone()
+    source = (origin or {}).get("source_ref") or {}
     return dict(
+        writer={"claude-subscription": "Claude 定时任务", "deepseek": "DeepSeek"}.get(source.get("executor")),
+        review_label=source.get("review_label"),
         paper_id=paper_id, question_id=question_id, position=row["position"], subject=snap["subject"], question_type=snap["question_type"],
         chapter=chapters.ChapterMap(conn).name(snap["subject"], raw) if raw else chapters.OTHER,
         stem=snap["stem"], options=options, your_choice=letter if letter in options else None, correct_choice=reference if snap["question_type"] == "single_choice" else None,

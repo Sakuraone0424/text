@@ -456,7 +456,7 @@ def _executor_report(conn):
 
     return dict(today=external_executor.executor_stats(conn), routing=external_executor.policy(conn),
                 waiting=external_executor.waiting_for_claude(conn), rebuild=external_executor.rebuild_state(conn),
-                released=external_executor.release_reasons(conn), past_exam_support=past_exam_import.support_stats(conn))
+                released=external_executor.release_reasons(conn), report_rates=external_executor.report_rates(conn), past_exam_support=past_exam_import.support_stats(conn))
 
 
 def _rescale_report(conn):

@@ -448,12 +448,25 @@ function bank(report) {
 let funnelType = "all";
 /* Who wrote today's questions: per executor, tasks done, the share that passed the program checks, and the average time. */
 const EXECUTOR = { deepseek: "DeepSeek", claude: "Claude（订阅）", "claude-subscription": "Claude（订阅）" };
-const ROUTE = { deepseek: "DeepSeek", claude: "Claude", claude_first: "Claude 优先" };
+const ROUTE = { none: "不审核（仅程序检查）", deepseek: "DeepSeek", claude: "Claude", claude_first: "Claude 优先" };
 function executors(report) {
   const data = report.executors || { today: {}, routing: {} };
   const root = $("executors");
   root.replaceChildren();
   const route = data.routing || {};
+  const rates = data.report_rates || {};
+  const rateBox = $("report-rate");
+  if (rateBox) {
+    // the share of questions the learner marked as wrong ("这题有问题"), per writer; above 10% the page advises turning review on
+    rateBox.replaceChildren();
+    const c = rates["claude-subscription"];
+    if (c) {
+      const text = c.used ? `Claude 出题被反馈有问题的比例：${c.rate === null ? "—" : Math.round(c.rate * 1000) / 10 + "%"}（${c.reported}/${c.used} 道已出过卷的题）` + (c.enough ? "" : "，样本还少（至少 10 道才下结论）") : "Claude 出题被反馈有问题的比例：还没有 Claude 的题出过卷";
+      el("li", text, rateBox);
+      if (c.advise) el("li", "建议开启审核：反馈有问题的比例已超过 10%。在「模型与费用 → 出题执行方」把审核改成「Claude 定时任务」或「DeepSeek」。", rateBox, "notice");
+    }
+    rateBox.hidden = !rateBox.children.length;
+  }
   const supportBox = $("past-support");
   if (supportBox) {
     // the share of past-exam answer tasks the model could not answer from the paragraphs it was given, before and after the keyword search
