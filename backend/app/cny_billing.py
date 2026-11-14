@@ -52,7 +52,52 @@ def validate_price(price, model, now=None):
     return price
 
 
+def price_key(rules):
+    """What a price IS: the six rates (and the tool rates). The label of the model version the page printed and the page's own wording are
+    not part of it: two observations with the same rates are the same price."""
+    def norm(value):
+        try:
+            return str(Decimal(str(value)).normalize())
+        except (InvalidOperation, ValueError):
+            return str(value)
+
+    out = []
+    for period in ("off_peak", "peak"):
+        for field in ("cache_hit", "cache_miss", "output"):
+            out.append(norm((rules.get(period) or {}).get(field)))
+    out += [norm(rules.get(k)) for k in ("search_per_success", "fetch_per_success") if rules.get(k) is not None]
+    return tuple(out)
+
+
+def _refresh_succeeded_lately(conn, latest):
+    """Was the newest observation read from the official Chinese price page by the last refresh, and did that refresh pass the parser?"""
+    from app import legacy_reuse
+
+    state = legacy_reuse._state(conn, "price_refresh") or {}
+    if not state.get("ok") or not state.get("last_ok_at"):
+        return False
+    try:
+        ok_at = datetime.fromisoformat(state["last_ok_at"])
+    except (TypeError, ValueError):
+        return False
+    return latest["created_at"] >= ok_at - timedelta(minutes=30)
+
+
+def _as_price(row, model, now, check=True):
+    p = dict(row)
+    for k in ("valid_from", "valid_until", "verified_at", "official_effective_at", "created_at"):
+        if p.get(k) is not None:
+            p[k] = p[k].isoformat()
+    return validate_price(p, model, now) if check else p
+
+
 def current_price(conn, model, now=None):
+    """The price in force. Rules, in this order:
+    - observations with the same rates are one price (a changed model-version label is not a conflict): the newest is used;
+    - rates that really differ: the newest observation wins when the last refresh read the official Chinese page and it parsed; the older
+      ones are then retired (a resolution row records it);
+    - only when the official page could not be read and parsed does the conflict stop the calls, until the owner confirms one version
+      (confirm_price). A confirmation stands until a newer observation with other rates arrives."""
     now = now or utcnow()
     rows = conn.execute(
         "SELECT * FROM ai_cny_prices WHERE model_id=%s AND valid_from<=%s AND valid_until>%s ORDER BY id",
@@ -60,40 +105,90 @@ def current_price(conn, model, now=None):
     ).fetchall()
     if not rows:
         raise ValueError("verified_cny_price_required")
-    # Conflicts do not auto-resolve just because a newer observation expires.
-    # A cached old page may never silently replace a newer confirmed tariff.
     decision = conn.execute(
-        "SELECT p.rules,p.model_version,d.created_at AS resolved_at FROM ai_cny_price_resolutions d JOIN ai_cny_prices p ON p.id=d.price_id WHERE d.model_id=%s ORDER BY d.id DESC LIMIT 1",
-        (model,),
+        "SELECT p.id AS price_id,p.rules,d.created_at AS resolved_at FROM ai_cny_price_resolutions d JOIN ai_cny_prices p ON p.id=d.price_id "
+        "WHERE d.model_id=%s ORDER BY d.id DESC LIMIT 1", (model,)
     ).fetchone()
-    history = conn.execute(
-        "SELECT rules,model_version FROM ai_cny_prices WHERE model_id=%s", (model,)
-    ).fetchall()
-    identity = lambda r: (str(r["rules"]), r["model_version"])
-    identities = {identity(r) for r in history}
     if decision:
-        if any(
-            identity(r) != identity(decision)
-            and r["created_at"] > decision["resolved_at"]
-            for r in rows
-        ):
-            raise ValueError("conflicting_cny_price_versions")
-        rows = [r for r in rows if identity(r) == identity(decision)]
-        if not rows:
-            raise ValueError("verified_cny_price_required")
-    elif len(identities) != 1:
-        raise ValueError("conflicting_cny_price_versions")
-    p = dict(rows[-1])
-    for k in (
-        "valid_from",
-        "valid_until",
-        "verified_at",
-        "official_effective_at",
-        "created_at",
-    ):
-        if p.get(k) is not None:
-            p[k] = p[k].isoformat()
-    return validate_price(p, model, now)
+        newer = [r for r in rows if r["created_at"] > decision["resolved_at"]]
+        if not any(price_key(r["rules"]) != price_key(decision["rules"]) for r in newer):
+            chosen = [r for r in rows if price_key(r["rules"]) == price_key(decision["rules"])]
+            if not chosen:
+                raise ValueError("verified_cny_price_required")
+            return _as_price(chosen[-1], model, now)
+        rows = [r for r in rows if r["created_at"] > decision["resolved_at"] or r["id"] >= decision["price_id"]]
+    if len({price_key(r["rules"]) for r in rows}) == 1:
+        return _as_price(rows[-1], model, now)
+    latest = rows[-1]
+    if _refresh_succeeded_lately(conn, latest):
+        already = conn.execute("SELECT 1 FROM ai_cny_price_resolutions WHERE model_id=%s AND price_id=%s", (model, latest["id"])).fetchone()
+        if not already:
+            conn.execute(
+                "INSERT INTO ai_cny_price_resolutions(model_id,price_id,evidence_sha256,basis) VALUES(%s,%s,%s,%s)",
+                (model, latest["id"], latest["source_sha256"],
+                 f"自动：官方中文价格页刚抓取并解析通过（版本 {latest['version']}），价格与旧版本不同，旧版本失效，采用最新抓取的一版。"),
+            )
+        return _as_price(latest, model, now)
+    raise ValueError("conflicting_cny_price_versions")
+
+
+def last_verified_price(conn, model):
+    """The most recent price that was read from the official page and verified, even if its 24 hours have run out or two versions are
+    unresolved: used only to ESTIMATE what a grading call may cost, so that grading is never stopped by a price question."""
+    row = conn.execute("SELECT * FROM ai_cny_prices WHERE model_id=%s ORDER BY id DESC LIMIT 1", (model,)).fetchone()
+    if not row:
+        raise ValueError("verified_cny_price_required")
+    price = _as_price(row, model, utcnow(), check=False)
+    price["unconfirmed"] = True
+    return price
+
+
+def price_conflict(conn, model):
+    """What the owner needs to choose between: the observations in force whose rates differ (model-version label, rates, source, time).
+    None when there is no conflict."""
+    now = utcnow()
+    rows = conn.execute(
+        "SELECT id,model_id,model_version,version,rules,source_sha256,verified_at,valid_until,created_at FROM ai_cny_prices "
+        "WHERE model_id=%s AND valid_from<=%s AND valid_until>%s ORDER BY id", (model, now, now)).fetchall()
+    try:
+        current_price(conn, model)
+        return None
+    except ValueError as exc:
+        if str(exc) != "conflicting_cny_price_versions":
+            return None
+    return [dict(price_id=r["id"], model_id=r["model_id"], model_version=r["model_version"], version=r["version"],
+                 off_peak=r["rules"]["off_peak"], peak=r["rules"]["peak"], source_sha256=r["source_sha256"],
+                 verified_at=r["verified_at"].isoformat(), valid_until=r["valid_until"].isoformat(), created_at=r["created_at"].isoformat())
+            for r in rows]
+
+
+def price_state(conn, model):
+    """One line for the worker-run log: which price is in force (version label, off-peak output rate), or why none is — and, for a
+    conflict, the versions and rates that disagree. Codes, numbers and version labels only."""
+    try:
+        p = current_price(conn, model)
+        return f"ok:{p.get('model_version')}:out={p['rules']['off_peak']['output']}/{p['rules']['peak']['output']}"
+    except ValueError as exc:
+        code = str(exc)
+        versions = price_conflict(conn, model) if code == "conflicting_cny_price_versions" else None
+        if not versions:
+            return code
+        return code + ":" + "|".join(
+            f"#{v['price_id']}={v['model_version']}@{v['created_at'][:16]}out={v['off_peak']['output']}/{v['peak']['output']}" for v in versions[-4:])
+
+
+def confirm_price(conn, price_id):
+    """The owner picked one version on the 模型与费用 page (the fallback for when the official page cannot be read): it is the price from now on,
+    until a newer observation with other rates arrives."""
+    p = conn.execute("SELECT * FROM ai_cny_prices WHERE id=%s", (price_id,)).fetchone()
+    if not p:
+        raise ValueError("price_not_found")
+    conn.execute(
+        "INSERT INTO ai_cny_price_resolutions(model_id,price_id,evidence_sha256,basis) VALUES(%s,%s,%s,%s)",
+        (p["model_id"], price_id, p["source_sha256"],
+         f"本人在「模型与费用」页确认采用价格版本 {p['version']}（模型版本 {p['model_version']}），其余版本失效。"),
+    )
+    return dict(price_id=price_id, model_id=p["model_id"], version=p["version"])
 
 
 def install_price(conn, price):

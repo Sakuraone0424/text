@@ -8,7 +8,7 @@ import signal
 import threading
 import time
 from app.db import get_db
-from app import cost_control
+from app import cost_control, cny_billing
 from app import ai_jobs, auto_quality, model_router, model_compatibility, auto_grading, auto_execution
 from app import auto_knowledge, auto_generation, auto_exams, auto_insights, past_exam_import, legacy_reuse
 from app import cny_prices, cost_reconcile
@@ -529,6 +529,13 @@ def _plan_queue(conn, report, users, private, first):
                         text += ":" + json.dumps(detail, ensure_ascii=False, separators=(",", ":"))[:400]
                     report["plan_error"] = (report.get("plan_error", "") + " | " if report.get("plan_error") else "") + name + "=" + text
 
+            # grading housekeeping first and on its own: a failure further down the planning pass must not keep stuck gradings stuck
+            def grading_housekeeping():
+                from app import grading_recovery
+
+                grading_recovery.recover(conn, user["user_id"], report)
+
+            step("grading_recovery", grading_housekeeping)
             # queue enough work that every call this batch can make has a job to claim
             step("plan", lambda: plan(conn, user["user_id"], target=2 * calls_per_run(), report=report))
             t = _lap(report, "plan", t, "plan_detail")
@@ -676,6 +683,8 @@ def _locked_run(report, run_began):
             and model_router.catalog(conn)["stale"]
         ):
             model_router.refresh(conn)
+        if users:
+            report["price"] = cny_billing.price_state(conn, users[0]["model_id"])
         lap = _lap(report, "prices", lap)
         _plan_queue(conn, report, users, private, True)
         lap = _lap(report, "queue", lap)

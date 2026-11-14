@@ -35,8 +35,16 @@ def operation(name, fn):
 
 
 def status(c, uid):
+    settings = models.settings(c, uid)
+    from app import cny_billing
+
+    try:
+        conflict = cny_billing.price_conflict(c, settings["model_id"])
+    except (ValueError, KeyError):
+        conflict = None
     return dict(
-        settings=models.settings(c, uid),
+        price_conflict=conflict,       # two price versions in force whose rates differ, and the official page could not settle it: the owner picks one
+        settings=settings,
         catalog=models.catalog(c),
         label="AI自动核验",
         running_tasks_keep_original_settings=True,
@@ -503,6 +511,26 @@ async def progress_events_stream(request: Request, name=Depends(require_auth)):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
+
+
+class PriceConfirm(StrictModel):
+    price_id: StrictInt = Field(ge=1)
+
+
+@router.post("/price-confirm")
+def confirm_price_version(data: PriceConfirm, request: Request, name=Depends(require_auth)):
+    """The fallback when the official page could not settle two different prices: the owner picks the version to use."""
+    origin(request)
+    from app import cny_billing
+
+    def run(c, u):
+        model = models.settings(c, u)["model_id"]
+        shown = cny_billing.price_conflict(c, model)
+        if not shown or data.price_id not in {v["price_id"] for v in shown}:
+            raise ValueError("price_version_not_in_conflict")
+        return cny_billing.confirm_price(c, data.price_id)
+
+    return operation(name, run)
 
 
 @router.post("/prices/refresh")

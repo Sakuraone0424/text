@@ -144,7 +144,7 @@ def enqueue(conn, user_id, key, kind, payload):
         ):
             raise IdempotencyConflict(conflict_detail(key, kind, old, payload, user_id))
         return old
-    s = model_router.snapshot(conn, user_id)
+    s = model_router.snapshot(conn, user_id, price_fallback=(kind == "grading"))
     from app import cost_control
 
     level = cost_control.effort_for(kind, payload)
@@ -341,11 +341,22 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         # Ordinary jobs reserve at the price of the current period; the frozen owner scopes (trial, campaign, QA)
         # were approved at the higher ceiling and keep it.
         amount = model_router.cost_bound({**s, "price_snapshot": price}, at=None if any(k in s for k in SCOPED) else cny_billing.utcnow())
-    except ValueError:
-        # No verified price in force (expired, never fetched, or being confirmed): the job WAITS in the queue. It is not
-        # blocked, so nothing needs putting back by hand once a price is verified again.
-        _note("waiting_for_verified_price", job_id=job["id"], kind=job["kind"])
-        return None
+    except ValueError as price_error:
+        price = None
+        if job["kind"] == "grading":
+            # A price question never stops grading: the call is estimated at the last price that was verified (it is only a ceiling for the
+            # reserve; the real cost is settled afterwards), and the job goes ahead.
+            try:
+                price = cny_billing.last_verified_price(conn, s["model_id"])
+                amount = cny_billing.reserve_bound(price, s["token_limit"], cny_billing.utcnow())
+                _note("grading_priced_at_last_verified", job_id=job["id"], reason=str(price_error)[:60])
+            except ValueError:
+                price = None
+        if price is None:
+            # No verified price in force (expired, never fetched, or being confirmed): the job WAITS in the queue. It is not
+            # blocked, so nothing needs putting back by hand once a price is verified again.
+            _note("waiting_for_verified_price", job_id=job["id"], kind=job["kind"], reason=str(price_error)[:60])
+            return None
     totals = cny_billing.totals(conn, uid)
     budget_scope = None  # which limit stopped it: daily | monthly | trial | task | cap
     if job["kind"] == "grading":

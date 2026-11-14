@@ -94,7 +94,39 @@ function drawModel() {
     ? `上下文 ${row.context_window ?? "未知"} · 输出上限 ${row.max_output_tokens ?? "未知"} · 工具 ${row.tools ?? "未知"} · 图片 ${row.vision ?? "未知"} · 最近兼容性实测 ${row.compatibility_checked_at ?? "未执行"} · ${row.available ? "官方目录在列" : "已下线"} · ${row.compatible ? "兼容性已实测" : "尚未通过真实兼容性检查"}`
     : "尚无真实模型目录，请先配置服务端凭据并刷新。";
   drawPrice(row);
+  drawConflict();
   drawProbes(row);
+}
+/* Two price versions in force with different rates and the official page unreadable: say which, and let the owner pick one. */
+function drawConflict() {
+  const card = $("price-confirm-card"), list = $("price-confirm-list");
+  list.replaceChildren();
+  const versions = data?.price_conflict;
+  card.hidden = !versions || !versions.length;
+  if (card.hidden) return;
+  for (const v of versions) {
+    const row = document.createElement("div");
+    row.className = "price-version";
+    const text = document.createElement("p");
+    const o = v.off_peak, p = v.peak;
+    text.textContent = `${v.model_id} · 模型版本 ${v.model_version ?? "未知"} · 抓取 ${when(v.created_at)} · 核实 ${when(v.verified_at)}` +
+      ` · 低峰 ${o.cache_hit}/${o.cache_miss}/${o.output} · 高峰 ${p.cache_hit}/${p.cache_miss}/${p.output}（元/百万 Token：缓存命中/未命中/输出）`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "small-button";
+    button.textContent = "采用这一版";
+    button.onclick = async () => {
+      try {
+        await api("/v2/model/price-confirm", { price_id: v.price_id });
+        $("price-confirm-note").textContent = "已确认，其余版本失效。";
+        await load(true);
+      } catch (e) {
+        $("price-confirm-note").textContent = "确认失败：" + (e.message || e);
+      }
+    };
+    row.append(text, button);
+    list.append(row);
+  }
 }
 function drawPrice(row) {
   const root = $("price");

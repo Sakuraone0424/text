@@ -200,7 +200,7 @@ def recover(conn, user_id, report_to=None):
         legacy_reuse._set_state(conn, STATE_KEY, once)
         counts["recovery"] = once
     if report_to is not None and counts:
-        report_to["grading_requeue"] = counts
+        report_to["grading_requeue"] = {**report_to.get("grading_requeue", {}), **counts}      # (recover runs twice a pass: keep what the first run did)
     return counts
 
 

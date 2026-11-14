@@ -77,7 +77,7 @@ def _refuse(conn, uid, key, payload, code):
     conn.execute(
         "INSERT INTO ai_jobs(job_key,user_id,kind,settings_snapshot,payload,state,error_code) "
         "VALUES (%s,%s,'grading',%s,%s,'blocked',%s) ON CONFLICT(job_key) DO NOTHING",
-        (key, uid, Jsonb(model_router.snapshot(conn, uid)), Jsonb(payload), code),
+        (key, uid, Jsonb(model_router.snapshot(conn, uid, price_fallback=True)), Jsonb(payload), code),
     )
 
 
