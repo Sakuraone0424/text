@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from app import ai_jobs, cny_billing, cny_prices, cost_control, cost_reconcile
-from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count
+from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count, satisfied_keys
 from app.training_spec_v5 import COUNTS, SUBJECTS
 
 STALE_AFTER_MINUTES = 15  # the worker is a cron job every 5 minutes
@@ -142,6 +142,7 @@ def buckets(conn, uid):
         reasons[(r["s"], r["t"])][r["code"]] += r["n"]
     today = admitted_today(conn)
     first_batch = cost_control.bank_target() is not None
+    stocked_above_reserve = set(satisfied_keys(conn, uid))
     result = []
     for subject in SUBJECTS:
         for kind, required in COUNTS.items():
@@ -151,7 +152,10 @@ def buckets(conn, uid):
                 target=cost_control.reserve_target(required, STARTUP_RESERVE_DAYS),
                 target_kind="first_batch" if first_batch else "two_day_reserve",
                 stocked=eligible_reserve_count(conn, uid, subject, kind, cached=True), admitted_today=today.get((subject, kind), 0),
-                queued=c["queued"], generating=c["generating"], reviewing=c["reviewing"], blocked=c["blocked"],
+                # a bucket stocked above its reserve is not written to: its waiting tasks are shown apart ("已超额、暂缓"), not as work queued
+                queued=0 if f"{subject}|{kind}" in stocked_above_reserve else c["queued"],
+                deferred=c["queued"] if f"{subject}|{kind}" in stocked_above_reserve else 0,
+                generating=c["generating"], reviewing=c["reviewing"], blocked=c["blocked"],
                 blocked_reasons=dict(sorted(reasons[(subject, kind)].items(), key=lambda kv: -kv[1])),
             ))
     return result

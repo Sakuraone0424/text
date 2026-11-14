@@ -1034,7 +1034,7 @@ function startGradingActivity(paperId) {
     ai_grading_in_progress: "AI判分中",
     ai_result_being_applied: "判分结果写入中",
     reassessing: "结果不确定，正在自动复判一次",
-    uncertain_after_second_assessment: "复判后仍无法确定，暂不计分（不会记0分）",
+    uncertain_after_second_assessment: "复判后仍无法确定，暂不计分（不会记0分），可手动判分",
     ai_budget_exhausted: "本月 AI 总上限已用完，下月恢复后继续判分",
     ai_grading_stopped: "AI判分已暂停",
     answer_too_long_for_automatic_grading: "作答过长，无法自动判分",
