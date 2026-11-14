@@ -103,7 +103,7 @@ const REASON = {
   evidence_payload_too_large: "请求内容太大，装不下教材段落",
   bounded_input_exceeded: "请求内容超过大小上限",
   payload_exceeds_hard_cap: "请求内容超过 24000 字节上限",
-  no_textbook_evidence: "教材中找不到相关段落",
+  no_textbook_evidence: "教材中未找到相关段落",
   textbook_or_exam_source_unavailable: "教材或真题来源文件暂不可用",
   model_call_failed: "模型调用失败，没有拿到结果",
   invalid_repair_result: "修复的结果无效",
@@ -454,6 +454,26 @@ function executors(report) {
   const root = $("executors");
   root.replaceChildren();
   const route = data.routing || {};
+  const supportBox = $("past-support");
+  if (supportBox) {
+    // the share of past-exam answer tasks the model could not answer from the paragraphs it was given, before and after the keyword search
+    supportBox.replaceChildren();
+    const support = data.past_exam_support || {};
+    for (const [kind, ways] of Object.entries(support)) {
+      const old = ways.old, now = ways["keywords/1"];
+      if (!old && !now) continue;
+      const rate = (w) => (w && w.rate !== null ? `${Math.round(w.rate * 100)}%（${w.unsupported}/${w.answered}）` : "—");
+      el("li", `真题${TYPE[kind] || kind}答案任务「教材不支持」比例：改进前 ${rate(old)} → 改进后 ${rate(now)}`, supportBox);
+    }
+    supportBox.hidden = !supportBox.children.length;
+  }
+  const releasedBox = $("released-reasons");
+  if (releasedBox) {
+    // why the Routine put tasks back (the reason it wrote), most frequent first
+    releasedBox.replaceChildren();
+    for (const r of data.released || []) el("li", `放回 ×${r.count}：${r.reason}`, releasedBox);
+    releasedBox.hidden = !(data.released || []).length;
+  }
   const rebuild = data.rebuild, rebuildNote = $("rebuild-note");
   if (rebuildNote) {
     // the bank is rebuilt by the Claude Routine only: said at the top, with what it really delivers per night

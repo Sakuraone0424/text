@@ -8,6 +8,7 @@ events and CNY ledger are never touched), the executor is recorded as claude-sub
 reviews a question that the same session wrote.
 """
 
+import json
 import os
 import threading
 import time
@@ -224,7 +225,7 @@ def _claimable_where(conn, task, session):
     return sql, params
 
 
-def lease(conn, task, max_n, session):
+def lease(conn, task, max_n, session, full=False):
     """Hand out up to max_n tasks of one kind to a session. The task content is the job's payload, untouched."""
     if task not in TASKS:
         raise ExternalError(422, "unknown_task_kind")
@@ -249,20 +250,79 @@ def lease(conn, task, max_n, session):
             "INSERT INTO external_leases(lease_id,job_id,kind,session,expires_at) VALUES (%s,%s,%s,%s,clock_timestamp()+make_interval(mins => %s)) "
             "RETURNING expires_at", (lease_id, job["id"], task, session, LEASE_MINUTES)).fetchone()
         p = job["payload"]
-        out.append(dict(
+        rules_id = store_rules(conn, p)
+        slim = slim_task(p)
+        text = json.dumps(slim, ensure_ascii=False, separators=(",", ":"))
+        item = dict(
             lease_id=lease_id, expires_at=row["expires_at"], kind=task,
             subject=p.get("subject") or (p.get("question") or {}).get("subject"),
             question_type=p.get("question_type") or (p.get("question") or {}).get("question_type"),
             max_points=p.get("max_points") or (p.get("question") or {}).get("max_points"),
-            payload=p,        # byte for byte what DeepSeek is sent: rules, textbook paragraphs, style examples, schema
-            prompt=build_prompt(p),       # ... and the very message built from it (the same function the DeepSeek call uses)
-        ))
+            rules_id=rules_id,            # the rules (instructions + output schema) of this kind of task: GET /v2/external/rules/{rules_id}, once per id
+            task=slim,                    # everything that is particular to THIS task: textbook paragraphs, style examples, the question (no rules text)
+            chars=len(text), bytes=len(text.encode()),
+        )
+        if full:
+            item["payload"] = p           # byte for byte what DeepSeek is sent
+            item["prompt"] = build_prompt(p)
+        out.append(item)
     return out
 
 
-def release(conn, lease_id):
-    row = conn.execute("UPDATE external_leases SET state='released',finished_at=clock_timestamp() WHERE lease_id=%s AND state='active' RETURNING lease_id",
-                       (lease_id,)).fetchone()
+# What a Routine does not need to be sent with every task: the rules text and the output schema are the same for every task of a kind, so a task
+# carries only the id of them (fetched once); the style examples and the bibliography are shortened to fit; the paragraphs to quote from never are.
+TASK_CHAR_TARGET = 8000
+RULE_FIELDS = ("instructions", "schema")
+
+
+def store_rules(conn, payload):
+    """Keep the rules of this kind of task under their fingerprint; return the id."""
+    import hashlib
+    import json
+
+    from app.harness_runner import PROMPT_PREFIX
+
+    body = json.dumps({"i": payload.get("instructions"), "s": payload.get("schema"), "p": PROMPT_PREFIX}, ensure_ascii=False, sort_keys=True)
+    rules_id = hashlib.sha256(body.encode()).hexdigest()[:16]
+    conn.execute("INSERT INTO external_rules(rules_id,prefix,instructions,schema) VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                 (rules_id, PROMPT_PREFIX, payload.get("instructions") or "", Jsonb(payload.get("schema") or {})))
+    return rules_id
+
+
+def get_rules(conn, rules_id):
+    row = conn.execute("SELECT rules_id,prefix,instructions,schema FROM external_rules WHERE rules_id=%s", (rules_id,)).fetchone()
+    if not row:
+        raise ExternalError(404, "rules_not_found")
+    return dict(row)
+
+
+def slim_task(payload, limit=TASK_CHAR_TARGET):
+    """The task without its rules text. If it is still longer than `limit` characters, the style examples (then the bibliographies) are
+    shortened; the textbook paragraphs and the question are never touched (a quote must be word for word)."""
+    import json
+
+    task = {k: v for k, v in payload.items() if k not in RULE_FIELDS}
+
+    def size():
+        return len(json.dumps(task, ensure_ascii=False, separators=(",", ":")))
+
+    for cap in (600, 300, 150):
+        if size() <= limit:
+            break
+        if isinstance(task.get("style"), list):
+            task["style"] = [{**s, "text": str(s.get("text", ""))[:cap]} if isinstance(s, dict) else s for s in task["style"]]
+    if size() > limit and isinstance(task.get("bibliographies"), dict):
+        task["bibliographies"] = {k: {kk: vv for kk, vv in (v.items() if isinstance(v, dict) else []) if kk in ("textbook", "authors", "edition", "isbn")}
+                                  for k, v in task["bibliographies"].items()}
+    return task
+
+
+def release(conn, lease_id, reason=None):
+    """Put a task back. The Routine may say why (up to 200 characters): it is kept with the lease and shown on the progress page."""
+    if reason is not None and (not isinstance(reason, str) or len(reason) > 200):
+        raise ExternalError(422, "release_reason_invalid")
+    row = conn.execute("UPDATE external_leases SET state='released',finished_at=clock_timestamp(),release_reason=%s WHERE lease_id=%s AND state='active' RETURNING lease_id",
+                       ((reason or "").strip() or None, lease_id)).fetchone()
     if not row:
         exists = conn.execute("SELECT state FROM external_leases WHERE lease_id=%s", (lease_id,)).fetchone()
         if not exists:
@@ -344,6 +404,13 @@ def submit(conn, lease_id, session, model_label, result):
 
 
 # ---- status and per-executor figures ----------------------------------------------------------------------------------------
+
+def release_reasons(conn, hours=24):
+    """Why tasks were put back in the last day: [{reason, count, last_at}], most frequent first (a lease released with no reason is 'no reason given')."""
+    return [dict(reason=r["reason"], count=r["n"], last_at=r["last_at"].isoformat()) for r in conn.execute(
+        "SELECT COALESCE(release_reason,'未写原因') AS reason,count(*) AS n,max(finished_at) AS last_at FROM external_leases "
+        "WHERE state='released' AND finished_at>clock_timestamp()-make_interval(hours => %s) GROUP BY 1 ORDER BY n DESC,last_at DESC LIMIT 8", (hours,)).fetchall()]
+
 
 def executor_stats(conn):
     """Today's (Beijing day) writing tasks per executor: done, program-check pass rate, average seconds."""

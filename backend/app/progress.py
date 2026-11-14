@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app import ai_jobs, cny_billing, cny_prices, cost_control, cost_reconcile
+from app import ai_jobs, cny_billing, cny_prices, cost_control, cost_reconcile, past_exam_import
 from app.auto_generation import STARTUP_RESERVE_DAYS, eligible_reserve_count, satisfied_keys
 from app.training_spec_v5 import COUNTS, SUBJECTS
 
@@ -455,7 +455,8 @@ def _executor_report(conn):
     from app import external_executor
 
     return dict(today=external_executor.executor_stats(conn), routing=external_executor.policy(conn),
-                waiting=external_executor.waiting_for_claude(conn), rebuild=external_executor.rebuild_state(conn))
+                waiting=external_executor.waiting_for_claude(conn), rebuild=external_executor.rebuild_state(conn),
+                released=external_executor.release_reasons(conn), past_exam_support=past_exam_import.support_stats(conn))
 
 
 def _rescale_report(conn):

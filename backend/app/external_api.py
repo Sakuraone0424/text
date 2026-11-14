@@ -1,6 +1,6 @@
 """The interface a Claude Code scheduled task (Routine) uses: lease tasks, submit results, release, status. Secret: EXTERNAL_EXECUTOR_TOKEN in
 X-External-Token (separate from the login). Plus the owner's executor settings."""
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response
 from pydantic import Field, StrictInt
 
 from app import external_executor as ext
@@ -32,8 +32,10 @@ def _run(fn):
 
 @router.get("/v2/external/lease", dependencies=[Depends(external_auth)])
 def lease(kind: str = Query(pattern="^(generation|review|grading)$"), max: int = Query(default=1, ge=1, le=ext.MAX_PER_LEASE),
-          session: str = Query(min_length=6, max_length=80)):
-    return {"leases": _run(lambda c: ext.lease(c, kind, max, session)), "lease_minutes": ext.LEASE_MINUTES}
+          session: str = Query(min_length=6, max_length=80), full: bool = Query(default=False)):
+    """Tasks for a Routine: each is `task` (what is particular to it) plus `rules_id` (the rules, fetched once from /v2/external/rules/{id});
+    `chars` and `bytes` are its size. `full=true` also returns the whole payload and the complete message (large; for debugging)."""
+    return {"leases": _run(lambda c: ext.lease(c, kind, max, session, full)), "lease_minutes": ext.LEASE_MINUTES}
 
 
 class Submission(StrictModel):
@@ -50,11 +52,18 @@ def submit(data: Submission):
 
 class Release(StrictModel):
     lease_id: str = Field(min_length=8, max_length=64)
+    reason: str | None = Field(default=None, max_length=200)      # why the task is put back (shown on the progress page)
 
 
 @router.post("/v2/external/release", dependencies=[Depends(external_auth)])
 def release(data: Release):
-    return _run(lambda c: ext.release(c, data.lease_id))
+    return _run(lambda c: ext.release(c, data.lease_id, data.reason))
+
+
+@router.get("/v2/external/rules/{rules_id}", dependencies=[Depends(external_auth)])
+def rules(rules_id: str = Path(pattern="^[0-9a-f]{16}$")):
+    """The rules text and the output schema a lease's `rules_id` stands for: the same for every task of a kind, so fetched once, not sent with each."""
+    return _run(lambda c: ext.get_rules(c, rules_id))
 
 
 @router.get("/v2/external/status", dependencies=[Depends(external_auth)])
