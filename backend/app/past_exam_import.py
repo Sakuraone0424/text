@@ -755,11 +755,98 @@ def retrieve_term_evidence(conn, subject, term):
     return chosen
 
 
-def retrieve_evidence(conn, subject, text, page_hints=None, term=False):
+# Fill-in route: the question's own keywords (the nouns and terms left when the blank marker and the connecting words are taken away) are
+# searched in every textbook paragraph; a paragraph that holds several of them, and the paragraphs just before and after it, are the evidence.
+RETRIEVAL_VERSION = "keywords/1"
+_SPLIT_WORDS = re.compile(r"包含|含有|具有|存在|称为|叫做|一种|通过|以及|或者|因此|所以|可以|能够|属于|表示|用于|进行|其中|之间|仅|并|或|其|被|将|把|对|由|以|也|都|可|能|会|的|是|和|与|及|在|中|为|于|有|等|之|个|该|此|这|那|所|而|但|如|若")
+_BLANK_MARK = re.compile(r"[_＿]{2,}|[（(][\s\u3000]*[)）]")
+
+
+def stem_keywords(stem, limit=40):
+    """The searchable terms of a stem: Latin words, and the pieces between connecting words (with their 4-grams when long), longest first."""
+    value = unicodedata.normalize("NFKC", _BLANK_MARK.sub(" ", stem or ""))
+    terms = {w.lower() for w in re.findall(r"[A-Za-z][A-Za-z0-9\-']{2,}", value)}
+    for run in re.findall(r"[一-鿿]+", value):
+        for piece in _SPLIT_WORDS.split(run):
+            if len(piece) < 2:
+                continue
+            terms.add(piece)
+            if len(piece) > 4:
+                terms.update(piece[i : i + 4] for i in range(len(piece) - 3))
+            if len(piece) > 6:
+                terms.update(piece[i : i + 3] for i in range(len(piece) - 2))
+    return sorted(terms, key=lambda t: (-len(t), t))[:limit]
+
+
+def retrieve_keyword_evidence(conn, subject, stem):
+    """Evidence for a fill-in question from its keywords. A paragraph qualifies when it holds at least two different keywords (not parts of
+    one another) of 6 characters or more together, or one keyword of 5 characters or more that few paragraphs hold (4 characters if only one to three paragraphs hold it). Rare keywords weigh more.
+    Nothing qualifying -> [] (the item is not sent to a model: nothing to quote)."""
+    import math
+
+    terms = stem_keywords(stem)
+    if not terms:
+        return []
+    rows = conn.execute(
+        "SELECT u.id,u.text,u.printed_page,u.ocr_global_page,d.file_id,d.sha256 FROM source_units u JOIN source_documents d ON d.id=u.document_id WHERE "
+        + current_source_sql("d", kind="textbook")
+        + " AND d.subject=%s AND " + evidence_filter.SEVERE_SQL + " AND u.chapter NOT IN ('','unclassified','contents') "
+        "AND length(u.text) BETWEEN %s AND %s AND lower(u.text) LIKE ANY(%s) ORDER BY u.id LIMIT 3000",
+        (subject, MIN_UNIT_CHARS, MAX_UNIT_CHARS, ["%" + t + "%" for t in terms]),
+    ).fetchall()
+    bodies = {r["id"]: r["text"].lower() for r in rows}
+    df = {t: sum(1 for b in bodies.values() if t in b) for t in terms}
+    scored, seen = [], set()
+    for r in rows:
+        body = bodies[r["id"]]
+        if body in seen:
+            continue
+        seen.add(body)
+        kept = []
+        for t in sorted((t for t in terms if t in body), key=lambda t: (-len(t), t)):
+            if not any(t in k for k in kept):           # a keyword that is only a part of one already counted is not a second keyword
+                kept.append(t)
+        total = sum(len(t) for t in kept)
+        strong_single = len(kept) == 1 and ((len(kept[0]) >= 5 and df[kept[0]] <= 5) or (len(kept[0]) >= 4 and df[kept[0]] <= 3))
+        if not ((len(kept) >= 2 and total >= 6) or strong_single):
+            continue
+        if not pinned_source_bytes(r["file_id"], r["sha256"]):
+            continue
+        weight = sum(len(t) * math.log(1 + len(rows) / df[t]) for t in kept)
+        scored.append((-(weight - 0.0005 * len(r["text"])), r["id"], r["printed_page"]))
+    scored.sort()
+    chosen, taken, chars = [], set(), 0
+
+    def take(uid, printed):
+        nonlocal chars
+        if uid in taken or len(chosen) >= MAX_EVIDENCE_UNITS:
+            return
+        try:
+            unit = snapshot_unit(conn, uid)
+        except ValueError:
+            return
+        if chars + len(unit["text"]) > MAX_EVIDENCE_CHARS or evidence_filter.severe(unit["quality_flags"]):
+            return
+        chosen.append({**unit, "printed_page": printed})
+        taken.add(uid)
+        chars += len(unit["text"])
+
+    for _, uid, printed in scored[:2]:
+        take(uid, printed)
+        for n in _neighbours(conn, uid):                   # the paragraph before and the one after, in reading order
+            take(n["id"], None)
+    chosen.sort(key=lambda u: u["unit_id"])
+    return chosen
+
+
+def retrieve_evidence(conn, subject, text, page_hints=None, term=False, blank=False):
     """The few paragraphs most relevant to ONE question, within the hard caps. For a 名词解释 (`term=True`, `text` is its
-    stem) the paragraphs that contain the term come first (see retrieve_term_evidence)."""
+    stem) the paragraphs that contain the term come first (see retrieve_term_evidence); for a fill-in (`blank=True`) the paragraphs that
+    hold several of the question's keywords (see retrieve_keyword_evidence)."""
     if term:
         return retrieve_term_evidence(conn, subject, term_of_stem(text))
+    if blank:
+        return retrieve_keyword_evidence(conn, subject, text)
     chosen, chars = [], 0
     for _, uid, printed, _, _ in ranked_paragraphs(conn, subject, text, page_hints):
         try:
@@ -924,6 +1011,8 @@ def _payload(conn, item, units, draft=None):
     if blanks > 1:
         payload["blank_count"] = blanks
         payload["instructions"] = INSTRUCTIONS + MULTI_BLANK_NOTICE.format(n=blanks)
+    if kind == "fill_blank":
+        payload["retrieval"] = RETRIEVAL_VERSION        # which way the paragraphs were found (the share of "not supported" answers is counted per way)
     if draft:
         payload["unreviewed_reference_draft"] = draft
         payload["instructions"] = payload["instructions"] + DRAFT_NOTICE
@@ -935,7 +1024,8 @@ def _enqueue_item(conn, uid, item):
 
     text = item["stem"] + " " + " ".join(item["options"].values())
     is_term = item["question_type"] == "term"
-    units = retrieve_evidence(conn, item["subject"], text, legacy_reuse.page_hints(conn, item["id"]), term=is_term)
+    is_blank = item["question_type"] == "fill_blank"
+    units = retrieve_evidence(conn, item["subject"], text, legacy_reuse.page_hints(conn, item["id"]), term=is_term, blank=is_blank)
     if not units:
         _block(conn, item["id"], "term_not_in_textbook" if is_term else "no_textbook_evidence")
         return "blocked"
@@ -1041,6 +1131,20 @@ def plan(conn, uid, batch=MAX_CONCURRENT_JOBS):
             PLAN_DETAIL["not_queued"] += 1                  # blocked on the way (no textbook evidence, ...)
     PLAN_DETAIL["queued"] = queued
     return queued
+
+
+def support_stats(conn):
+    """How often a model said "the textbook does not support an answer" (supported=false) for the past-exam answer tasks, per question type and
+    per way the paragraphs were found (`old` = before the keyword route). {type: {way: {answered, unsupported, rate}}}."""
+    out = {}
+    for r in conn.execute(
+        "SELECT payload->>'question_type' AS kind,COALESCE(payload->>'retrieval','old') AS way,count(*) AS answered,"
+        "count(*) FILTER (WHERE result->'response'->>'supported'='false') AS unsupported FROM ai_jobs "
+        "WHERE kind='generation' AND payload->>'origin'='past_exam' AND state IN ('succeeded','blocked') "
+        "AND result->'response' ? 'supported' GROUP BY 1,2").fetchall():
+        out.setdefault(r["kind"], {})[r["way"]] = dict(answered=r["answered"], unsupported=r["unsupported"],
+                                                       rate=round(r["unsupported"] / r["answered"], 3) if r["answered"] else None)
+    return out
 
 
 PLAN_DETAIL = {}   # what the last plan() wanted, did and was stopped by (read by the worker's log)

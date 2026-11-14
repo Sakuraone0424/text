@@ -20,9 +20,10 @@
 
 | 接口 | 作用 |
 |---|---|
-| `GET /v2/external/lease?kind=generation&max=N&session=<会话ID>` | 领 N 个任务（最多 10），每个有 `lease_id`、`expires_at`、`payload`、`prompt` |
+| `GET /v2/external/lease?kind=generation&max=N&session=<会话ID>` | 领 N 个任务（最多 10），每个有 `lease_id`、`expires_at`、`task`（这一条任务特有的内容：教材段落、真题风格样例、题目）、`rules_id`、`chars`、`bytes`（目标每个任务不超过 8000 字）。加 `&full=true` 才返回完整 `payload` 和 `prompt`（很大，只用于排查） |
+| `GET /v2/external/rules/{rules_id}` | 这类任务的规则（`prefix`、`instructions`、`schema`），同一种任务都一样，一个运行取一次 |
 | `POST /v2/external/submit` `{lease_id, session, model_label, result}` | 交结果，返回 `passed` / `outcome` / `reasons` |
-| `POST /v2/external/release` `{lease_id}` | 放回任务 |
+| `POST /v2/external/release` `{lease_id, reason?}` | 放回任务；`reason`（可选，最长 200 字）会保存，并显示在进度页 |
 | `GET /v2/external/status` | 各类可领任务数、今日各执行方完成数和通过率 |
 
 `outcome` 有三种：`passed`（通过程序检查，已入库等审核）、`repair_requested`（有可修复的毛病，网站已排了一次修复任务，用同样方式再领一次 `kind=generation` 就能领到）、`blocked`（被挡，`reasons` 是原因代码）。
@@ -64,13 +65,16 @@
 2. 领任务：curl -sS -H "X-External-Token: $EXTERNAL_EXECUTOR_TOKEN" "https://training-api-qa-qa.up.railway.app/v2/external/lease?kind=generation&max=3&session=$SESSION"
    - 返回的 leases 为空，或返回 401/429/503 等错误：重试一次；仍然不行就直接结束，输出“领取 0、提交 0、通过 0”。
    - 每次运行最多处理 3 个任务（按单次运行时长估算，不要多领）。
-3. 对每个任务：
-   - 严格按任务里的 prompt（等同 payload.instructions 加上 payload.schema）完成，只输出 payload.schema 要求的严格 JSON 对象，不要任何解释、不要 Markdown。
-   - 只能使用任务里给的教材段落（payload.evidence）。不能编造教材内容；evidence 里的 excerpt 必须逐字来自给你的段落，一个字也不能改；source_unit_id、file_id、source_sha256、ocr_page、paragraph_id、locator 必须原样抄给定的值。
-   - 满分用 payload.max_points（填空题 2.5 分，名词解释 5、简答 15、问答 25），评分要点的分值之和必须正好等于满分，评分要点数量和格式按 instructions 里的要求。分值是 JSON 数字，不是字符串。
-   - 只出四种题：填空、名词解释、简答、问答，不出单选题。填空题看 payload.blank_count：1 个空时题干里恰有一个 ____，answer 是标准答案，accepted_answers 列出所有等价写法，评分要点只有一条（2.5 分）；2 或 3 个空时题干里恰有这么多个 ____，blanks 里按顺序给每个空各自的 accepted_answers（每个空的分值 = 2.5 ÷ 空数），评分要点正好一空一条、分值与该空相同，accepted_answers 留空，answer 写各空标准答案用“；”连接。
+3. 对每个任务（领到的每个任务有 task、rules_id、chars、bytes；整次返回已经按大小控制，不会被截断）：
+   - 先取这个任务的规则：curl -sS -H "X-External-Token: $EXTERNAL_EXECUTOR_TOKEN" "https://training-api-qa-qa.up.railway.app/v2/external/rules/<rules_id>"。同一个 rules_id 整个运行只取一次，之后复用。返回里的 prefix 是总原则，instructions 是出题规则，schema 是输出格式。
+   - 严格按规则（instructions）和任务（task）完成，只输出 schema 要求的严格 JSON 对象，不要任何解释、不要 Markdown。
+   - 只能使用任务里给的教材段落（task.evidence）。不能编造教材内容；evidence 里的 excerpt 必须逐字来自给你的段落，一个字也不能改；source_unit_id、file_id、source_sha256、ocr_page、paragraph_id、locator 必须原样抄给定的值。
+   - 满分用 task.max_points（填空题 2.5 分，名词解释 5、简答 15、问答 25），评分要点的分值之和必须正好等于满分，评分要点数量和格式按 instructions 里的要求。分值是 JSON 数字，不是字符串。
+   - 只出四种题：填空、名词解释、简答、问答，不出单选题。填空题看 task.blank_count：1 个空时题干里恰有一个 ____，answer 是标准答案，accepted_answers 列出所有等价写法，评分要点只有一条（2.5 分）；2 或 3 个空时题干里恰有这么多个 ____，blanks 里按顺序给每个空各自的 accepted_answers（每个空的分值 = 2.5 ÷ 空数），评分要点正好一空一条、分值与该空相同，accepted_answers 留空，answer 写各空标准答案用“；”连接。
    - 不能在题干里写出答案，不能写“根据教材/本章/文献”“如图”这类措辞，题目要像真题。
-   - 做不了（教材段落不够支撑一道题）就不要硬写：用 release 放回这个任务，继续下一个。
+   - 做不了：
+     · 真题答案任务（task.origin 为 past_exam）里教材段落不足以回答：提交 {"supported": false, "unsupported_reason": "<一句话说明段落缺什么>"}，系统会按「教材不支持」处理，这一条真题不再派发；
+     · 其他任务做不了：用 release 放回，并写上原因：curl -sS -X POST ... /v2/external/release -d '{"lease_id":"<lease_id>","reason":"<最多 200 字的原因>"}'，继续下一个。原因会显示在进度页。
 4. 提交：curl -sS -X POST -H "X-External-Token: $EXTERNAL_EXECUTOR_TOKEN" -H "Content-Type: application/json" https://training-api-qa-qa.up.railway.app/v2/external/submit -d '{"lease_id":"<lease_id>","session":"<SESSION>","model_label":"<你的模型名称，如实填写>","result":<你的 JSON>}'
    - 返回 outcome=repair_requested：再领一次 kind=generation（max=1），领到 repair_of_job 的修复任务，按 errors 里列出的毛病只改这些地方，其余一字不动，再提交一次。
    - 返回 blocked：记录 reasons，不要重试同一份。

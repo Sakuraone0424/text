@@ -42,8 +42,9 @@ def one_job(db, uid):
     return job
 
 
-def lease_one(api, session="session-aaaaaa", kind="generation"):
-    r = api.get(f"/v2/external/lease?kind={kind}&max=1&session={session}", headers=HEADERS)
+def lease_one(api, session="session-aaaaaa", kind="generation", full=True):
+    """(full=True keeps the whole payload and message in the answer, as the tests read them; the slim shape has its own tests)"""
+    r = api.get(f"/v2/external/lease?kind={kind}&max=1&session={session}" + ("&full=true" if full else ""), headers=HEADERS)
     assert r.status_code == 200, r.text
     return r.json()["leases"]
 
