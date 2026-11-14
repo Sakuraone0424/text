@@ -95,6 +95,7 @@ function drawModel() {
     : "尚无真实模型目录，请先配置服务端凭据并刷新。";
   drawPrice(row);
   drawConflict();
+  drawRetired();
   drawProbes(row);
 }
 /* Two price versions in force with different rates and the official page unreadable: say which, and let the owner pick one. */
@@ -325,6 +326,49 @@ document.querySelectorAll("#controls input, #controls select").forEach((node) =>
   node.addEventListener("change", refreshDirty);
 });
 $("effort").addEventListener("change", refreshDirty);
+/* The withdrawn questions, per subject and type, with a button to put each group back. */
+const SUBJECT_NAME = { biochemistry: "生物化学", cell_biology: "细胞生物学" };
+const KIND_NAME = { single_choice: "单选", fill_blank: "填空", term: "名词解释", short_answer: "简答", essay: "问答" };
+async function drawRetired() {
+  const list = $("retired-list");
+  if (!list) return;
+  let info;
+  try {
+    info = await Data.fetchJSON("/v2/model/retired");
+  } catch (e) {
+    return;
+  }
+  $("retired-card").hidden = !info.total && !info.done;
+  list.replaceChildren();
+  const rows = info.retired || [];
+  if (!rows.length) {
+    const p = document.createElement("p");
+    p.textContent = "目前没有撤下的题。";
+    list.append(p);
+  }
+  for (const r of rows) {
+    const row = document.createElement("div");
+    row.className = "retired-row";
+    const text = document.createElement("span");
+    text.textContent = `${SUBJECT_NAME[r.subject] || r.subject} · ${KIND_NAME[r.question_type] || r.question_type}：${r.count} 道`;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "small-button";
+    button.textContent = "恢复这一组";
+    button.onclick = async () => {
+      if (!window.confirm(`恢复 ${text.textContent}？`)) return;
+      try {
+        const done = await api("/v2/model/retired/restore", { subject: r.subject, question_type: r.question_type });
+        $("retired-note").textContent = `已恢复 ${done.restored} 道。`;
+        await drawRetired();
+      } catch (e) {
+        $("retired-note").textContent = "恢复失败：" + (e.message || e);
+      }
+    };
+    row.append(text, button);
+    list.append(row);
+  }
+}
 $("price-refresh").onclick = async () => {
   try {
     await api("/v2/model/prices/refresh", {});

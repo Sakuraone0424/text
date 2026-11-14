@@ -175,11 +175,12 @@ def tomorrow_ready(conn, uid):
     """Is there a whole paper's worth of approved questions in the bank, and when will there be? Answered for the whole day's
     demand and for each of the two papers (the objective paper only needs single choice and fill-in questions, the
     subjective paper only the other three types), so one paper being short never holds back the other."""
-    from app import progress
+    from app import external_executor, progress
 
     buckets = progress.buckets(conn, uid)
     now = conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
     busy = progress.platform_status(conn)["busy"]
+    rebuilding = external_executor.policy(conn)["generation"] == "claude"       # the bank is being written again, by Claude only, at night
 
     def summary(cells):
         needed = sum(b["required"] for b in cells)
@@ -190,7 +191,7 @@ def tomorrow_ready(conn, uid):
                  for b in cells if b["stocked"] < b["required"]]
         return dict(ready=ready, needed=needed, missing=needed - ready, complete=ready >= needed and not short, short_cells=short,
                     platform_busy=busy, eta_at=paper["eta_at"], eta_hours=paper["eta_hours"], eta_state=paper["eta_state"],
-                    per_hour=paper["per_hour"], budget=paper["budget"])
+                    per_hour=paper["per_hour"], budget=paper["budget"], rebuilding=rebuilding)
 
     out = summary(buckets)
     out["kinds"] = {

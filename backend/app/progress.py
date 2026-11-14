@@ -455,7 +455,7 @@ def _executor_report(conn):
     from app import external_executor
 
     return dict(today=external_executor.executor_stats(conn), routing=external_executor.policy(conn),
-                waiting=external_executor.waiting_for_claude(conn))
+                waiting=external_executor.waiting_for_claude(conn), rebuild=external_executor.rebuild_state(conn))
 
 
 def _rescale_report(conn):

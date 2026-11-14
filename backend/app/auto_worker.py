@@ -552,8 +552,23 @@ def _plan_queue(conn, report, users, private, first):
         report["plan_error"] = (report.get("plan_error", "") + " | " if report.get("plan_error") else "") + "queue=" + text
 
 
+def retire_unused_once(conn, report):
+    """The owner's one-time decision: the unused part of the bank is taken out of use (see bulk_retire). It prints how many it is about to
+    withdraw before it does, runs in its own savepoint and only once; tests switch it off with BULK_RETIRE_DISABLED=1."""
+    if os.environ.get("BULK_RETIRE_DISABLED") == "1":
+        return
+    from app import bulk_retire
+
+    try:
+        with conn.transaction():
+            bulk_retire.run_once(conn, report)
+    except Exception as exc:  # noqa: BLE001  (a log line; it is tried again on the next run)
+        report["retire_unused_error"] = (describe_db_error(exc) if isinstance(exc, psycopg.Error) else type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_"))
+
+
 def _plan_queue_inner(conn, report, users, private, first):
     """Fill the queue (so every call of a batch has a job) and put back what should be tried again."""
+    retire_unused_once(conn, report)
     rescale_scoring(conn, report)
     t = time.monotonic()
     for user in users:

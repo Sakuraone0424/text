@@ -31,6 +31,15 @@ test("one cell short: not ready, the total and the cell are named, with the esti
   assert.equal(card({ lock: { ...short, eta_state: "estimating", eta_at: null } }).label, "题库还差 7 道，暂不能开始");
 });
 
+test("while the bank is rebuilt by the Claude Routine the card says so, with the missing number and the hours, and is no error", () => {
+  const short = bank({ complete: false, rebuilding: true, missing: 9, short_cells: [{ subject: "biochemistry", question_type: "fill_blank", missing: 5 }, { subject: "cell_biology", question_type: "fill_blank", missing: 4 }] });
+  const s = card({ lock: short });
+  assert.deepEqual([s.kind, s.pill], ["short", "题库重建中"]);
+  assert.equal(s.label, "题库重建中，还差 9 道，Claude 每晚 23:00–07:00 出题");
+  assert.match(s.reason, /错题复习和专项练习/);
+  assert.equal(card({ lock: { ...short, complete: true } }).kind, "prepare");        // once the bank is full the paper can be prepared again
+});
+
 test("the missing total is the sum of the short cells (a surplus elsewhere does not hide it)", () => {
   const short = bank({ complete: false, missing: 1, short_cells: [{ subject: "biochemistry", question_type: "term", missing: 2 }, { subject: "cell_biology", question_type: "essay", missing: 1 }] });
   assert.match(card({ lock: short }).label, /^题库还差 3 道/);

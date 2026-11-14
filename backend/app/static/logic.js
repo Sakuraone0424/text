@@ -27,6 +27,12 @@
     if (known && known.status === "not_started") return { kind: "start", label: `开始（${minutes} 分钟）`, pill: "尚未开始", green: true, paperId: known.paperId };
     // never "已就绪" before the state is actually known: the bank (no paper yet) or the paper itself
     if (!loaded || !lock) return { kind: "loading", label: "开始", pill: "状态待载入" };
+    if (!lock.complete && lock.rebuilding) {
+      // the bank is being written again by the Claude Routine (nothing is wrong, nothing to press): said plainly, never an error
+      const missing = (lock.short_cells || []).reduce((n, c) => n + c.missing, 0) || lock.missing;
+      return { kind: "short", label: `题库重建中，还差 ${missing} 道，Claude 每晚 23:00–07:00 出题`, pill: "题库重建中",
+               reason: "旧题库已撤下，由 Claude 定时任务重新出题。错题复习和专项练习（用已做过的题）照常可用。" };
+    }
     if (!lock.complete) {
       const when = lock.eta_state === "estimated" && lock.eta_at ? `，预计 ${clock(lock.eta_at)} 可开始` : "，暂不能开始";
       const cells = (lock.short_cells || []).map((c) => `${SHORT[c.subject]}${TYPE[c.question_type]}缺 ${c.missing}`).join("、");
