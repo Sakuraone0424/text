@@ -454,6 +454,14 @@ function executors(report) {
   const root = $("executors");
   root.replaceChildren();
   const route = data.routing || {};
+  const rebuild = data.rebuild, rebuildNote = $("rebuild-note");
+  if (rebuildNote) {
+    // the bank is rebuilt by the Claude Routine only: said at the top, with what it really delivers per night
+    rebuildNote.hidden = !(rebuild && rebuild.active);
+    if (rebuild && rebuild.active) {
+      rebuildNote.textContent = "题库由 Claude 定时任务补充，" + (rebuild.per_night ? `预计每晚可补 ${rebuild.per_night} 道` : "还没有 Claude 出题记录，第一晚跑通后显示每晚可补多少道");
+    }
+  }
   const waiting = data.waiting, notice = $("claude-waiting");
   if (notice) {
     // tasks that only a Routine may take: said plainly at the top of the page, with the time DeepSeek takes them over

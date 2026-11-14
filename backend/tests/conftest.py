@@ -260,3 +260,9 @@ def writing_is_deepseeks_in_the_older_tests(monkeypatch):
     """The production default routes question writing to a Claude scheduled task first. The existing tests exercise the DeepSeek worker's
     path, so they run with writing routed to DeepSeek; test_external_executor.py clears this to test the real default."""
     monkeypatch.setenv("EXECUTOR_GENERATION", "deepseek")
+
+
+@pytest.fixture(autouse=True)
+def the_one_time_withdrawal_is_off_in_the_tests(monkeypatch):
+    """The unused part of the bank is withdrawn once, by the first worker run after the deploy. The tests call bulk_retire themselves."""
+    monkeypatch.setenv("BULK_RETIRE_DISABLED", "1")

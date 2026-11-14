@@ -312,6 +312,7 @@
           <div id="pv-skeleton" class="skeleton-stack" aria-hidden="true"><div class="skeleton card-sk tall"></div><div class="skeleton card-sk"></div><div class="skeleton card-sk"></div></div>
           <div id="pv-error" class="error-card" role="alert" hidden><p id="pv-error-text"></p><button id="pv-retry" class="secondary" type="button">重试</button></div>
           <div id="pv-content" class="stack" hidden>
+        <p id="rebuild-note" class="notice" role="status" hidden></p>
         <p id="claude-waiting" class="notice" role="status" hidden></p>
         <section class="card key" aria-labelledby="h-batch">
           <div class="hero">
@@ -502,6 +503,13 @@
           <p class="note">官方价格页现在读不到，而系统里有两个价格不同的版本。点一下选择采用哪一个（正常情况下不需要，官方页读取成功后系统自己会采用最新的一版）。</p>
           <div id="price-confirm-list" class="stack"></div>
           <p id="price-confirm-note" class="note" role="status"></p>
+        </section>
+
+        <section class="card" id="retired-card" aria-labelledby="h-retired">
+          <h2 id="h-retired">已撤下的题</h2>
+          <p class="note">用户认为质量差，没出过卷、没练过的旧题已撤下（不删除），改由 Claude 重出。用过的题和历史成绩不受影响。需要时可按科目和题型恢复。</p>
+          <div id="retired-list" class="stack"></div>
+          <p id="retired-note" class="note" role="status"></p>
         </section>
 
         <section class="card" aria-labelledby="h-price">

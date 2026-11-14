@@ -144,6 +144,20 @@ def waiting_for_claude(conn):
     return dict(count=row["n"], oldest_hours=round(float(row["oldest_hours"] or 0), 1), hand_over_hours=left, fallback_hours=fallback)
 
 
+def rebuild_state(conn):
+    """The bank is being written again by Claude only: {active, per_night}. `per_night` is what the Routine really delivered in the last
+    seven nights (questions written and handed in), None until it has delivered something."""
+    pol = policy(conn)
+    if pol["generation"] != "claude":
+        return dict(active=False, per_night=None)
+    row = conn.execute(
+        "SELECT count(*) AS n,EXTRACT(EPOCH FROM clock_timestamp()-min(finished_at))/86400 AS days FROM ai_jobs "
+        "WHERE kind='generation' AND executor=%s AND state='succeeded' AND finished_at>clock_timestamp()-interval '7 days'", (CLAUDE,)).fetchone()
+    if not row["n"]:
+        return dict(active=True, per_night=None)
+    return dict(active=True, per_night=max(1, round(row["n"] / min(7.0, max(1.0, float(row["days"] or 1))))))
+
+
 def deepseek_hold(conn):
     """(SQL, params) appended to the DeepSeek worker's claim query: a task pinned to Claude, one a Routine is working on, and one whose
     kind is routed to Claude (until the fallback time of 'claude first' has passed) are not claimed by the DeepSeek worker."""

@@ -533,6 +533,28 @@ def confirm_price_version(data: PriceConfirm, request: Request, name=Depends(req
     return operation(name, run)
 
 
+@router.get("/retired")
+def retired_questions(name=Depends(require_auth)):
+    """The questions the owner took out of use, per subject and type, and what the one-time withdrawal did (before / after)."""
+    from app import bulk_retire
+
+    return operation(name, lambda c, u: bulk_retire.summary(c))
+
+
+class RestoreRetired(StrictModel):
+    subject: str | None = Field(default=None, pattern="^(biochemistry|cell_biology)$")
+    question_type: str | None = Field(default=None, pattern="^(single_choice|fill_blank|term|short_answer|essay)$")
+
+
+@router.post("/retired/restore")
+def restore_retired(data: RestoreRetired, request: Request, name=Depends(require_auth)):
+    """Put the withdrawn questions of one subject and type back (a subject or type left out means all of them)."""
+    origin(request)
+    from app import bulk_retire
+
+    return operation(name, lambda c, u: dict(restored=bulk_retire.restore(c, data.subject, data.question_type)))
+
+
 @router.post("/prices/refresh")
 def refresh_cny_prices(request: Request, name=Depends(require_auth)):
     origin(request)
