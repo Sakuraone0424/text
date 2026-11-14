@@ -126,7 +126,14 @@ def enqueue_rekeyed(conn, user_id, key, kind, payload):
         fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:12]
         RESOLVED_CONFLICTS.append(exc.detail)
         del RESOLVED_CONFLICTS[:-20]
-        return enqueue(conn, user_id, f"{key}:{fingerprint}", kind, payload)
+        # the new key may itself be taken (by another kind, another owner, other content): then the next suffix, never an error
+        for n in range(1, 6):
+            new_key = f"{key}:{fingerprint}" + ("" if n == 1 else f":{n}")
+            try:
+                return enqueue(conn, user_id, new_key, kind, payload)
+            except IdempotencyConflict:
+                continue
+        raise
 
 
 def enqueue(conn, user_id, key, kind, payload):
@@ -403,6 +410,11 @@ def claim(conn, scope_id=None, scope_kind="limited_trial"):
         "UPDATE ai_jobs SET state='running',attempts=attempts+1,reserved_cny=reserved_cny+%s,lease_token=%s,lease_run=%s,lease_until=clock_timestamp()+%s*interval '1 second',started_at=clock_timestamp() WHERE id=%s RETURNING *",
         (amount, str(uuid4()), RUN_ID, 600 if extended_limits(s) else 180, job["id"]),
     ).fetchone()
+    # Every attempt has its own reservation (unique per job and attempt number). A task whose attempt counter was ever put back
+    # would collide with the reservations of its earlier attempts and stop the whole run: number the attempt after the last one on record.
+    last = conn.execute("SELECT COALESCE(max(attempt),0) AS m FROM ai_cny_reservations WHERE job_id=%s", (job["id"],)).fetchone()["m"]
+    if claimed["attempts"] <= last:
+        claimed = conn.execute("UPDATE ai_jobs SET attempts=%s WHERE id=%s RETURNING *", (last + 1, job["id"])).fetchone()
     conn.execute(
         "INSERT INTO ai_cny_reservations(job_id,attempt,amount_cny,price_snapshot) VALUES(%s,%s,%s,%s)",
         (job["id"], claimed["attempts"], amount, Jsonb(price)),

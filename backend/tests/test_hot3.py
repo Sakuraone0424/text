@@ -46,7 +46,7 @@ def test_a_task_stuck_on_the_evidence_limit_is_cut_down_and_starts_again(db, set
         (setup_ai, Jsonb(payload))).fetchone()["id"]
     assert grading_recovery.shrink_oversized_requests(db, setup_ai) == 1
     row = db.execute("SELECT * FROM ai_jobs WHERE id=%s", (jid,)).fetchone()
-    assert row["state"] == "retrying" and row["attempts"] == 0 and row["error_code"] is None and len(row["payload"]["evidence"]) == 3
+    assert row["state"] == "retrying" and row["attempts"] == 3 and row["transient_attempts"] == 3 and row["error_code"] is None and len(row["payload"]["evidence"]) == 3
     auto_execution.bounded_material(row["payload"])
     assert len(db.execute("SELECT payload FROM ai_jobs WHERE id=%s", (other,)).fetchone()["payload"]["evidence"]) == 8     # other failures untouched
     assert grading_recovery.shrink_oversized_requests(db, setup_ai) == 0

@@ -1,6 +1,7 @@
 """Short-lived leased automation tick, activated only with explicit API consent."""
 
 import httpx
+import psycopg
 import json
 import os
 import sys
@@ -19,6 +20,22 @@ from app.worker import tick, integrations_tick
 from app.dispatch_codes import safe_dispatch_failure, _SAFE_VALIDATOR_ERRORS, _SAFE_QUALITY_CODES, _SAFE_PACKET_ERRORS  # noqa: F401  (re-exported)
 
 
+WHERE = {"at": ""}      # the last thing the worker did (read by the run's error line: where a database error happened)
+DB_ERRORS = []          # database errors that were contained in this run (one entry each, for the log)
+
+
+def describe_db_error(exc):
+    """A database error as one log token: kind, table, constraint and the conflicting key (names and values of OUR rows only; the
+    server's own detail text, e.g. `Key (new_key)=(auto-repair-75-ab12) already exists.`)."""
+    diag = getattr(exc, "diag", None)
+    parts = [type(exc).__name__]
+    for label, value in (("table", getattr(diag, "table_name", None)), ("constraint", getattr(diag, "constraint_name", None)),
+                         ("detail", getattr(diag, "message_detail", None))):
+        if value:
+            parts.append(f"{label}={str(value)[:140]}")
+    return ":".join(parts).replace(" ", "_")[:360]
+
+
 def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job_id=None):
     if scope_kind not in ("limited_trial", "review_campaign", "qa_automation"):
         raise ValueError("unknown_execution_scope")
@@ -34,6 +51,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job
         ((scope_id,) if scope_id else ()) + ((only_job_id,) if only_job_id else ()),
     ).fetchall()
     for job in rows:
+        WHERE["at"] = f"dispatch:{job['kind']}#{job['id']}"
         try:
             with conn.transaction():
                 if job["kind"] == "quality_review":
@@ -93,6 +111,15 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job
                     auto_insights.accept(conn, job)
                 else:
                     raise ValueError("unsupported_dispatch_kind")
+        except psycopg.Error as exc:
+            # one result that collides with a row that is already there (a unique key ...) is that task's problem alone: it is put aside with
+            # the reason on record and the run goes on with the others (its own savepoint is already rolled back)
+            detail = describe_db_error(exc)
+            DB_ERRORS.append(f"dispatch:{job['kind']}#{job['id']}:{detail}")
+            conn.execute("UPDATE ai_jobs SET state='blocked',error_code='database_conflict',result=jsonb_set(COALESCE(result,'{}'::jsonb),"
+                         "'{dispatch_failure}',%s),dispatched_at=clock_timestamp() WHERE id=%s",
+                         (ai_jobs.Jsonb({"code": "database_conflict", "detail": detail}), job["id"]))
+            continue
         except (ValueError, KeyError, LookupError) as exc:
             if isinstance(exc, auto_quality.ReviewFormatError) and job["kind"] == "quality_review":
                 # a malformed review answer says nothing about the question: ask for the review once more
@@ -189,6 +216,11 @@ def plan(conn, uid, target=None, report=None):
             q, refs, style = auto_quality.evidence(conn, row["question_id"])
         except ValueError:
             continue
+        if conn.execute(
+            "SELECT 1 FROM ai_jobs WHERE kind='repair' AND payload->>'question_id'=%s AND state IN ('pending','running','retrying') LIMIT 1",
+            (str(row["question_id"]),),
+        ).fetchone():
+            continue                   # a repair of this question is already on its way: not a second one
         payload = dict(
             question_id=row["question_id"],
             question=q,
@@ -498,16 +530,32 @@ def rescale_scoring(conn, report):
 
 
 def _plan_queue(conn, report, users, private, first):
+    """Preparation of a run, contained: whatever goes wrong in it is written to the log (route and database detail) and the run still goes on to
+    claim and execute the tasks that are already queued. Every planning route has its own savepoint, so an error in one route costs only that route; this outer one only covers what is outside the routes."""
+    try:
+        with conn.transaction():
+            _plan_queue_inner(conn, report, users, private, first)
+    except (ValueError, psycopg.Error) as exc:
+        WHERE["at"] = WHERE.get("at") or "plan"
+        text = describe_db_error(exc) if isinstance(exc, psycopg.Error) else type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
+        report["plan_error"] = (report.get("plan_error", "") + " | " if report.get("plan_error") else "") + "queue=" + text
+
+
+def _plan_queue_inner(conn, report, users, private, first):
     """Fill the queue (so every call of a batch has a job) and put back what should be tried again."""
     rescale_scoring(conn, report)
     t = time.monotonic()
     for user in users:
         if first:
-            upgrade = model_compatibility.auto_upgrade(conn, user["user_id"])
-            report["upgrade"] = upgrade["status"] + (
-                ":" + ",".join(f"{c['model']}={c['reason']}" for c in upgrade.get("candidates", []))
-                if upgrade.get("candidates") else ":" + upgrade["model"] if upgrade.get("model") else ""
-            )
+            try:
+                with conn.transaction():
+                    upgrade = model_compatibility.auto_upgrade(conn, user["user_id"])
+                report["upgrade"] = upgrade["status"] + (
+                    ":" + ",".join(f"{c['model']}={c['reason']}" for c in upgrade.get("candidates", []))
+                    if upgrade.get("candidates") else ":" + upgrade["model"] if upgrade.get("model") else ""
+                )
+            except (ValueError, psycopg.Error) as exc:
+                report["upgrade"] = "error:" + (describe_db_error(exc) if isinstance(exc, psycopg.Error) else type(exc).__name__)
             t = _lap(report, "upgrade", t, "plan_detail")
         if (
             not user["stopped"]
@@ -517,14 +565,18 @@ def _plan_queue(conn, report, users, private, first):
             first_new = conn.execute("SELECT COALESCE(max(id),0) AS m FROM ai_jobs").fetchone()["m"]
 
             def step(name, fn):
-                """One planning route in its own savepoint: whatever it raises undoes only that route, is written to the log with its
-                route name, and the other routes carry on."""
+                """One planning route in its own savepoint: whatever it raises (a rule error or a database error such as a unique key) undoes
+                only that route, is written to the log with its route name and the key that collided, and the other routes carry on."""
+                WHERE["at"] = "plan:" + name
                 try:
                     with conn.transaction():
                         fn()
-                except ValueError as exc:
+                except (ValueError, psycopg.Error) as exc:
                     detail = getattr(exc, "detail", None)
-                    text = type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
+                    if isinstance(exc, psycopg.Error):
+                        text = describe_db_error(exc)
+                    else:
+                        text = type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
                     if detail:
                         text += ":" + json.dumps(detail, ensure_ascii=False, separators=(",", ":"))[:400]
                     report["plan_error"] = (report.get("plan_error", "") + " | " if report.get("plan_error") else "") + name + "=" + text
@@ -707,6 +759,9 @@ def _locked_run(report, run_began):
     report["concurrency"] = workers
     cutoff, hard = start_cutoff_seconds(), run_seconds()
     report["pre_s"] = f"{time.monotonic() - run_began:.1f}"     # everything before the first call (planning, prices, balance)
+    if DB_ERRORS:
+        report["db_errors"] = " ; ".join(DB_ERRORS[-3:])
+        del DB_ERRORS[:]
     calls, ran, claimed, peak, overran = 0, 0, [], 0, False
     exit_reason, pool = None, None
     try:
@@ -852,6 +907,10 @@ def main():
         # Application-owned messages (fixed strings / codes) are safe; others: type only.
         safe = isinstance(exc, (PermissionError, ValueError)) and getattr(exc, "errno", None) is None  # ours, not the OS's
         report["error"] = type(exc).__name__ + (":" + str(exc)[:120].replace(" ", "_") if safe else "")
+        if isinstance(exc, psycopg.Error):
+            # which table, which constraint, which value, and the step it happened in (the worker's own row names, never learner text)
+            report["error"] = describe_db_error(exc)
+            report["error_at"] = WHERE["at"]
         code = 1
     report["duration_s"] = f"{(datetime.now(timezone.utc) - started).total_seconds():.1f}"  # the whole run
     if not report.get("skipped"):                 # a run that left at once (the previous one still going) is not a run

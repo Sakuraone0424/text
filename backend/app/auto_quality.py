@@ -1,6 +1,7 @@
 """AI自动核验: separate evidence-bound rounds, no simulated human signatures."""
 
 import re
+import time
 from typing import Literal
 from pydantic import Field, StrictBool, StrictInt
 from psycopg.types.json import Jsonb
@@ -1026,7 +1027,8 @@ def retire_old_scoring(conn):
 
 
 STALE_RECHECK_MINUTES = 30
-STALE_PER_RUN = 150      # at most this many questions are verified in one planning pass: the rest wait for the next run
+STALE_PER_RUN = 150
+STALE_BUDGET_SECONDS = 1.5   # and none of it may take longer than this      # at most this many questions are verified in one planning pass: the rest wait for the next run
 
 
 def retire_stale(conn, now=None):
@@ -1041,7 +1043,10 @@ def retire_stale(conn, now=None):
         "OR stale_checked_at < clock_timestamp() - make_interval(mins => (%s + (question_id %% 10))::int)) "
         "ORDER BY stale_checked_at NULLS FIRST,question_id LIMIT %s", (STALE_RECHECK_MINUTES, STALE_PER_RUN)).fetchall()
     ok = []
+    began = time.monotonic()
     for row in due:
+        if time.monotonic() - began > STALE_BUDGET_SECONDS:
+            break                                    # the planning pass must stay short: the rest are due on the next run
         qid = row["question_id"]
         try:
             evidence(conn, qid)

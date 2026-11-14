@@ -173,7 +173,7 @@ def shrink_oversized_requests(conn, user_id):
             continue
         payload = {**job["payload"], "evidence": fit_evidence(evidence)}
         conn.execute(
-            "UPDATE ai_jobs SET payload=%s,state='retrying',next_retry=clock_timestamp(),attempts=0,transient_attempts=0,platform_streak=0,"
+            "UPDATE ai_jobs SET payload=%s,state='retrying',next_retry=clock_timestamp(),transient_attempts=attempts,platform_streak=0,"
             "error_code=NULL,dispatched_at=NULL WHERE id=%s", (Jsonb(payload), job["id"]))
         fixed += 1
     return fixed
