@@ -42,6 +42,7 @@ def route_review(conn, uid, qid, writer=None):
     every question DeepSeek wrote, the independent review is scheduled as before ("Claude" review tasks are leased by another session)."""
     from app import external_executor as ext
 
+    ext.apply_owner_review_choice(conn)            # (once: replaces a review setting saved before the owner chose "no review")
     writer = writer or auto_quality.writer_job(conn, qid)
     auto_quality.note_writer(conn, qid, writer)
     if writer and writer.get("executor") == ext.CLAUDE and ext.policy(conn)["review"] == "none":
@@ -51,32 +52,54 @@ def route_review(conn, uid, qid, writer=None):
 
 
 def publish_waiting_claude_questions(conn, report=None):
-    """Questions a Claude Routine wrote that are waiting for a DeepSeek review (the owner has now chosen "no review"): published on the program
-    checks, and their waiting review tasks cancelled. Runs on every planning pass; costs one small query when nothing waits."""
+    """Questions a Claude Routine wrote that are waiting for a review (the owner has chosen "no review"): published on the program checks, and
+    their waiting review tasks cancelled. Runs on every planning pass. The log always says what it did and why it did nothing:
+    program_only=considered=N,published=N,blocked=N,reason=..."""
     from app import external_executor as ext
 
-    if ext.policy(conn)["review"] != "none":
-        return 0
-    published = blocked = 0
-    for row in conn.execute("SELECT s.question_id FROM (SELECT question_id FROM auto_question_states WHERE status='checking' "
-                            "ORDER BY updated_at LIMIT 100) s").fetchall():
-        qid = row["question_id"]
-        writer = auto_quality.writer_job(conn, qid)
-        if not writer or writer.get("executor") != ext.CLAUDE:
-            continue
-        try:
-            with conn.transaction():
-                conn.execute("UPDATE ai_jobs SET state='cancelled',error_code='review_not_needed',finished_at=clock_timestamp() "
-                             "WHERE kind='quality_review' AND state IN ('pending','retrying') AND lease_token IS NULL AND payload->>'question_id'=%s", (str(qid),))
-                auto_quality.note_writer(conn, qid, writer)
-                if auto_quality.publish_on_program_checks(conn, writer["user_id"], qid, writer):
-                    published += 1
-                else:
-                    blocked += 1
-        except (ValueError, psycopg.Error):
-            blocked += 1
-    if report is not None and (published or blocked):
-        report["program_only"] = f"published={published},blocked={blocked}"
+    replaced = ext.apply_owner_review_choice(conn)
+    if replaced and report is not None:
+        report["review_setting"] = f"none(was:{replaced})"
+    mode = ext.policy(conn)["review"]
+    considered = published = blocked = not_claude = no_writer = 0
+    reason = "ok"
+    if mode != "none":
+        reason = f"review_setting_is_{mode}"
+    else:
+        rows = conn.execute("SELECT question_id FROM auto_question_states WHERE status='checking' ORDER BY updated_at LIMIT 600").fetchall()
+        considered = len(rows)
+        if not rows:
+            reason = "nothing_is_waiting_for_review"
+        for row in rows:
+            if published + blocked >= 150:
+                reason = "limit_per_pass_reached"
+                break
+            qid = row["question_id"]
+            writer = auto_quality.writer_job(conn, qid)
+            if not writer:
+                no_writer += 1
+                continue
+            if writer.get("executor") != ext.CLAUDE:
+                not_claude += 1
+                continue
+            try:
+                with conn.transaction():
+                    conn.execute("UPDATE ai_jobs SET state='cancelled',error_code='review_not_needed',finished_at=clock_timestamp() "
+                                 "WHERE kind='quality_review' AND state IN ('pending','retrying') AND lease_token IS NULL AND payload->>'question_id'=%s", (str(qid),))
+                    auto_quality.note_writer(conn, qid, writer)
+                    if auto_quality.publish_on_program_checks(conn, writer["user_id"], qid, writer):
+                        published += 1
+                    else:
+                        blocked += 1
+            except (ValueError, psycopg.Error):
+                blocked += 1
+        if considered and not published and not blocked and reason == "ok":
+            reason = f"none_written_by_claude(not_claude={not_claude},no_writer_found={no_writer})"
+    if report is not None:
+        # always said, even when it is all zero: what it looked at, what it did, and why it did nothing
+        report["program_only"] = f"considered={considered},published={published},blocked={blocked},review_setting={mode},reason={reason}"
+        if not_claude or no_writer:
+            report["program_only"] += f",not_claude={not_claude},no_writer={no_writer}"
     return published
 
 
@@ -629,6 +652,15 @@ def retire_unused_once(conn, report):
 def _plan_queue_inner(conn, report, users, private, first):
     """Fill the queue (so every call of a batch has a job) and put back what should be tried again."""
     retire_unused_once(conn, report)
+    try:
+        with conn.transaction():
+            from app import external_executor as _ext
+
+            replaced = _ext.apply_owner_review_choice(conn)
+        if replaced:
+            report["review_setting"] = f"none(was:{replaced})"
+    except (ValueError, psycopg.Error) as exc:
+        report["review_setting_error"] = describe_db_error(exc) if isinstance(exc, psycopg.Error) else type(exc).__name__
     rescale_scoring(conn, report)
     t = time.monotonic()
     for user in users:
