@@ -210,7 +210,7 @@ def configure(conn, user_id, model, effort, verify=True, **options):
     return settings(conn, user_id)
 
 
-def snapshot(conn, user_id):
+def snapshot(conn, user_id, price_fallback=False):
     s = dict(settings(conn, user_id))
     row = conn.execute(
         "SELECT * FROM ai_model_catalog WHERE model_id=%s", (s["model_id"],)
@@ -231,9 +231,15 @@ def snapshot(conn, user_id):
         raise ValueError("output_limit_exceeds_official_catalog")
     s["capabilities"] = row["compatibility"]
     s["official_metadata"] = row["metadata"]
-    from app.cny_billing import current_price
+    from app.cny_billing import current_price, last_verified_price
 
-    s["price_snapshot"] = current_price(conn, s["model_id"])
+    try:
+        s["price_snapshot"] = current_price(conn, s["model_id"])
+    except ValueError:
+        if not price_fallback:
+            raise
+        # grading is never held back by a price question: it is estimated at the last verified price
+        s["price_snapshot"] = last_verified_price(conn, s["model_id"])
     for k in ("daily_cny", "monthly_cny", "task_cny", "trial_cny"):
         s[k] = str(s[k])
     s.pop("updated_at", None)
