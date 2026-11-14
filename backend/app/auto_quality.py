@@ -789,6 +789,9 @@ def ready(conn, qid):
         for e in (events.get("identity"), events.get("review"))
     ):
         return False
+    if (events["review"]["result"] or {}).get("review_mode") == "program_only":
+        # the owner's choice "no review": the program checks (identity phase, above) were the gate; the event names the task that wrote it
+        return True
     job = conn.execute("SELECT * FROM ai_jobs WHERE id=%s", (events["review"]["job_id"],)).fetchone()
     return bool(
         job
@@ -801,6 +804,72 @@ def ready(conn, qid):
         and job["payload"].get("content_sha256") == row["content_sha256"]
         and job["payload"] == review_payload("review", qid, row["content_sha256"], q, refs, style, job_contract_version(job))
     )
+
+
+def writer_job(conn, qid):
+    """The writing task a question came from (generation task, past-exam answer task, or - for a repaired question - the one of the question
+    it replaced). None when it cannot be told."""
+    for _ in range(4):
+        row = conn.execute("SELECT candidate_key FROM candidate_review_packets WHERE question_id=%s", (qid,)).fetchone()
+        if not row:
+            return None
+        key = row["candidate_key"]
+        m = re.match(r"auto-generated-(\d+)-", key)
+        if m:
+            return conn.execute("SELECT * FROM ai_jobs WHERE id=%s", (int(m.group(1)),)).fetchone()
+        m = re.match(r"past-exam-(\d+)-", key)
+        if m:
+            return conn.execute("SELECT j.* FROM past_exam_items i JOIN ai_jobs j ON j.id=i.job_id WHERE i.id=%s", (int(m.group(1)),)).fetchone()
+        m = re.match(r"auto-repair-(\d+)-", key)
+        if m:
+            qid = int(m.group(1))                       # a repair: the writer of the question it replaced
+            continue
+        return None
+    return None
+
+
+def publish_on_program_checks(conn, uid, qid, writer):
+    """The owner chose "no review": a question a Claude Routine wrote is published when it passes every program check (the identity phase:
+    evidence match, duplicate in the same subject and type, answer in the stem, a figure it points at, the past-exam stem; and the writing
+    rules again: forbidden wording, answer given away, reference list / caption / contents as source). One `review` event of mode
+    program_only records that nothing else judged it. Returns True when published; a question that fails stays blocked and goes to the
+    repair step (one repair, then discarded)."""
+    from app import exam_authoring
+
+    check = preflight(conn, qid)
+    if not check["passed"]:
+        return False
+    q, refs, style = evidence(conn, qid)
+    problems = exam_authoring.issues(q)
+    if problems:
+        conn.execute("UPDATE auto_question_states SET updated_at=clock_timestamp(),status='blocked',reason=%s WHERE question_id=%s", (";".join(problems), qid))
+        return False
+    row = conn.execute("SELECT content_sha256 FROM auto_question_states WHERE question_id=%s", (qid,)).fetchone()
+    sha = row["content_sha256"]
+    conn.execute(
+        "INSERT INTO auto_quality_events(question_id,content_sha256,policy_version,phase,run_key,evidence_snapshot,result,passed) "
+        "VALUES(%s,%s,%s,'review',%s,%s,%s,true) ON CONFLICT DO NOTHING",
+        (qid, sha, POLICY, f"{qid}:{sha}:{POLICY}:program_only", Jsonb(refs + style),
+         Jsonb(dict(review_mode="program_only", executor=(writer or {}).get("executor"), writer_job=(writer or {}).get("id"),
+                    scope="program_checks_only_no_model_review"))))
+    conn.execute("UPDATE auto_question_states SET updated_at=clock_timestamp(),status='checking',reason=NULL WHERE question_id=%s", (qid,))
+    ok = promote(conn, qid)
+    if ok:
+        conn.execute(
+            "INSERT INTO question_origins(question_id,origin,source_ref) VALUES (%s,'generated',%s) "
+            "ON CONFLICT(question_id) DO UPDATE SET source_ref=question_origins.source_ref || EXCLUDED.source_ref",
+            (qid, Jsonb(dict(executor=(writer or {}).get("executor"), review="program_only", review_label="仅程序检查"))))
+    return ok
+
+
+def note_writer(conn, qid, writer):
+    """Remember which executor wrote a question (for the share of questions the learner reported, per executor)."""
+    if not writer:
+        return
+    conn.execute(
+        "INSERT INTO question_origins(question_id,origin,source_ref) VALUES (%s,'generated',%s) "
+        "ON CONFLICT(question_id) DO UPDATE SET source_ref=question_origins.source_ref || EXCLUDED.source_ref",
+        (qid, Jsonb(dict(executor=writer.get("executor") or "deepseek"))))
 
 
 def promote(conn, qid):

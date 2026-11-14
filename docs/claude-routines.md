@@ -4,7 +4,8 @@
 网站只多开一组**专用接口**（`/v2/external/...`）；定时任务用 `EXTERNAL_EXECUTOR_TOKEN` 领任务、交结果。登录密码和这个令牌完全分开。
 
 > 第一阶段只做**出题**：出题 = Claude 优先（4 小时没人领就回退 DeepSeek），审核 = DeepSeek，判分 = DeepSeek。
-> 审核、判分的提示词和接口也写好了，默认不启用，等第一阶段对比结果满意再切。
+> 审核的默认设置现在是「不审核」：Claude 出的题通过全部程序检查（引用逐字匹配、分值相加、空数/答案数/评分要点数一致、可接受答案含标准答案、禁止措辞、答案不在题干里、不能出自参考文献/图注/目录、同科目同题型查重）就直接入库，来源记为 Claude 定时任务、审核方式记为「仅程序检查」；DeepSeek 出的题仍由 DeepSeek 审核。可以在「模型与费用 → 出题执行方」把审核改成「Claude 定时任务」（另一个会话审核，下面的审核提示词）或「DeepSeek」。判分仍由 DeepSeek 负责，不受影响。
+> 用户做题时点「这题有问题」的，会统计到出题执行方上；进度页显示「Claude 出题被反馈有问题的比例」，超过 10%（至少 10 道已出过卷的题）时提示「建议开启审核」。
 
 ## 一、它是怎么工作的
 
@@ -68,7 +69,7 @@
 3. 对每个任务（领到的每个任务有 task、rules_id、chars、bytes；整次返回已经按大小控制，不会被截断）：
    - 先取这个任务的规则：curl -sS -H "X-External-Token: $EXTERNAL_EXECUTOR_TOKEN" "https://training-api-qa-qa.up.railway.app/v2/external/rules/<rules_id>"。同一个 rules_id 整个运行只取一次，之后复用。返回里的 prefix 是总原则，instructions 是出题规则，schema 是输出格式。
    - 严格按规则（instructions）和任务（task）完成，只输出 schema 要求的严格 JSON 对象，不要任何解释、不要 Markdown。
-   - 只能使用任务里给的教材段落（task.evidence）。不能编造教材内容；evidence 里的 excerpt 必须逐字来自给你的段落，一个字也不能改；source_unit_id、file_id、source_sha256、ocr_page、paragraph_id、locator 必须原样抄给定的值。
+   - 只能使用任务里给的教材段落（task.evidence）。每个段落都有 unit_id 和 paragraph_id（两者相同），引用里的 source_unit_id 和 paragraph_id 都填它；填不上也没关系，系统会按教材原文补上。不能编造教材内容；evidence 里的 excerpt 必须逐字来自给你的段落，一个字也不能改；source_unit_id、file_id、source_sha256、ocr_page、paragraph_id、locator 必须原样抄给定的值。
    - 满分用 task.max_points（填空题 2.5 分，名词解释 5、简答 15、问答 25），评分要点的分值之和必须正好等于满分，评分要点数量和格式按 instructions 里的要求。分值是 JSON 数字，不是字符串。
    - 只出四种题：填空、名词解释、简答、问答，不出单选题。填空题看 task.blank_count：1 个空时题干里恰有一个 ____，answer 是标准答案，accepted_answers 列出所有等价写法，评分要点只有一条（2.5 分）；2 或 3 个空时题干里恰有这么多个 ____，blanks 里按顺序给每个空各自的 accepted_answers（每个空的分值 = 2.5 ÷ 空数），评分要点正好一空一条、分值与该空相同，accepted_answers 留空，answer 写各空标准答案用“；”连接。
    - 不能在题干里写出答案，不能写“根据教材/本章/文献”“如图”这类措辞，题目要像真题。

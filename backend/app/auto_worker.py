@@ -36,6 +36,50 @@ def describe_db_error(exc):
     return ":".join(parts).replace(" ", "_")[:360]
 
 
+def route_review(conn, uid, qid, writer=None):
+    """What happens to a newly written question next. The owner's review setting decides for the questions a Claude Routine wrote: with
+    "no review" (the default) they are published on the program checks alone (see auto_quality.publish_on_program_checks); otherwise, and for
+    every question DeepSeek wrote, the independent review is scheduled as before ("Claude" review tasks are leased by another session)."""
+    from app import external_executor as ext
+
+    writer = writer or auto_quality.writer_job(conn, qid)
+    auto_quality.note_writer(conn, qid, writer)
+    if writer and writer.get("executor") == ext.CLAUDE and ext.policy(conn)["review"] == "none":
+        auto_quality.publish_on_program_checks(conn, uid, qid, writer)
+        return []
+    return auto_quality.schedule_checks(conn, uid, qid)
+
+
+def publish_waiting_claude_questions(conn, report=None):
+    """Questions a Claude Routine wrote that are waiting for a DeepSeek review (the owner has now chosen "no review"): published on the program
+    checks, and their waiting review tasks cancelled. Runs on every planning pass; costs one small query when nothing waits."""
+    from app import external_executor as ext
+
+    if ext.policy(conn)["review"] != "none":
+        return 0
+    published = blocked = 0
+    for row in conn.execute("SELECT s.question_id FROM (SELECT question_id FROM auto_question_states WHERE status='checking' "
+                            "ORDER BY updated_at LIMIT 100) s").fetchall():
+        qid = row["question_id"]
+        writer = auto_quality.writer_job(conn, qid)
+        if not writer or writer.get("executor") != ext.CLAUDE:
+            continue
+        try:
+            with conn.transaction():
+                conn.execute("UPDATE ai_jobs SET state='cancelled',error_code='review_not_needed',finished_at=clock_timestamp() "
+                             "WHERE kind='quality_review' AND state IN ('pending','retrying') AND lease_token IS NULL AND payload->>'question_id'=%s", (str(qid),))
+                auto_quality.note_writer(conn, qid, writer)
+                if auto_quality.publish_on_program_checks(conn, writer["user_id"], qid, writer):
+                    published += 1
+                else:
+                    blocked += 1
+        except (ValueError, psycopg.Error):
+            blocked += 1
+    if report is not None and (published or blocked):
+        report["program_only"] = f"published={published},blocked={blocked}"
+    return published
+
+
 def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job_id=None):
     if scope_kind not in ("limited_trial", "review_campaign", "qa_automation"):
         raise ValueError("unknown_execution_scope")
@@ -74,7 +118,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job
                 elif job["kind"] == "repair" and "repair_of_job" in job["payload"]:
                     # the one repair of a draft that never became a question: same checks, same review
                     qid = auto_generation.accept_repair(conn, job)
-                    auto_quality.schedule_checks(conn, job["user_id"], qid)
+                    route_review(conn, job["user_id"], qid, job)
                     conn.execute("UPDATE auto_question_states SET revision_count=1 WHERE question_id=%s", (qid,))
                 elif job["kind"] == "repair":
                     qid = auto_quality.repair(
@@ -83,7 +127,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job
                         job["result"]["response"]["question"],
                         job["result"]["response"]["reason"],
                     )
-                    auto_quality.schedule_checks(conn, job["user_id"], qid)
+                    route_review(conn, job["user_id"], qid, job)
                 elif job["kind"] in ("textbook_analysis", "knowledge_extraction"):
                     auto_knowledge.accept(conn, job)
                 elif job["kind"] == "generation":
@@ -102,7 +146,7 @@ def dispatch_completed(conn, scope_id=None, scope_kind="limited_trial", only_job
                                              dict(field=e.get("field"), reason=e.get("code")) for e in fixable.errors]}), job["id"]))
                             conn.execute("UPDATE ai_jobs SET dispatched_at=clock_timestamp() WHERE id=%s", (job["id"],))
                             continue
-                    auto_quality.schedule_checks(conn, job["user_id"], new)
+                    route_review(conn, job["user_id"], new, job)
                 elif job["kind"] == "exam_analysis":
                     auto_exams.accept(conn, job)
                 elif job["kind"] == "grading":
@@ -204,10 +248,12 @@ def plan(conn, uid, target=None, report=None):
             pass
     auto_quality.discard_unfixable(conn)
     mark("retire")
+    publish_waiting_claude_questions(conn, report)
+    mark("program_only")
     for row in conn.execute(
         "SELECT p.question_id FROM candidate_review_packets p LEFT JOIN auto_question_states s ON s.question_id=p.question_id WHERE NOT EXISTS(SELECT 1 FROM candidate_revision_links l WHERE l.old_key=p.candidate_key) AND (s.question_id IS NULL OR s.status='candidate') ORDER BY p.question_id LIMIT 10"
     ).fetchall():
-        auto_quality.schedule_checks(conn, uid, row["question_id"])
+        route_review(conn, uid, row["question_id"])
     for row in conn.execute(
         "SELECT question_id FROM auto_question_states WHERE status='blocked' AND revision_count<%s AND reason<>ALL(%s) ORDER BY question_id LIMIT 3",
         (auto_quality.MAX_REPAIRS, list(auto_quality.UNREPAIRABLE) + list(auto_quality.NOT_QUESTION_FAULT)),
@@ -258,8 +304,13 @@ def plan(conn, uid, target=None, report=None):
     mark("legacy")
     # New questions are planned FIRST: past-exam term requests may take at most 20% of the tasks in flight, and that
     # share is counted against what was just queued
+    from app import external_executor as ext
+
+    claude_writes = ext.policy(conn)["generation"] in ("claude", "claude_first")
+    if target and claude_writes:
+        target = max(target, auto_generation.CLAUDE_QUEUE_TARGET)        # a Routine run leases up to 30 tasks: have that many waiting
     if target:
-        auto_generation.fill_queue(conn, uid, target)
+        auto_generation.fill_queue(conn, uid, target, writing_only=claude_writes)
     else:
         auto_generation.plan_gap(conn, uid)
     mark("fill")
@@ -268,6 +319,7 @@ def plan(conn, uid, target=None, report=None):
     if report is not None:
         # per route: what it wanted, what it queued and what stopped it (a short token each, numbers and codes only)
         f, p = auto_generation.FILL_DETAIL, past_exam_import.PLAN_DETAIL
+        report["pending_mix"] = pending_mix(conn)
         report["plan_routes"] = (
             f"gap:want={f.get('want', '-')}/had={f.get('claimable_before', '-')}/queued={f.get('queued', '-')}/stop={f.get('stop') or '-'}"
             + (f"/{f['buckets']}" if f.get("buckets") else "")
@@ -550,6 +602,14 @@ def _plan_queue(conn, report, users, private, first):
         WHERE["at"] = WHERE.get("at") or "plan"
         text = describe_db_error(exc) if isinstance(exc, psycopg.Error) else type(exc).__name__ + ":" + str(exc)[:80].replace(" ", "_")
         report["plan_error"] = (report.get("plan_error", "") + " | " if report.get("plan_error") else "") + "queue=" + text
+
+
+def pending_mix(conn):
+    """What the waiting tasks are made of: kind / origin / executor : state = count (the largest groups), as one log token."""
+    rows = conn.execute(
+        "SELECT kind,COALESCE(payload->>'origin','-') AS origin,COALESCE(executor,'-') AS executor,state,count(*) AS n FROM ai_jobs "
+        "WHERE state IN ('pending','retrying') GROUP BY 1,2,3,4 ORDER BY n DESC,kind LIMIT 12").fetchall()
+    return ";".join(f"{r['kind']}/{r['origin']}/{r['executor']}:{r['state']}={r['n']}" for r in rows) or "-"
 
 
 def retire_unused_once(conn, report):

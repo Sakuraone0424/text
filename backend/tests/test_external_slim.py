@@ -13,7 +13,8 @@ def test_a_lease_is_the_task_and_the_id_of_its_rules_not_the_rules_over_and_over
     assert "payload" not in got and "prompt" not in got                                  # neither the payload nor the message built from it again
     task = got["task"]
     assert "instructions" not in task and "schema" not in task and {"evidence", "style"} <= set(task)
-    assert task["evidence"] == job["payload"]["evidence"]                                # the paragraphs to quote from are never touched
+    assert [{k: v for k, v in u.items() if k != "paragraph_id"} for u in task["evidence"]] == job["payload"]["evidence"]    # the paragraphs to quote from are never touched
+    assert all(u["paragraph_id"] == u["unit_id"] for u in task["evidence"])                                              # ... each with its paragraph_id
     assert got["chars"] == len(json.dumps(task, ensure_ascii=False, separators=(",", ":"))) and got["bytes"] >= got["chars"]
     assert got["chars"] < ext.TASK_CHAR_TARGET and got["chars"] < len(json.dumps(job["payload"], ensure_ascii=False)) / 2
     rules = api.get(f"/v2/external/rules/{got['rules_id']}", headers=HEADERS)
@@ -43,7 +44,7 @@ def test_a_big_task_is_shortened_in_its_style_examples_never_in_its_paragraphs()
                    style=[dict(unit_id=9, text="真题样例" * 400)] * 3, bibliographies={"f": dict(textbook="书", authors="作者", edition="版", isbn=None, extra="z" * 3000)})
     slim = ext.slim_task(payload, limit=8000)
     assert len(json.dumps(slim, ensure_ascii=False, separators=(",", ":"))) <= 8000
-    assert slim["evidence"] == payload["evidence"] and "instructions" not in slim and "schema" not in slim
+    assert [u["text"] for u in slim["evidence"]] == [u["text"] for u in payload["evidence"]] and "instructions" not in slim and "schema" not in slim
     assert all(len(s["text"]) <= 600 for s in slim["style"])
 
 

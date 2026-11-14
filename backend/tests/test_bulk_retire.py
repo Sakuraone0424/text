@@ -117,7 +117,7 @@ def test_waiting_deepseek_tasks_are_cancelled_and_writing_is_claudes_only(db, se
     got = {r["id"]: (r["state"], r["error_code"]) for r in db.execute("SELECT id,state,error_code FROM ai_jobs").fetchall()}
     assert all(got[i] == ("cancelled", "retired_by_user") for i in waiting)
     assert got[keep[0]][0] == "pending" and got[keep[1]][0] == "pending" and got[keep[2]][0] == "succeeded"     # grading, advice, finished work stay
-    assert ext.policy(db)["generation"] == "claude" and ext.policy(db)["review"] == "deepseek" and ext.policy(db)["grading"] == "deepseek"
+    assert ext.policy(db)["generation"] == "claude" and ext.policy(db)["review"] == "none" and ext.policy(db)["grading"] == "deepseek"
     assert ext.rebuild_state(db)["active"] is True
 
 

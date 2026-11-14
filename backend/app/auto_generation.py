@@ -811,6 +811,20 @@ def claimable_count(conn, uid=None):
     ).fetchone()["n"]
 
 
+CLAUDE_QUEUE_TARGET = 30      # when writing is Claude's, enough writing tasks wait for one Routine run to lease 30 of them
+
+
+def generation_claimable_count(conn, uid=None):
+    """Writing tasks (and repairs of drafts) that a worker or a Routine could take now: the number planning compares with its target when
+    Claude writes (the reviews and gradings in the queue are not writing work and do not hold planning back)."""
+    extra, params = surplus_filter(conn, uid)
+    return conn.execute(
+        "SELECT count(*) AS n FROM ai_jobs WHERE state IN ('pending','retrying') AND next_retry<=clock_timestamp() "
+        "AND (kind='generation' OR (kind='repair' AND payload ? 'repair_of_job')) "
+        "AND NOT (settings_snapshot ?| ARRAY['limited_trial','review_campaign','qa_automation'])" + extra, params
+    ).fetchone()["n"]
+
+
 def deferred_count(conn, uid):
     """Tasks waiting only because their bucket is stocked above the reserve ('已超额、暂缓'), and how many per bucket."""
     keys = satisfied_keys(conn, uid)
@@ -894,7 +908,7 @@ def plan_gap(conn, uid, max_active=2):
     return None
 
 
-def fill_queue(conn, uid, target):
+def fill_queue(conn, uid, target, writing_only=False):
     """Queue writing requests until `target` jobs are claimable, never beyond what the bank is short of.
 
     `bucket_gaps` already deducts everything on its way (questions in review or repair, unfinished writing
@@ -905,8 +919,10 @@ def fill_queue(conn, uid, target):
     """
     detail = FILL_DETAIL
     detail.clear()
-    detail.update(want=target, claimable_before=claimable_count(conn, uid), deferred=deferred_count(conn, uid)[0])
-    first = plan_gap(conn, uid)
+    # Claude writing: the target counts writing tasks only, and the cap on writing tasks in flight is the target (not 2, which is DeepSeek's pace)
+    count = generation_claimable_count if writing_only else claimable_count
+    detail.update(want=target, claimable_before=count(conn, uid), deferred=deferred_count(conn, uid)[0], writing_only=writing_only)
+    first = plan_gap(conn, uid, max_active=max(2, target) if writing_only else 2)
     queued = 1 if first else 0
     if first is None:
         detail.update(queued=0, stop=GAP_WHY.get("stop"), buckets=",".join(GAP_WHY.get("buckets", [])[:6]))
@@ -916,7 +932,7 @@ def fill_queue(conn, uid, target):
         return queued
     stop = "target_reached"
     # the target counts the work a worker will really take: tasks of buckets stocked above the reserve are left out (they are not claimed)
-    while claimable_count(conn, uid) < target:
+    while count(conn, uid) < target:
         if plan_gap(conn, uid, max_active=target) is None:
             stop = GAP_WHY.get("stop") or "no_request"
             detail["buckets"] = ",".join(GAP_WHY.get("buckets", [])[:6])

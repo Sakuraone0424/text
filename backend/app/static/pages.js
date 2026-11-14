@@ -372,6 +372,7 @@
     el("span", `${SHORT[d.subject]} · ${d.chapter}`, head, "mc-chapter");
     if (d.points !== null && d.points !== undefined) el("span", `${n2(d.points)} / ${n2(d.max_points)} 分`, head, "qd-score");
     el("p", d.stem, root, "qd-stem");
+    if (d.writer || d.review_label) el("p", `出题：${d.writer || "—"}` + (d.review_label ? ` · 审核：${d.review_label}` : ""), root, "muted small");
     if (d.question_type === "single_choice" && d.options && Object.keys(d.options).length) {
       const list = el("ul", undefined, root, "qd-options");
       Object.entries(d.options).sort(([a], [b]) => a.localeCompare(b)).forEach(([letter, text]) => {

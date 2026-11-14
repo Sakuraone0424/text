@@ -168,6 +168,9 @@
 
   /* ---------------- who does which kind of task ---------------- */
   const MODES = [["deepseek", "DeepSeek"], ["claude", "Claude"], ["claude_first", "Claude 优先（超时转 DeepSeek）"]];
+  /* Review has its own list: "no review" (the owner's default: a Claude question is published when it passes the program checks), the Claude
+     Routine (another session reviews), or DeepSeek (as before). */
+  const REVIEW_MODES = [["none", "不审核（仅程序检查）"], ["claude", "Claude 定时任务"], ["deepseek", "DeepSeek"]];
   async function showExecutors() {
     const root = $("executor-form");
     if (!root) return;
@@ -184,7 +187,7 @@
       el("span", label, row, "label");
       const select = el("select", undefined, row);
       select.id = "executor-" + key;
-      MODES.forEach(([value, text]) => (el("option", text, select).value = value));
+      (key === "review" ? REVIEW_MODES : MODES).forEach(([value, text]) => (el("option", text, select).value = value));
       select.value = data.routing[key];
     }
     const hours = el("label", undefined, root, "field");

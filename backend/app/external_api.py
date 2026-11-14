@@ -75,7 +75,7 @@ def status():
 
 class ExecutorSettings(StrictModel):
     generation: str | None = Field(default=None, pattern="^(deepseek|claude|claude_first)$")
-    review: str | None = Field(default=None, pattern="^(deepseek|claude|claude_first)$")
+    review: str | None = Field(default=None, pattern="^(none|deepseek|claude|claude_first)$")
     grading: str | None = Field(default=None, pattern="^(deepseek|claude|claude_first)$")
     fallback_hours: StrictInt | None = Field(default=None, ge=1, le=72)
 
