@@ -81,7 +81,7 @@ def test_questions_already_waiting_for_a_review_are_published_and_their_review_t
     db.execute("UPDATE auto_question_states SET status='checking' WHERE question_id=ANY(%s)", ([qid, deepseek_q],))
     report = {}
     assert auto_worker.publish_waiting_claude_questions(db, report) == 1
-    assert report["program_only"] == "published=1,blocked=0"
+    assert report["program_only"].startswith("considered=2,published=1,blocked=0,review_setting=none,reason=ok")
     assert db.execute("SELECT status FROM reviewed_questions WHERE id=%s", (qid,)).fetchone()["status"] == "published"
     assert [j["state"] for j in review_jobs_of(db, qid)] == ["cancelled"]            # the DeepSeek review task is cancelled
     assert db.execute("SELECT status FROM reviewed_questions WHERE id=%s", (deepseek_q,)).fetchone()["status"] == "draft"      # DeepSeek's question waits for its review

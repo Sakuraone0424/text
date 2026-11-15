@@ -108,20 +108,45 @@ def policy(conn):
 
 
 def save_policy(conn, values):
+    """Keep what was chosen. Only the values given are written: a task nobody chose keeps following the environment and the default, so a
+    later change of a default reaches it (writing the whole effective policy, as this used to, froze every default the first time anything
+    was saved - which is how an old default kept overriding the owner's later choice)."""
     from app import legacy_reuse
 
-    current = policy(conn)
+    saved = dict(legacy_reuse._state(conn, STATE_KEY) or {})
     for task in TASKS:
         if task in values:
             if values[task] not in MODES or (values[task] == "none" and task != "review"):
                 raise ValueError("unknown_executor_mode")
-            current[task] = values[task]
+            saved[task] = values[task]
+            if task == "review":
+                saved[REVIEW_CHOICE_KEY] = True       # a review choice made now is the owner's and is never replaced by the one-time rule
     if "fallback_hours" in values:
         if type(values["fallback_hours"]) is not int or not 1 <= values["fallback_hours"] <= 72:
             raise ValueError("fallback_hours_out_of_range")
-        current["fallback_hours"] = values["fallback_hours"]
-    legacy_reuse._set_state(conn, STATE_KEY, current)
-    return current
+        saved["fallback_hours"] = values["fallback_hours"]
+    legacy_reuse._set_state(conn, STATE_KEY, saved)
+    return policy(conn)
+
+
+REVIEW_CHOICE_KEY = "review_none_chosen_v1"
+
+
+def apply_owner_review_choice(conn):
+    """Once: the owner chose "no review" (Claude's questions are published on the program checks). A review setting saved before that choice
+    existed - the old default "deepseek" written when anything else was saved, or "claude" / "claude_first" - would otherwise keep standing
+    in its way, so it is replaced by "none" this one time. Anything chosen afterwards on the page is kept. Returns what it replaced, or None."""
+    from app import legacy_reuse
+
+    saved = dict(legacy_reuse._state(conn, STATE_KEY) or {})
+    if saved.get(REVIEW_CHOICE_KEY):
+        return None
+    before = saved.get("review")
+    if before is not None:
+        saved["review"] = "none"                   # (nothing saved: the default, "none", already applies, and an environment setting stays the deployer's)
+    saved[REVIEW_CHOICE_KEY] = True
+    legacy_reuse._set_state(conn, STATE_KEY, saved)
+    return before
 
 
 def waiting_for_claude(conn):
