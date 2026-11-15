@@ -273,7 +273,7 @@ def enqueue_review(conn, uid, qid, sid, phases=("science", "answer")):
         raise ValueError("campaign_identity_preflight_failed")
     jobs = []
     for phase, payload in payloads:
-        job = ai_jobs.enqueue(conn, uid, f"campaign:{sid}:{qid}:{phase}", phase + "_review", payload)
+        job = ai_jobs.enqueue_rekeyed(conn, uid, f"campaign:{sid}:{qid}:{phase}", phase + "_review", payload)
         bind(conn, job["id"], sid)
         jobs.append(job)
     conn.execute("UPDATE auto_question_states SET status='checking',reason=NULL,updated_at=clock_timestamp() WHERE question_id=%s", (qid,))

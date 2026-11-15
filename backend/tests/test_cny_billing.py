@@ -172,7 +172,9 @@ def test_unknown_timeout_and_retry_reservations_immutable(db, setup_ai):
     report = b.summary(db, setup_ai)
     assert (
         report["usage_estimate_cny"]["unknown"] == 1
-        and Decimal(report["unknown_reserved_cny"]) == first["reserved_cny"] * 2
+        # the finished attempt without usage counts as an estimate (no settled call yet: its own ceiling); the second
+        # is still running and is counted separately, at its reservation
+        and Decimal(report["unknown_reserved_cny"]) == first["reserved_cny"]
     )
     assert report["confirmed_invoice_cny"] is None
     with pytest.raises(psycopg.Error), db.transaction():
@@ -297,9 +299,11 @@ def test_concurrent_cny_reservation_one_winner(live_app):  # noqa: F811
     _, dsn, _ = live_app
     with psycopg.connect(dsn, row_factory=dict_row) as c:
         uid = setup_ai.__wrapped__(c)
-        m.configure(
-            c, uid, "deepseek-flash", "high", daily_cny="0.10", max_concurrency=4
-        )
+        m.configure(c, uid, "deepseek-flash", "high", daily_cny="0.10", max_concurrency=4)
+        snap = m.snapshot(c, uid)
+        one = m.cost_bound({**snap, "price_snapshot": b.current_price(c, snap["model_id"])}, at=b.utcnow())
+        # room for exactly one reservation (its price depends on whether it is peak or off-peak right now)
+        c.execute("UPDATE ai_settings SET daily_cny=%s", (one * Decimal("1.5"),))
         jobs.enqueue(c, uid, "parallel1", "science_review", {})
         jobs.enqueue(c, uid, "parallel2", "science_review", {})
 
@@ -371,8 +375,10 @@ def test_public_price_parser_cny_and_layout_fail_closed():
     assert prices[0]["official_effective_at"] is None
     with pytest.raises(ValueError):
         parse(html.replace("0.02元", "0.02 USD"))
-    with pytest.raises(ValueError):
-        parse(html.replace("每 1,000 次成功请求", "每次请求"))
+    # The Search & Fetch table is not needed for model prices: a reshaped one drops the tool rates (tools stay disabled and
+    # tool_cost fails closed without them) instead of blocking the model prices.
+    reshaped = parse(html.replace("每 1,000 次成功请求", "每次请求"))
+    assert "search_per_success" not in reshaped[0]["rules"] and reshaped[0]["rules"]["network_tools_enabled"] is False
 
 
 def test_offpeak_usage_estimate_and_cross_boundary():
@@ -439,7 +445,9 @@ def test_upgrade_does_not_use_unknown_model_price(db, setup_ai):
         (Jsonb(cap),),
     )
     m.configure(db, setup_ai, "deepseek-flash", "high", auto_upgrade=True)
-    assert auto_upgrade(db, setup_ai) is None
+    out = auto_upgrade(db, setup_ai)  # never switched, and never silent about why
+    assert out["status"] == "waiting" and out["candidates"] == [{"model": "unknown-price-new", "reason": "price_not_verified"}]
+    assert m.settings(db, setup_ai)["model_id"] == "deepseek-flash"
 
 
 def test_lease_recovery_records_unknown_and_stop_blocks_new_calls(db, setup_ai):
@@ -551,3 +559,38 @@ def test_price_refresh_reprices_attempt_without_changing_model_snapshot(db, setu
         claimed["settings_snapshot"]["price_snapshot"]["version"]
         != "same-rates-refreshed"
     )
+
+
+def test_one_save_keeps_every_field_including_max_concurrency_one_to_four(client, db, monkeypatch):
+    from app import model_api
+
+    @contextmanager
+    def connection():
+        yield db
+
+    monkeypatch.setattr(model_api, "get_db", connection)
+    headers = {"x-api-key": "learner-test-key"}
+    body = dict(
+        model_id="deepseek-flash", effort="high", auto_discover=True, auto_upgrade=False, token_limit=4096,
+        retry_limit=2, max_concurrency=3, daily_cny="15", monthly_cny="90", task_cny="1", trial_cny="10",
+        trial_active=False, task_limit_enabled=True, daily_limit_enabled=True, monthly_limit_enabled=True,
+    )
+    # the model/effort stored now must be saveable even if it is not (yet) a verified model
+    client.get("/v2/model", headers=headers)
+    saved = client.post("/v2/model/save", headers=headers, json=body)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["settings"]["max_concurrency"] == 3
+    # a fresh read (what a page refresh does) still has the user's value
+    assert client.get("/v2/model", headers=headers).json()["settings"]["max_concurrency"] == 3
+    for n in (1, 4):
+        assert client.post("/v2/model/save", headers=headers, json={**body, "max_concurrency": n}).json()["settings"]["max_concurrency"] == n
+    for bad in (0, 5):
+        assert client.post("/v2/model/save", headers=headers, json={**body, "max_concurrency": bad}).status_code == 422
+    # stop / resume is its own switch and does not touch the saved limits
+    stopped = client.post("/v2/model/stopped", headers=headers, json={"stopped": True}).json()["settings"]
+    assert stopped["stopped"] is True and stopped["max_concurrency"] == 4 and Decimal(stopped["daily_cny"]) == Decimal("15")
+    assert client.post("/v2/model/stopped", headers=headers, json={"stopped": False}).json()["settings"]["stopped"] is False
+    # a different model that was never verified is refused, and nothing is half-saved
+    refused = client.post("/v2/model/save", headers=headers, json={**body, "model_id": "never-verified", "max_concurrency": 2})
+    assert refused.status_code == 409
+    assert client.get("/v2/model", headers=headers).json()["settings"]["max_concurrency"] == 4

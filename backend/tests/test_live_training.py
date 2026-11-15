@@ -39,6 +39,8 @@ def live_app(tmp_path):
             apply_migrations(conn)
             factory = fixtures.question_factory.__wrapped__(conn)
             blueprint = fixtures.blueprint.__wrapped__()
+            from app.training_spec import SPECIFICATION as historical_specification
+            blueprint = blueprint.model_copy(update={"specification": historical_specification})
             fixtures.bank.__wrapped__(
                 conn, factory, fixtures.passing_audit.__wrapped__(), blueprint
             )
@@ -55,6 +57,8 @@ def live_app(tmp_path):
             "QUIZ_REVIEW_API_KEY": "operator-live",
             "NOTION_SYNC_ENABLED": "0",
             "QUIZ_WORKER_ENABLED": "1",
+            "QUIZ_QA_LEGACY_FIXTURE_SCHEMA": schema,
+            "QUIZ_QA_LEGACY_FIXTURE": "1",
         }
         with (tmp_path / "server.log").open("w+") as log:
             process = subprocess.Popen(
@@ -67,6 +71,8 @@ def live_app(tmp_path):
                     "127.0.0.1",
                     "--port",
                     str(port),
+                    "--timeout-graceful-shutdown",   # a page that still holds the progress event stream open must not hold the shutdown
+                    "3",
                 ],
                 cwd=Path(__file__).resolve().parents[1],
                 env=env,
@@ -91,12 +97,19 @@ def live_app(tmp_path):
                 else:
                     raise RuntimeError("Test server readiness timeout")
 
+                # Existing 28q paper is intentionally prepared in this
+                # disposable QA schema. Upgraded UI must safely resume it,
+                # not replace it with an unreviewed 60q synthetic bank.
+                seeded = client.post("/v2/papers", json=blueprint.model_dump())
+                if seeded.status_code != 200 or seeded.json().get("count") != 28:
+                    raise RuntimeError("Legacy HTTPS QA fixture was not prepared")
+
                 def restart_server():
                     nonlocal process
                     process.terminate()
                     process.wait(timeout=15)
                     process = subprocess.Popen(
-                        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
+                        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port), "--timeout-graceful-shutdown", "3"],
                         cwd=Path(__file__).resolve().parents[1],
                         env=env, stdout=log, stderr=log,
                     )
@@ -224,7 +237,10 @@ def login(page, base):
     page.locator("#password").fill("test-live-login")
     page.locator("#login button").click()
     page.locator("#login").wait_for(state="hidden")
-    page.locator("#prepare").click()
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    page.evaluate("window.TodayPaper.prepare('objective')")                       # prepares today's paper (the isolated fixture's old paper) and stays on the page ...
+    page.wait_for_function("window.TrainingUI.today().hasPaper")
+    page.evaluate("document.getElementById('start-dialog').showModal()")          # ... then the start sheet asks to confirm
     page.locator("#start").wait_for(state="visible")
 
 
@@ -255,7 +271,7 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     page.on("pageerror", lambda e: errors.append(str(e)))
     login(page, base)
     assert page.locator('a[href="/"]').count() == 0
-    assert page.locator("details").count() == 0
+    assert page.locator("details:visible").count() == 0   # the hidden progress/model views hold some; none is on screen
     assert page.locator("article").count() == 0
     page.locator("#start").click()
     page.locator("#questions article:not([hidden])").wait_for()
@@ -298,7 +314,9 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     assert camera_response.value.status == 200
     page.wait_for_function("document.querySelector('#status').textContent.includes('图片已保存')")
     page.reload()
-    page.locator("#prepare").click()
+    page.evaluate("location.hash = '#/home'")      # a reload keeps the address (#/exam); go back to the home page first
+    page.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    page.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     page.locator("#questions article:not([hidden])").wait_for()
     assert (
         page.locator(f"article[data-id='{term['id']}'] textarea").input_value()
@@ -313,7 +331,8 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     second.locator("#password").fill("test-live-login")
     second.locator("#login button").click()
     second.locator("#login").wait_for(state="hidden")
-    second.locator("#prepare").click()
+    second.wait_for_function("document.getElementById('prepare-objective').dataset.kind && document.getElementById('prepare-objective').dataset.kind !== 'loading'")
+    second.evaluate("window.TodayPaper.prepare('objective').then(() => TrainingUI.showView('exam'))")
     second.locator("#questions article:not([hidden])").wait_for()
     assert (
         second.locator(f"article[data-id='{term['id']}'] textarea").input_value()
@@ -323,7 +342,8 @@ def test_iphone_ipad_restore_upload_and_full_150_point_e2e(live_app, browser):
     page.on("dialog", lambda dialog: dialog.accept())
     confirm_submission(page)
     page.locator("#result > h2").wait_for()
-    assert page.get_by_text("本卷命题依据（训练优先级，不是考试概率）").count() == 1
+    assert page.get_by_text("本卷命题依据（训练优先级，不是考试概率）").count() == 0       # audit wording is not on the result page
+    assert page.get_by_text("独立AI双轮复核").count() == 0
     result = client.get(f"/v2/papers/{pid}/result").json()
     assert result["pending"] == 16 and result["graded_points"] == 30
     with psycopg.connect(dsn) as conn:

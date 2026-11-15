@@ -43,7 +43,7 @@ def db(raw_db):
 @pytest.fixture
 def client(db, monkeypatch):
     from app.main import app
-    from app import main, routes_v2
+    from app import auth, main, routes_v2
 
     @contextmanager
     def test_db():
@@ -52,6 +52,7 @@ def client(db, monkeypatch):
 
     monkeypatch.setattr(main, "get_db", test_db)
     monkeypatch.setattr(routes_v2, "get_db", test_db)
+    monkeypatch.setattr(auth, "get_db", test_db)
     monkeypatch.setenv("QUIZ_API_KEY", "learner-test-key")
     monkeypatch.setenv("QUIZ_REVIEW_API_KEY", "operator-test-key")
     monkeypatch.setenv("QUIZ_USERNAME", "test-owner")
@@ -192,3 +193,76 @@ def running(db, bank, blueprint):
     paper = q.create_paper(db, uid, blueprint)
     sessions.start(db, uid, paper["paper_id"])
     return uid, q.load_paper(db, uid, paper["paper_id"])
+
+
+@pytest.fixture(autouse=True)
+def photo_answers_for_legacy_tests(monkeypatch):
+    """Photo answers are off in production; the older tests exercise the upload path.
+
+    Tests of the default behaviour delete this variable themselves.
+    """
+    monkeypatch.setenv("QUIZ_PHOTO_ANSWERS_ENABLED", "1")
+
+
+@pytest.fixture(autouse=True)
+def wall_clock_is_off_peak(monkeypatch):
+    """Tests must not depend on the time of day they run at.
+
+    Question writing waits for DeepSeek's weekday peak hours; with no explicit time (the wall
+    clock) the tests see off-peak. Calls that pass a time, and tests that patch is_peak, are
+    unaffected.
+    """
+    from app import cost_control
+
+    real = cost_control.is_peak
+    monkeypatch.setattr(
+        cost_control, "is_peak",
+        lambda at=None, calendar=None: False if at is None else real(at, calendar),
+    )
+
+
+@pytest.fixture(autouse=True)
+def no_real_balance_calls(monkeypatch):
+    """Tests never ask DeepSeek for the balance; a test that wants a reading passes its own."""
+    from app import cost_reconcile
+
+    def refuse(timeout=10):
+        raise ValueError("balance_disabled_in_tests")
+
+    monkeypatch.setattr(cost_reconcile, "fetch_balance", refuse)
+
+def fresh_progress_cache():
+    from app import model_api
+
+    model_api._PROGRESS.invalidate()
+    yield
+    model_api._PROGRESS.invalidate()
+
+
+@pytest.fixture(autouse=True)
+def forget_module_caches():
+    """In-process caches (stock check, chapter names, readiness) must not leak from one test's database into the next."""
+    from app import auto_generation, auto_quality
+
+    auto_generation._SATISFIED.clear()
+    try:
+        from app import chapters
+
+        chapters.clear_cache()
+    except ImportError:                        # (the chapter-name module arrives with the mistake-page work)
+        pass
+    getattr(auto_quality, "_READY_SEEN", {}).clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
+def writing_is_deepseeks_in_the_older_tests(monkeypatch):
+    """The production default routes question writing to a Claude scheduled task first. The existing tests exercise the DeepSeek worker's
+    path, so they run with writing routed to DeepSeek; test_external_executor.py clears this to test the real default."""
+    monkeypatch.setenv("EXECUTOR_GENERATION", "deepseek")
+
+
+@pytest.fixture(autouse=True)
+def the_one_time_withdrawal_is_off_in_the_tests(monkeypatch):
+    """The unused part of the bank is withdrawn once, by the first worker run after the deploy. The tests call bulk_retire themselves."""
+    monkeypatch.setenv("BULK_RETIRE_DISABLED", "1")

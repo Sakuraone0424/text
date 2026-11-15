@@ -1,0 +1,33 @@
+{
+  "collection_version": "ocr-corrected-2026-10-26-v1",
+  "source": "actual six downloaded Google Drive files, verified 2026-10-29",
+  "notes": "Hashes pin exact downloaded bytes; update only after explicit version change. No source bytes are stored in Git.",
+  "files": {
+    "biochemistry_upper": {
+      "sha256": "89b226f7c9da53179943375751cacdf873b3693efdb426304a41ed1556e3b013",
+      "bytes": 1749006
+    },
+    "biochemistry_lower": {
+      "sha256": "1cdd646caae4fe185fc90623e2706ed9503690fe93a41fb91f381927694c9a5b",
+      "bytes": 1520962
+    },
+    "biochemistry_notes": {
+      "sha256": "dbae27206fed8ad0b1303dcf759c73b55194dbb4fa6308f392826592ec85bd6c",
+      "bytes": 915492
+    },
+    "cell_biology": {
+      "sha256": "de3dd4e75ba10c5a4f49096949a0e4cf44512856070440fd410c373e0745bae1",
+      "bytes": 1387287
+    },
+    "biochemistry_exams": {
+      "sha256": "6add10fad4708453f7f8cff5562ee73bf0853d70e43c8c3d67d06299cf82c001",
+      "bytes": 1697187,
+      "embedded_media_objects": 27
+    },
+    "cell_biology_exams": {
+      "sha256": "63b0eea0b1dbb5a7b6323dcd769792bba60a96ce9d93c6b8bd8c79fd4939ef79",
+      "bytes": 272001,
+      "embedded_media_objects": 4
+    }
+  }
+}

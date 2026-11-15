@@ -5,11 +5,12 @@ from decimal import Decimal
 from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import Field, StrictBool, StrictInt
-from app.auth import require_auth
+from app.auth import require_auth, same_secret
 from app.common import ensure_user
 from app.db import get_db
 from app.question_quality import StrictModel
 from app import model_router as models
+from app.server_cache import StaleCache
 
 router = APIRouter(prefix="/v2/model", tags=["models"])
 
@@ -34,8 +35,16 @@ def operation(name, fn):
 
 
 def status(c, uid):
+    settings = models.settings(c, uid)
+    from app import cny_billing
+
+    try:
+        conflict = cny_billing.price_conflict(c, settings["model_id"])
+    except (ValueError, KeyError):
+        conflict = None
     return dict(
-        settings=models.settings(c, uid),
+        price_conflict=conflict,       # two price versions in force whose rates differ, and the official page could not settle it: the owner picks one
+        settings=settings,
         catalog=models.catalog(c),
         label="AI自动核验",
         running_tasks_keep_original_settings=True,
@@ -131,7 +140,7 @@ def command(data: Command, request: Request, name=Depends(require_auth)):
 class Limits(StrictModel):
     token_limit: StrictInt = Field(default=4096, ge=128, le=32768)
     retry_limit: StrictInt = Field(default=2, ge=0, le=5)
-    max_concurrency: StrictInt = Field(default=1, ge=1, le=4)
+    max_concurrency: StrictInt = Field(default=2, ge=1, le=4)
     daily_cny: Decimal = Field(ge=0, le=1000, allow_inf_nan=False)
     monthly_cny: Decimal = Field(ge=0, le=10000, allow_inf_nan=False)
     trial_active: StrictBool = True
@@ -170,6 +179,102 @@ def limits(data: Limits, request: Request, name=Depends(require_auth)):
         return status(c, u)
 
     return operation(name, save)
+
+
+class SaveAll(StrictModel):
+    """Everything on the model page except the stop switch, saved together by the one Save button."""
+    model_id: str = Field(min_length=1, max_length=200)
+    effort: str = Field(min_length=1, max_length=20)
+    auto_discover: StrictBool
+    auto_upgrade: StrictBool
+    token_limit: StrictInt = Field(ge=128, le=32768)
+    retry_limit: StrictInt = Field(ge=0, le=5)
+    max_concurrency: StrictInt = Field(ge=1, le=4)
+    daily_cny: Decimal = Field(ge=0, le=1000, allow_inf_nan=False)
+    monthly_cny: Decimal = Field(ge=0, le=10000, allow_inf_nan=False)
+    task_cny: Decimal = Field(ge=0, le=1000, allow_inf_nan=False)
+    trial_cny: Decimal = Field(ge=0, le=10000, allow_inf_nan=False)
+    trial_active: StrictBool
+    task_limit_enabled: StrictBool
+    daily_limit_enabled: StrictBool
+    monthly_limit_enabled: StrictBool
+    weak_focus: StrictBool | None = None      # 薄弱章节优先出题 (None: leave as it is)
+    mistake_below: float | None = Field(default=None, gt=0, le=1, allow_inf_nan=False)       # 主观题得分率低于它算错题
+    consolidate_below: float | None = Field(default=None, gt=0, le=1, allow_inf_nan=False)  # 低于它（且不低于上一条）算待巩固
+
+
+@router.post("/save")
+def save_all(data: SaveAll, request: Request, name=Depends(require_auth)):
+    """One transaction: model, effort, switches, limits, concurrency, token and retry limits."""
+    origin(request)
+
+    def save(c, u):
+        current = models.settings(c, u)
+        same = (data.model_id, data.effort) == (current["model_id"], current["effort"])
+        models.configure(
+            c, u, data.model_id, data.effort, verify=not same,
+            **{k: v for k, v in data.model_dump(exclude={"model_id", "effort"}).items() if not (k in ("weak_focus", "mistake_below", "consolidate_below") and v is None)},
+        )
+        return status(c, u)
+
+    return operation(name, save)
+
+
+class Stopped(StrictModel):
+    stopped: StrictBool
+
+
+@router.post("/stopped")
+def set_stopped(data: Stopped, request: Request, name=Depends(require_auth)):
+    """The stop / resume switch (the danger zone of the page), separate from Save."""
+    origin(request)
+
+    def apply(c, u):
+        models.settings(c, u)
+        c.execute("UPDATE ai_settings SET stopped=%s,updated_at=clock_timestamp() WHERE user_id=%s", (data.stopped, u))
+        return status(c, u)
+
+    return operation(name, apply)
+
+
+@router.get("/reconciliation")
+def reconciliation(name=Depends(require_auth)):
+    """What the counted spend is made of, the last balance reading and the last corrections (time, before, after, difference)."""
+    from app import cny_billing, cost_reconcile
+
+    return operation(name, lambda c, u: dict(breakdown=cny_billing.ledger_breakdown(c, u), **cost_reconcile.status(c)))
+
+
+@router.post("/reconcile")
+def reconcile_now(request: Request, name=Depends(require_auth)):
+    """Read the real balance now and reconcile (the worker does this hourly and at Beijing midnight)."""
+    origin(request)
+    from app import cost_reconcile
+
+    def run(c, u):
+        try:
+            balance = cost_reconcile.fetch_balance()
+        except ValueError as exc:
+            raise ValueError("balance_unavailable:" + str(exc))
+        return dict(result=cost_reconcile.reconcile(c, u, balance, "manual"))
+
+    return operation(name, run)
+
+
+@router.get("/waste/stats")
+def waste_stats(hours: int = Query(24, ge=1, le=168), name=Depends(require_auth)):
+    """Why finished model work was thrown away in the last `hours`, most frequent first, with how each is handled now."""
+    from app import waste_report
+
+    return operation(name, lambda c, u: waste_report.full_stats(c, hours))
+
+
+@router.get("/waste/replay")
+def waste_replay(hours: int = Query(24, ge=1, le=168), limit: int = Query(300, ge=1, le=1000), name=Depends(require_auth)):
+    """Recent failed drafts run through today's rules again. No model call, nothing is written."""
+    from app import waste_report
+
+    return operation(name, lambda c, u: waste_report.replay(c, hours, limit))
 
 
 class Probe(StrictModel):
@@ -230,7 +335,9 @@ def cancel(job_id: int, request: Request, name=Depends(require_auth)):
             already_sent_request_cannot_be_recalled=True,
         )
 
-    return operation(name, stop)
+    result = operation(name, stop)
+    _PROGRESS.invalidate()
+    return result
 
 
 @router.get("/backup")
@@ -284,11 +391,168 @@ def insights(name=Depends(require_auth)):
     )
 
 
+@router.get("/insights/status")
+def insights_status(name=Depends(require_auth)):
+    from app.auto_insights import readiness
+
+    return operation(name, readiness)
+
+
 @router.get("/billing")
 def billing(name=Depends(require_auth)):
     from app.cny_billing import summary
 
     return operation(name, summary)
+
+
+@router.get("/spend")
+def spend(name=Depends(require_auth)):
+    """Today / this month, per-call tokens and cost, caps, and the average cost per admitted question."""
+    from app.cost_control import spend_report
+
+    return operation(name, spend_report)
+
+
+class BenchmarkApproval(StrictModel):
+    model_id: str = Field(min_length=1, max_length=200)
+    approved: StrictBool = True
+    note: str = Field(default="", max_length=500)
+
+
+@router.post("/benchmark-approval")
+def benchmark_approval(data: BenchmarkApproval, request: Request, name=Depends(require_auth)):
+    """Operator-only (needs QUIZ_REVIEW_API_KEY): record that the quality comparison passed.
+
+    This only ALLOWS auto-upgrade to consider the model; it never selects it. Nothing automatic
+    calls this, and it is refused for a model that has no real compatibility probe yet.
+    """
+    import hmac
+
+    origin(request)
+    configured = os.environ.get("QUIZ_REVIEW_API_KEY", "")
+    if not configured:
+        raise HTTPException(503, "Operator approval is disabled: QUIZ_REVIEW_API_KEY is not configured")
+    if not same_secret(request.headers.get("x-review-api-key", ""), configured):
+        raise HTTPException(403, "Operator authorization required")
+    from app.model_compatibility import approve_benchmark
+
+    return operation(name, lambda c, u: approve_benchmark(c, data.model_id, data.approved, data.note))
+
+
+STREAM_SECONDS = 8      # short on purpose: the browser reconnects at once, and a restart is never held up for long
+_PROGRESS = StaleCache(ttl=30)
+_BANK_CARD = StaleCache(ttl=30)
+
+
+@router.get("/progress")
+def progress_report(fresh: bool = Query(False), name=Depends(require_auth)):
+    """Question-writing progress: counts, codes and times only (no question or textbook text).
+
+    Served from a shared copy (a page polling every 5 s, or several open pages, share one build: see StaleCache). The copy
+    is rebuilt as soon as the database says something changed (progress_events), so it is also never stale for long;
+    `?fresh=1` rebuilds now (used after cancelling a task)."""
+    from app.progress import report
+
+    return _PROGRESS.get(name, lambda: operation(name, report), fresh=fresh)
+
+
+@router.get("/progress/bank")
+def progress_bank_card(name=Depends(require_auth)):
+    """Just the 'is tomorrow's paper stocked, and when will it be' block of the home progress card (cached the same way)."""
+    from app.learning_stats import tomorrow_ready
+
+    return _BANK_CARD.get(name, lambda: operation(name, tomorrow_ready))
+
+
+def _rebuild_progress_pages():
+    _PROGRESS.rebuild_all()
+    _BANK_CARD.rebuild_all()
+
+
+from app import progress_events  # noqa: E402
+
+progress_events.on_change(_rebuild_progress_pages)
+
+
+@router.get("/progress/events")
+async def progress_events_stream(request: Request, name=Depends(require_auth)):
+    """Server-sent events: `event: update` whenever the progress may have changed (the page then fetches /progress), and a
+    comment line every 20 s to keep the connection open. The page falls back to polling if this stream ends."""
+    import asyncio
+    import json
+    import time
+
+    from fastapi.responses import StreamingResponse
+
+    hub = progress_events.HUB
+    entry = hub.subscribe()
+
+    async def stream():
+        # A stream never lives longer than STREAM_SECONDS: the browser reconnects by itself (retry:), and a deploy or restart is
+        # never held up by pages that are still open (uvicorn waits for open responses before it shuts down).
+        began = time.monotonic()
+        last_ping = began
+        try:
+            yield "retry: 1000\n"
+            yield f"event: hello\ndata: {json.dumps({'version': hub.version})}\n\n"
+            while not hub.closing and time.monotonic() - began < STREAM_SECONDS and not await request.is_disconnected():
+                try:
+                    event = await asyncio.wait_for(entry[1].get(), timeout=1.0)
+                    yield f"event: update\ndata: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    if time.monotonic() - last_ping >= 15:
+                        last_ping = time.monotonic()
+                        yield ": ping\n\n"
+        finally:
+            hub.unsubscribe(entry)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+class PriceConfirm(StrictModel):
+    price_id: StrictInt = Field(ge=1)
+
+
+@router.post("/price-confirm")
+def confirm_price_version(data: PriceConfirm, request: Request, name=Depends(require_auth)):
+    """The fallback when the official page could not settle two different prices: the owner picks the version to use."""
+    origin(request)
+    from app import cny_billing
+
+    def run(c, u):
+        model = models.settings(c, u)["model_id"]
+        shown = cny_billing.price_conflict(c, model)
+        if not shown or data.price_id not in {v["price_id"] for v in shown}:
+            raise ValueError("price_version_not_in_conflict")
+        return cny_billing.confirm_price(c, data.price_id)
+
+    return operation(name, run)
+
+
+@router.get("/retired")
+def retired_questions(name=Depends(require_auth)):
+    """The questions the owner took out of use, per subject and type, and what the one-time withdrawal did (before / after)."""
+    from app import bulk_retire
+
+    return operation(name, lambda c, u: bulk_retire.summary(c))
+
+
+class RestoreRetired(StrictModel):
+    subject: str | None = Field(default=None, pattern="^(biochemistry|cell_biology)$")
+    question_type: str | None = Field(default=None, pattern="^(single_choice|fill_blank|term|short_answer|essay)$")
+
+
+@router.post("/retired/restore")
+def restore_retired(data: RestoreRetired, request: Request, name=Depends(require_auth)):
+    """Put the withdrawn questions of one subject and type back (a subject or type left out means all of them)."""
+    origin(request)
+    from app import bulk_retire
+
+    return operation(name, lambda c, u: dict(restored=bulk_retire.restore(c, data.subject, data.question_type)))
 
 
 @router.post("/prices/refresh")

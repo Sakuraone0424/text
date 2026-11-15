@@ -1,11 +1,29 @@
 "use strict";
-const CACHE = "xiaohan-training-shell-v8-offline-recovery-upgrade";
+const CACHE = "xiaohan-training-shell-v19-one-shell";
 const ASSETS = [
   "/",
   "/training",
   "/static/training.js",
   "/static/app.css",
+  "/static/tokens.css",
+  "/static/shell.js",
   "/static/training.css",
+  "/static/views.css",
+  "/static/motion.css",
+  "/static/motion.js",
+  "/static/pages.css",
+  "/static/pages.js",
+  "/static/logic.js",
+  "/static/manual.js",
+  "/static/drill.js",
+  "/static/data.js",
+  "/static/live.js",
+  "/static/progress.js",
+  "/static/model.js",
+  "/static/compare.js",
+  "/static/charts.js",
+  "/static/insights.js",
+  "/manifest.webmanifest",
   "/static/training-ui.js",
 ];
 self.addEventListener("install", (event) => {

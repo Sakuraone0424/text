@@ -557,7 +557,7 @@ def test_client_dictionary_order_cannot_change_the_seeded_draw(
 def test_one_formal_interface_and_no_legacy_static_resources(client):
     root = client.get("/")
     assert root.status_code == 200 and "肖涵 · 中科大考研智能答题" in root.text
-    assert "60题" not in root.text and "/static/app.js" not in root.text
+    assert "客观题卷" in root.text and "主观题卷" in root.text and "/static/app.js" not in root.text
     assert client.get("/static/app.js").status_code == 404
     assert client.get("/static/index.html").status_code == 404
     assert (
@@ -583,7 +583,8 @@ def test_unanswered_and_pending_records_cannot_initialize_fsrs_on_repeated_updat
     assert db.execute("SELECT COUNT(*) AS n FROM fsrs_events").fetchone()["n"] == 0
 
 
-def test_public_contract_exposes_only_v2_training_and_schema_readiness(client):
+def test_public_contract_exposes_only_v2_training_and_schema_readiness(client, monkeypatch):
+    monkeypatch.setattr("app.main.business_gaps", lambda: [])  # bank readiness is tested in test_hardening.py
     schema = client.get("/openapi.json").json()
     assert (
         "/quiz/today" not in schema["paths"] and "/quiz/submit" not in schema["paths"]
@@ -591,9 +592,11 @@ def test_public_contract_exposes_only_v2_training_and_schema_readiness(client):
     assert "/v2/papers" in schema["paths"] and "/history" in schema["paths"]
     health = client.get("/db/health").json()
     assert health["formal_training"] == {
-        "questions": 28,
-        "points": 150,
-        "duration_seconds": 3600,
+        "specification": "xiaohan-obj-fill-150-v6+xiaohan-subj-150-v5",
+        "papers": [
+            {"specification": "xiaohan-obj-fill-150-v6", "questions": 60, "points": 150, "duration_seconds": 3600},
+            {"specification": "xiaohan-subj-150-v5", "questions": 14, "points": 150, "duration_seconds": 3600},
+        ],
     }
     from migrate import SQL_DIR
     assert health["migration_count"] == len(list(SQL_DIR.glob("*.sql")))

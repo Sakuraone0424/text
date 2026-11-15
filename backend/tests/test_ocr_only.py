@@ -329,7 +329,7 @@ def test_corrupt_and_synthetic_material_cannot_be_human_approved(db, tmp_path):
         approve(db, unit, "text")
 
 
-def test_docx_all_years_are_candidates_not_verified_originals(db, tmp_path):
+def test_genuine_past_exam_documents_count_recorded_questions_without_fake_answers(db, tmp_path):
     path, meta = material(tmp_path, "biochemistry_exams")
     doc = sources.import_source(db, path, meta)
     assert db.execute("SELECT count(*) AS n FROM exam_records").fetchone()["n"] == 0
@@ -339,12 +339,10 @@ def test_docx_all_years_are_candidates_not_verified_originals(db, tmp_path):
             r for r in years if r["subject"] == "biochemistry" and r["year"] == year
         )
         assert state["candidate_questions"] == 1 and state["ocr_transcription_present"]
-        assert not state["frequency_eligible_from_transcription"]
-        assert not state.get("original_verified", False)
-        assert (
-            state["official_answer_evidence_verified"] == 0
-            and state["priority_2023_2026"]
-        )
+        assert state["frequency_eligible_from_transcription"]
+        assert state["source_level"] == "user_provided_genuine_past_exam"
+        assert state["textbook_answer_verification"] == "not_checked_in_year_coverage_report"
+        assert state["priority_2023_2026"]
     for row in db.execute(
         "SELECT * FROM source_units WHERE document_id=%s", (doc,)
     ).fetchall():

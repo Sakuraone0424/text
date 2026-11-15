@@ -109,7 +109,8 @@ def accept(conn, job):
         compatibility_checked_at=datetime.now(timezone.utc).isoformat(),
         probe_job_id=job["id"],
         model_version=job["result"].get("model_version"),
-        quality_benchmark_passed=False,
+        # Set only by a person after the quality comparison (approve_benchmark); a probe never changes it.
+        quality_benchmark_passed=cap.get("quality_benchmark_passed") is True,
         max_tested_output_tokens=s["token_limit"],
     )
     conn.execute(
@@ -119,37 +120,89 @@ def accept(conn, job):
     return cap
 
 
+def required_efforts(settings):
+    """Every thinking level the pipeline will ask a model for: the settings level (grading),
+    the writing level (off) and the review level (low)."""
+    from app import cost_control
+
+    levels = {settings["effort"]}
+    for kind in ("generation", "repair", "quality_review", "grading"):
+        levels.add(cost_control.effort_for(kind) or settings["effort"])
+    return levels
+
+
+def approve_benchmark(conn, model_id, approved=True, note=""):
+    """A PERSON records that the quality comparison passed for this model (step 8.5).
+
+    Nothing automatic calls this. It does not select the model; it only allows
+    auto-upgrade to consider it.
+    """
+    row = conn.execute("SELECT * FROM ai_model_catalog WHERE model_id=%s FOR UPDATE", (model_id,)).fetchone()
+    if not row or not row["available"]:
+        raise ValueError("model_not_in_actual_catalog")
+    cap = dict(row["compatibility"])
+    if approved and cap.get("real_api_verified") is not True:
+        raise ValueError("model_has_no_compatibility_probe_yet")
+    cap.update(
+        quality_benchmark_passed=bool(approved),
+        quality_benchmark_recorded_at=datetime.now(timezone.utc).isoformat(),
+        quality_benchmark_note=str(note)[:500],
+    )
+    conn.execute("UPDATE ai_model_catalog SET compatibility=%s WHERE model_id=%s", (Jsonb(cap), model_id))
+    return cap
+
+
 def auto_upgrade(conn, uid):
+    """Allow a newer model only after a person approved its quality AND it is proven usable.
+
+    Returns a status dict (never silent): {"status": "off"|"none"|"waiting"|"switched", ...}.
+    The switch itself happens only when every level the pipeline uses has been probed on the
+    candidate, its CNY price is currently verified and its worst-case cost fits every budget.
+    Missing probes are queued here (synthetic arithmetic only, tiny cost).
+    """
     s = m.settings(conn, uid)
-    if not s["auto_upgrade"] or s["stopped"]:
-        return None
+    if not s["auto_upgrade"]:
+        return dict(status="off")
+    if s["stopped"]:
+        return dict(status="off", reason="automation_stopped")
+    current = conn.execute(
+        "SELECT first_seen FROM ai_model_catalog WHERE model_id=%s", (s["model_id"],)
+    ).fetchone()
+    needed = required_efforts(s)
+    waiting = []
     for row in conn.execute(
-        "SELECT * FROM ai_model_catalog WHERE available=true AND compatibility->>'real_api_verified'='true' AND compatibility->>'quality_benchmark_passed'='true' ORDER BY first_seen DESC"
+        "SELECT * FROM ai_model_catalog WHERE available=true AND compatibility->>'quality_benchmark_passed'='true' "
+        "AND model_id<>%s ORDER BY first_seen DESC",
+        (s["model_id"],),
     ).fetchall():
-        if s["effort"] not in row["compatibility"].get("efforts", []):
-            continue
-        current = conn.execute(
-            "SELECT first_seen FROM ai_model_catalog WHERE model_id=%s",
-            (s["model_id"],),
-        ).fetchone()
         if current and row["first_seen"] <= current["first_seen"]:
             continue
         from app.cny_billing import current_price
 
         try:
-            bound = m.cost_bound(
-                {
-                    **dict(s),
-                    "model_id": row["model_id"],
-                    "price_snapshot": current_price(conn, row["model_id"]),
-                }
-            )
+            price = current_price(conn, row["model_id"])
+            bound = m.cost_bound({**dict(s), "model_id": row["model_id"], "price_snapshot": price})
         except ValueError:
+            waiting.append(dict(model=row["model_id"], reason="price_not_verified"))
             continue
-        limits = [s["daily_cny"], s["monthly_cny"], s["task_cny"]] + (
-            [s["trial_cny"]] if s["trial_active"] else []
-        )
+        limits = [s["daily_cny"], s["monthly_cny"], s["task_cny"]] + ([s["trial_cny"]] if s["trial_active"] else [])
         if bound > min(limits):
+            waiting.append(dict(model=row["model_id"], reason="budget_too_small"))
             continue
-        return m.configure(conn, uid, row["model_id"], s["effort"])
-    return None
+        cap = row["compatibility"]
+        missing = sorted(needed - set(cap.get("efforts", [])))
+        if cap.get("real_api_verified") is not True:
+            missing = sorted(needed)
+        if missing:
+            queued = []
+            for effort in missing:
+                try:
+                    enqueue_probe(conn, uid, row["model_id"], effort)
+                    queued.append(effort)
+                except ValueError as exc:
+                    waiting.append(dict(model=row["model_id"], reason="probe_not_queued:" + str(exc)))
+            waiting.append(dict(model=row["model_id"], reason="waiting_for_probes", efforts=missing, queued=queued))
+            continue
+        m.configure(conn, uid, row["model_id"], s["effort"])
+        return dict(status="switched", model=row["model_id"])
+    return dict(status="waiting", candidates=waiting) if waiting else dict(status="none")

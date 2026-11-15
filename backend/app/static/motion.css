@@ -1,0 +1,109 @@
+/* Shared motion for every page. Short (150-300 ms), light, transform + opacity only (colour fades on option borders aside).
+   One place: pages do not write their own. `prefers-reduced-motion: reduce` turns all of it into instant changes. */
+:root {
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);   /* things entering */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);        /* things leaving */
+  --t-press: 100ms;
+  --t-fast: 150ms;
+  --t-base: 220ms;
+  --t-slow: 300ms;
+}
+
+/* ---- 1. press feedback: buttons and tappable cards shrink to 0.97 and spring back ---- */
+.training-app button:not(:disabled),
+.training-app [role="button"],
+.training-app a.card,
+.training-app .tappable {
+  transition: transform var(--t-press) var(--ease-out), background-color var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.training-app button:not(:disabled):active,
+.training-app [role="button"]:active,
+.training-app a.card:active,
+.training-app .tappable:active { transform: scale(0.97); }
+/* things that must not shrink: the bottom bar items, calendar cells, chart hit areas and the segmented switches' labels */
+.training-app .primary-nav button:active,
+.training-app .heat-cell:active,
+.training-app .question-grid button:active { transform: none; }
+.training-app .question-grid button:active { transform: scale(0.95); }
+
+/* ---- 3. single-choice options: border and fill change smoothly ---- */
+.training-app .question-card .option { transition: border-color var(--t-fast) var(--ease-out), background-color var(--t-fast) var(--ease-out), transform var(--t-press) var(--ease-out); }
+.training-app .option-letter { transition: background-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out); }
+
+/* ---- 2 / 6. pages and cards (the script starts these with the Web Animations API; these are the resting states) ---- */
+.training-app [data-page] { will-change: auto; }
+.motion-enter-card { opacity: 0; }                 /* until its turn; the script removes it */
+
+/* ---- 5. charts: grow once, when first in view ---- */
+.training-app .motion-grow-x { transform-origin: left center; }
+.training-app .motion-grow-y { transform-origin: 50% 100%; transform-box: fill-box; }
+
+/* ---- 7. sheets and dialogs: slide up from the bottom over a darkening backdrop; closing runs the same backwards ---- */
+.training-app dialog.sheet { margin: auto auto 0; width: 100%; max-width: 520px; border-radius: 16px 16px 0 0; border-bottom: 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.training-app dialog.sheet[open] { animation: sheet-up var(--t-base) var(--ease-out); }
+.training-app dialog[open]::backdrop { animation: backdrop-in var(--t-base) var(--ease-out); }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sheet-down { from { transform: translateY(0); } to { transform: translateY(100%); } }
+@keyframes backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes backdrop-out { from { opacity: 1; } to { opacity: 0; } }
+
+/* ---- 8. status bar above the bottom navigation: slides up and fades in, fades out by itself ---- */
+.training-app .status-message, .training-app .view-model .toast { transform: translateY(12px); transition: opacity var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out); }
+.training-app .status-message.show, .training-app .view-model .toast.show { transform: translateY(0); }
+
+/* ---- 9. submit succeeded: a tick draws itself, then everything fades ---- */
+.motion-done { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; pointer-events: none; background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.motion-done svg { width: 96px; height: 96px; }
+.motion-done circle, .motion-done path { fill: none; stroke: var(--primary); stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---- 10. skeleton: a soft light bar sweeps left to right every 1.2 s ---- */
+.training-app .skeleton { position: relative; overflow: hidden; animation: none; }
+.training-app .skeleton::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 34%;
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  box-shadow: 0 0 28px 14px color-mix(in srgb, var(--card) 70%, transparent);
+  transform: translateX(-140%); animation: shimmer 1.2s var(--ease-out) infinite;
+}
+@keyframes shimmer { from { transform: translateX(-140%); } to { transform: translateX(420%); } }
+
+/* ---- refresh: a hair-thin line at the very top while something refreshes in the background ---- */
+#motion-topline { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 95; pointer-events: none; opacity: 0; overflow: hidden; background: color-mix(in srgb, var(--primary) 16%, transparent); }  /* a full-width track with the bar running along it */
+#motion-topline i { position: absolute; top: 0; bottom: 0; left: 0; width: 40%; background: var(--primary); transform: translateX(-100%); }
+#motion-topline.on { opacity: 1; transition: opacity var(--t-fast) var(--ease-out); }
+#motion-topline.on i { animation: topline 1.1s var(--ease-out) infinite; }
+@keyframes topline { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+
+/* ---- pull to refresh: a small round indicator that fills as you pull, content follows with damping ---- */
+.ptr { position: fixed; left: 0; right: 0; top: calc(env(safe-area-inset-top, 0px) + 56px); z-index: 40; pointer-events: none; opacity: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.ptr-dot { width: 32px; height: 32px; border-radius: 50%; background: var(--card); box-shadow: var(--shadow); display: flex; align-items: center; justify-content: center; }
+.ptr svg { width: 22px; height: 22px; }
+.ptr circle { fill: none; stroke: var(--primary); stroke-width: 3; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; }
+.ptr.spin svg { animation: ptr-spin 0.8s linear infinite; }
+.ptr-label { text-align: center; font-size: 12px; color: var(--muted); }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+/* ---- question change while answering: only a 120 ms fade-in, no sliding or page turning ---- */
+.training-app #questions > article.motion-fade { animation: q-fade 120ms var(--ease-out); }
+@keyframes q-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---- reduced motion: every change is instant ---- */
+@media (prefers-reduced-motion: reduce) {
+  :root { --t-press: 0.01ms; --t-fast: 0.01ms; --t-base: 0.01ms; --t-slow: 0.01ms; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; transition-delay: 0s !important; scroll-behavior: auto !important; }
+  .training-app button:not(:disabled):active, .training-app [role="button"]:active, .training-app a.card:active, .training-app .tappable:active { transform: none; }
+  .training-app .skeleton::after { display: none; }
+  .motion-enter-card { opacity: 1; }
+}
+
+/* the start button while the state of today's paper is still loading: a grey placeholder with the same light sweep */
+.training-app .hero-action[data-loading] { position: relative; overflow: hidden; background: var(--tag); border-color: var(--tag); color: transparent; }
+.training-app .hero-action[data-loading]::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 34%; background: color-mix(in srgb, var(--card) 70%, transparent); box-shadow: 0 0 28px 14px color-mix(in srgb, var(--card) 70%, transparent); transform: translateX(-140%); animation: shimmer 1.2s var(--ease-out) infinite; }
+.training-app .pill.loading, .training-app #paper-state:not(.green-pill) { transition: background-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out); }
+
+/* home, first visit without a kept copy: the numbers are placeholders until the data arrives */
+.training-app #home-view[data-loading] .stat-card strong, .training-app #home-view[data-loading] .hero-stat strong { position: relative; overflow: hidden; display: inline-block; min-width: 56px; color: transparent; background: var(--tag); border-radius: 8px; }
+.training-app #home-view[data-loading] .stat-card strong::after, .training-app #home-view[data-loading] .hero-stat strong::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 34%; background: color-mix(in srgb, var(--card) 70%, transparent); box-shadow: 0 0 16px 8px color-mix(in srgb, var(--card) 70%, transparent); transform: translateX(-140%); animation: shimmer 1.2s var(--ease-out) infinite; }
+.training-app #home-view[data-loading] .stat-card small { visibility: hidden; }
+
+/* a page sliding in from the right must never make the content area scroll sideways while it moves */
+.training-app .workspace { overflow-x: clip; }

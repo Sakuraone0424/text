@@ -20,16 +20,14 @@ def integrations_tick():
         from app.scheduled_backup import tick as backup_tick
 
         backup_tick()  # Uses the API service's persistent volume, not ephemeral batch storage.
-    from app.archiving import configured_adapter, process_one
+    from app import notion_sync
     from app.automation import prepare_daily
 
-    adapter = configured_adapter()
-    if adapter:
-        try:
-            with get_db() as conn:
-                process_one(conn, adapter)
-        finally:
-            adapter.close()
+    try:
+        with get_db() as conn:
+            notion_sync.tick(conn)       # nothing happens unless the keys are set AND the learner switched it on
+    except Exception as exc:             # a Notion problem must never stop the other jobs of this tick
+        logger.error("Notion sync failed (%s)", type(exc).__name__)
     with get_db() as conn:
         prepare_daily(conn)
 

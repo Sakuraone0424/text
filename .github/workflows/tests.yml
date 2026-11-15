@@ -1,24 +1,74 @@
 name: Backend acceptance
+# A pull request run writes the commit it tested and the base it was tested against into its own name, so a later run can
+# check (see "reuse") that a merge added nothing the run had not seen.
+run-name: ${{ github.event_name == 'pull_request' && format('tests pr#{0} head={1} base={2}', github.event.pull_request.number, github.event.pull_request.head.sha, github.event.pull_request.base.sha) || github.event.head_commit.message || github.workflow }}
 on:
   pull_request:
   push:
     branches: [main, 'feat/**']
 permissions:
   contents: read
+  actions: read          # the "reuse" job looks up earlier runs of the same commit
+# A newer push to the same pull request makes the older run pointless. (Pushes to feat/** and main are never cancelled.)
+concurrency:
+  group: tests-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  SHARDS: 6
+
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17
+  # Code that was already tested as a pull request is not tested again. Railway ("Wait for CI") waits for every check of a
+  # commit; without this the same minutes would run again after each merge, and once more for the long-lived pull request
+  # from feat/** into main, which re-runs on every push to feat/**. The commit under test is the pushed commit (push) or
+  # the pull request head (pull_request). It counts as "already tested" only when it provably holds the same code as a
+  # pull request run that passed:
+  #   - push of a fast-forwarded branch: the pushed commit IS the head of a passed pull request run (same SHA); or
+  #   - a merge commit (made by GitHub's merge button): its second parent is the head of a passed pull request run AND its
+  #     first parent is the base that run was tested against, so merging added nothing the run had not seen.
+  # Anything else (squash, a base that moved, a hand-made commit, an ordinary pull request head) runs the full tests.
+  reuse:
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest moved to 26.04, whose sudo rejects the bwrap fd policy below
+    outputs:
+      skip: ${{ steps.look.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      - id: look
         env:
-          POSTGRES_USER: quiz_test
-          POSTGRES_PASSWORD: local-ci-only
-          POSTGRES_DB: quiz_test
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U quiz_test -d quiz_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          skip=false
+          read -r -a commits <<< "$(git rev-list --parents -n 1 HEAD)"
+          head=""; base=""
+          if [ "${#commits[@]}" -eq 3 ]; then base="${commits[1]}"; head="${commits[2]}"      # a merge commit
+          elif [ "${#commits[@]}" -eq 2 ] && [ "$EVENT" = "push" ]; then head="${commits[0]}"  # fast-forward
+          fi
+          if [ -n "$head" ]; then
+            passed=$(gh api "repos/$REPO/actions/workflows/tests.yml/runs?head_sha=$head&event=pull_request&status=completed&per_page=50" 2>/dev/null \
+              | jq --arg head "$head" --arg base "$base" '[.workflow_runs[] | select(.conclusion=="success")
+                     | select($base == "" or (.display_title | contains("head=" + $head + " base=" + $base)))] | length' 2>/dev/null \
+              || echo 0)
+            [ "${passed:-0}" -gt 0 ] 2>/dev/null && skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          echo "event=$EVENT commit=$(git rev-parse HEAD) parents=${#commits[@]} head=$head base=$base"
+          echo "an identical code state already passed as a pull request: $skip"
+
+  tests:
+    name: shard ${{ matrix.shard }}
+    needs: reuse
+    if: needs.reuse.outputs.skip != 'true'
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest moved to 26.04, whose sudo rejects the bwrap fd policy below
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     defaults:
       run:
         working-directory: backend
@@ -29,23 +79,113 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: backend/requirements-dev.txt
-      - run: python -m pip install -r requirements-dev.txt
-      - run: sudo apt-get update && sudo apt-get install -y libnss3-tools bubblewrap
-      - run: python -m playwright install --with-deps chromium firefox webkit
+      # Every step that talks to the network has its own short limit and is tried again: a download that stalls fails in minutes and
+      # is repeated, instead of holding the shard until the 25-minute job limit cancels it without a word.
+      - name: Install the Python packages (exact versions; retried)
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2 3; do
+            timeout 150 python -m pip install -r requirements-dev.txt && exit 0
+            echo "pip install did not finish (attempt $attempt)"; sleep $((attempt * 5))
+          done
+          exit 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install the lint tool (exact versions from package-lock.json; retried)
+        timeout-minutes: 5
+        run: |
+          for attempt in 1 2 3; do
+            timeout 120 npm ci --no-audit --no-fund && exit 0
+            echo "npm ci did not finish (attempt $attempt)"; sleep $((attempt * 5))
+          done
+          exit 1
+      - name: Start the throw-away PostgreSQL (the image pull is retried; a second registry is the fallback)
+        working-directory: .
+        timeout-minutes: 8
+        run: |
+          image=public.ecr.aws/docker/library/postgres:17
+          pulled=no
+          for attempt in 1 2 3; do
+            if timeout 120 docker pull "$image"; then pulled=yes; break; fi
+            echo "image pull did not finish (attempt $attempt)"; sleep $((attempt * 5))
+          done
+          if [ "$pulled" != yes ]; then timeout 240 docker pull postgres:17 && image=postgres:17 || exit 1; fi
+          docker run -d --name quiz-pg -e POSTGRES_USER=quiz_test -e POSTGRES_PASSWORD=local-ci-only -e POSTGRES_DB=quiz_test -p 5432:5432 "$image"
+          export PGPASSWORD=local-ci-only
+          for i in $(seq 1 90); do
+            psql -h 127.0.0.1 -U quiz_test -d quiz_test -c "SELECT 1" >/dev/null 2>&1 && { echo "PostgreSQL is up"; exit 0; }
+            sleep 1
+          done
+          docker logs quiz-pg; exit 1
+      - name: Playwright version (the browser cache key)
+        id: pw
+        run: echo "version=$(python -c 'import playwright; from importlib.metadata import version; print(version("playwright"))')" >> "$GITHUB_OUTPUT"
+      - name: Cache the Playwright browsers
+        id: browsers
+        uses: actions/cache@v4
+        timeout-minutes: 5            # a cache restore that stalls is given up on: the browsers are downloaded instead
+        continue-on-error: true
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium-firefox-webkit
+      - name: Download the browsers (only when not cached) and install their system libraries
+        timeout-minutes: 12
+        run: |
+          retry() { for attempt in 1 2 3; do timeout "$1" "${@:2}" && return 0; echo "did not finish (attempt $attempt): ${*:2}"; sleep $((attempt * 5)); done; return 1; }
+          if [ "${{ steps.browsers.outputs.cache-hit }}" != "true" ]; then
+            retry 200 python -m playwright install chromium firefox webkit
+          fi
+          retry 200 python -m playwright install-deps chromium firefox webkit
+          retry 120 sudo apt-get install -y --no-install-recommends libnss3-tools bubblewrap
       - name: Preserve QA browser protocol pipes in the mount helper
         run: |
           printf '%s\n' 'Defaults!/usr/bin/bwrap closefrom_override' | sudo tee /etc/sudoers.d/quiz-qa-bwrap-fds >/dev/null
           sudo chmod 0440 /etc/sudoers.d/quiz-qa-bwrap-fds
           sudo visudo -cf /etc/sudoers.d/quiz-qa-bwrap-fds
-      - name: Preflight all three browsers over verified HTTPS
-        run: python -m pytest tests/test_https_recovery.py::test_real_https_offline_refresh_and_reconnect -x -q
+      - name: Make the throw-away test database fast (no fsync, it is rebuilt every run)
+        working-directory: .
+        run: |
+          export PGPASSWORD=local-ci-only
+          for setting in "fsync=off" "synchronous_commit=off" "full_page_writes=off"; do
+            psql -h 127.0.0.1 -U quiz_test -d quiz_test -c "ALTER SYSTEM SET $setting"
+          done
+          psql -h 127.0.0.1 -U quiz_test -d quiz_test -c "SELECT pg_reload_conf()"
+      - name: Tests, shard ${{ matrix.shard }} of ${{ env.SHARDS }} (split by recorded durations, so the shards take about equally long)
+        timeout-minutes: 19           # below the job limit, so the screenshots and the database log below are still kept
+        # faulthandler_timeout: a test that hangs prints where every thread is after 5 minutes (a silent stall is a named test then)
+        run: python -m pytest -ra -q -p no:cacheprovider -o faulthandler_timeout=300 --splits ${{ env.SHARDS }} --group ${{ matrix.shard }} --splitting-algorithm least_duration --durations-path .test_durations --durations=15
         env:
+          SHOT_DIR: ${{ github.workspace }}/screenshots
           QUIZ_QA_PRIVILEGED_MOUNTS: '1'
           TEST_DATABASE_URL: postgresql://quiz_test:local-ci-only@127.0.0.1:5432/quiz_test
-      - run: python -m pytest -ra -q -p no:cacheprovider
-        env:
-          QUIZ_QA_PRIVILEGED_MOUNTS: '1'
-          TEST_DATABASE_URL: postgresql://quiz_test:local-ci-only@127.0.0.1:5432/quiz_test
+      - name: Keep the page screenshots (WebKit and Chromium, Safari and home-screen modes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots-${{ matrix.shard }}
+          path: screenshots/
+          if-no-files-found: ignore
+      - name: The database log, when something failed
+        if: failure() || cancelled()
+        working-directory: .
+        run: docker logs --tail 200 quiz-pg || true
       - name: Remove temporary QA mount-helper policy
         if: always()
         run: sudo rm -f /etc/sudoers.d/quiz-qa-bwrap-fds
+
+  # One required, stable check name. Railway ("Wait for CI") and any branch rule look at this single result: it passes
+  # only when every shard passed, or when the exact same commit already passed as a pull request.
+  test:
+    name: test
+    needs: [reuse, tests]
+    if: always()
+    runs-on: ubuntu-24.04   # pinned: ubuntu-latest moved to 26.04, whose sudo rejects the bwrap fd policy below
+    steps:
+      - name: All shards passed (or this exact commit already did)
+        env:
+          SKIPPED: ${{ needs.reuse.outputs.skip }}
+          RESULT: ${{ needs.tests.result }}
+        run: |
+          if [ "$SKIPPED" = "true" ]; then echo "same commit already passed as a pull request"; exit 0; fi
+          [ "$RESULT" = "success" ] || { echo "shards: $RESULT"; exit 1; }

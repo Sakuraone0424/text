@@ -235,7 +235,7 @@ def annual_report(conn):
                 "reported_transcription_gaps": sum(
                     "transcription_gap_reported" in r["concerns"] for r in candidates
                 ),
-                "question_completeness": "not_established_from_transcription",
+                "question_completeness": "as_recorded_in_supplied_past_exam_file",
                 "year_assignment_status": "explicit_heading_candidates_only"
                 if candidates
                 else "not_established",
@@ -243,13 +243,13 @@ def annual_report(conn):
                     bool(re.search("参考答案|答案[:：]|^答[：:]", r["transcription"]))
                     for r in candidates
                 ),
-                "official_answer_evidence_verified": 0,
+                "textbook_answer_verification": "not_checked_in_year_coverage_report",
                 "transcription_scientific_mapping_verified": mapped,
                 "unassigned_year_paragraphs": len(grouped[(year["subject"], None)]),
-                "source_level": "ocr_transcription_pending_review"
+                "source_level": "user_provided_genuine_past_exam"
                 if candidates
                 else "not_established",
-                "frequency_eligible_from_transcription": False,
+                "frequency_eligible_from_transcription": bool(questions),
                 "priority_2023_2026": year["year"] >= 2023,
             }
         )
